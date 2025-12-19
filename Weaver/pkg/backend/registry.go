@@ -101,10 +101,16 @@ type Status struct {
 }
 
 // Default creates a registry with default backends.
+// Panics if registration fails (indicates a programming error).
 func Default(loomURL string) *Registry {
 	registry := NewRegistry()
-	// Errors impossible here since registry is freshly created (no duplicates)
-	_ = registry.Register("claudecode", NewClaudeCode(ClaudeCodeConfig{}))
-	_ = registry.Register("loom", NewLoom(LoomConfig{URL: loomURL}))
+
+	if err := registry.Register("claudecode", NewClaudeCode(ClaudeCodeConfig{})); err != nil {
+		panic(fmt.Sprintf("failed to register backend 'claudecode': %v", err))
+	}
+	if err := registry.Register("loom", NewLoom(LoomConfig{URL: loomURL})); err != nil {
+		panic(fmt.Sprintf("failed to register backend 'loom': %v", err))
+	}
+
 	return registry
 }

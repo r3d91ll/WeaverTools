@@ -126,6 +126,8 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 			errs <- err
 			return
 		}
+		defer stdin.Close() // Ensure stdin is closed even on error
+
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			errs <- err
@@ -140,7 +142,6 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 			errs <- fmt.Errorf("failed to write prompt: %w", err)
 			return
 		}
-		stdin.Close()
 
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {

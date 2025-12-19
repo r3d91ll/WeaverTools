@@ -186,12 +186,12 @@ class LoomClient:
     def probe_loader(self, model_id: str) -> dict[str, Any]:
         """
         Determine which loader the server would select for the given model identifier.
-        
+
         Parameters:
-        	model_id (str): Model identifier to probe.
-        
+            model_id (str): Model identifier to probe.
+
         Returns:
-        	selection_info (dict[str, Any]): Server response describing loader selection and related metadata.
+            selection_info (dict[str, Any]): Server response describing loader selection and related metadata.
         """
         # Replace / with -- for URL safety
         safe_id = model_id.replace("/", "--")

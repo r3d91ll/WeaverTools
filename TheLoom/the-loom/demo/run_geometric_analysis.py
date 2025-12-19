@@ -445,7 +445,7 @@ def run_model_analysis(
     with open(metrics_path, "w") as f:
         json.dump(metrics_data, f, indent=2)
 
-    print(f"      Saved responses.json and layer_metrics.json")
+    print("      Saved responses.json and layer_metrics.json")
 
     return results
 
@@ -500,7 +500,7 @@ def generate_visualizations(
         min_l, max_l = min(layers), max(layers)
         if max_l == min_l:
             return np.array([0.5])
-        return np.array([(l - min_l) / (max_l - min_l) for l in layers])
+        return np.array([(layer_idx - min_l) / (max_l - min_l) for layer_idx in layers])
 
     norm_layers_a = normalize_layers(layers_a)
     norm_layers_b = normalize_layers(layers_b)
@@ -511,8 +511,8 @@ def generate_visualizations(
 
     # 1. D_eff by Layer
     ax1 = axes[0, 0]
-    d_eff_a = [agg_a[l]["d_eff"] for l in layers_a]
-    d_eff_b = [agg_b[l]["d_eff"] for l in layers_b]
+    d_eff_a = [agg_a[layer_idx]["d_eff"] for layer_idx in layers_a]
+    d_eff_b = [agg_b[layer_idx]["d_eff"] for layer_idx in layers_b]
 
     ax1.plot(norm_layers_a, d_eff_a, 'b-o', label=results_a.display_name, markersize=4)
     ax1.plot(norm_layers_b, d_eff_b, 'r-s', label=results_b.display_name, markersize=4)
@@ -524,8 +524,8 @@ def generate_visualizations(
 
     # 2. Beta by Layer
     ax2 = axes[0, 1]
-    beta_a = [agg_a[l]["beta"] for l in layers_a]
-    beta_b = [agg_b[l]["beta"] for l in layers_b]
+    beta_a = [agg_a[layer_idx]["beta"] for layer_idx in layers_a]
+    beta_b = [agg_b[layer_idx]["beta"] for layer_idx in layers_b]
 
     ax2.plot(norm_layers_a, beta_a, 'b-o', label=results_a.display_name, markersize=4)
     ax2.plot(norm_layers_b, beta_b, 'r-s', label=results_b.display_name, markersize=4)
@@ -538,8 +538,8 @@ def generate_visualizations(
 
     # 3. L2 Norm by Layer
     ax3 = axes[1, 0]
-    l2_a = [agg_a[l]["l2_norm"] for l in layers_a]
-    l2_b = [agg_b[l]["l2_norm"] for l in layers_b]
+    l2_a = [agg_a[layer_idx]["l2_norm"] for layer_idx in layers_a]
+    l2_b = [agg_b[layer_idx]["l2_norm"] for layer_idx in layers_b]
 
     ax3.plot(norm_layers_a, l2_a, 'b-o', label=results_a.display_name, markersize=4)
     ax3.plot(norm_layers_b, l2_b, 'r-s', label=results_b.display_name, markersize=4)
@@ -553,18 +553,18 @@ def generate_visualizations(
     ax4 = axes[1, 1]
 
     # Average D_eff and Beta for final layers (last 25%)
-    final_layers_a = [l for l in layers_a if l >= min(layers_a) + 0.75 * (max(layers_a) - min(layers_a))]
-    final_layers_b = [l for l in layers_b if l >= min(layers_b) + 0.75 * (max(layers_b) - min(layers_b))]
+    final_layers_a = [layer_idx for layer_idx in layers_a if layer_idx >= min(layers_a) + 0.75 * (max(layers_a) - min(layers_a))]
+    final_layers_b = [layer_idx for layer_idx in layers_b if layer_idx >= min(layers_b) + 0.75 * (max(layers_b) - min(layers_b))]
 
     if not final_layers_a:
         final_layers_a = layers_a[-1:]
     if not final_layers_b:
         final_layers_b = layers_b[-1:]
 
-    avg_d_eff_a = np.mean([agg_a[l]["d_eff"] for l in final_layers_a])
-    avg_d_eff_b = np.mean([agg_b[l]["d_eff"] for l in final_layers_b])
-    avg_beta_a = np.mean([agg_a[l]["beta"] for l in final_layers_a])
-    avg_beta_b = np.mean([agg_b[l]["beta"] for l in final_layers_b])
+    avg_d_eff_a = np.mean([agg_a[layer_idx]["d_eff"] for layer_idx in final_layers_a])
+    avg_d_eff_b = np.mean([agg_b[layer_idx]["d_eff"] for layer_idx in final_layers_b])
+    avg_beta_a = np.mean([agg_a[layer_idx]["beta"] for layer_idx in final_layers_a])
+    avg_beta_b = np.mean([agg_b[layer_idx]["beta"] for layer_idx in final_layers_b])
 
     x = np.arange(2)
     width = 0.35
@@ -622,10 +622,10 @@ def generate_markdown_summary(
     final_beta_a = agg_a.get(final_layer_a, {}).get("beta", 0)
     final_beta_b = agg_b.get(final_layer_b, {}).get("beta", 0)
 
-    avg_d_eff_a = np.mean([agg_a[l]["d_eff"] for l in layers_a]) if layers_a else 0
-    avg_d_eff_b = np.mean([agg_b[l]["d_eff"] for l in layers_b]) if layers_b else 0
-    avg_beta_a = np.mean([agg_a[l]["beta"] for l in layers_a]) if layers_a else 0
-    avg_beta_b = np.mean([agg_b[l]["beta"] for l in layers_b]) if layers_b else 0
+    avg_d_eff_a = np.mean([agg_a[layer_idx]["d_eff"] for layer_idx in layers_a]) if layers_a else 0
+    avg_d_eff_b = np.mean([agg_b[layer_idx]["d_eff"] for layer_idx in layers_b]) if layers_b else 0
+    avg_beta_a = np.mean([agg_a[layer_idx]["beta"] for layer_idx in layers_a]) if layers_a else 0
+    avg_beta_b = np.mean([agg_b[layer_idx]["beta"] for layer_idx in layers_b]) if layers_b else 0
 
     md_content = f"""# The Loom - Geometric Analysis Results
 

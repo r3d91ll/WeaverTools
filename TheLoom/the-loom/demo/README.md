@@ -46,7 +46,7 @@ poetry run python demo/run_geometric_analysis.py --server http://localhost:9000
 
 ## Output Structure
 
-```
+```text
 demo/outputs/
 ├── model_a/
 │   ├── responses.json          # Generated text and metadata

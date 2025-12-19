@@ -30,8 +30,8 @@ $$C_{\text{pair}}(i \leftrightarrow j) = \text{Hmean}(C_{\text{out}}, C_{\text{i
 
 1. [Introduction: Shannon's Deliberate Exclusion](#1-introduction-shannons-deliberate-exclusion)
 2. [From the Qualitative to the Quantitative](#2-from-the-qualitative-to-the-quantitative)
-3. [Theoretical Foundation](#3-theoretical-foundation)
-4. [The Mathematical Framework](#4-the-mathematical-framework)
+3. [From Qualitative Insight to Quantitative Tractability](#section-3-from-qualitative-insight-to-quantitative-tractability)
+4. [The Mathematical Framework](#section-4-the-mathematical-framework)
 5. [Key Metrics](#5-key-metrics)
 6. [Core Hypotheses (Under Investigation)](#6-core-hypotheses-under-investigation)
 7. [Context Amplification](#7-context-amplification)
@@ -317,7 +317,7 @@ Boundary objects are not limited to any particular modality:
 
 In each case, the pattern is the same:
 
-```
+```text
 High-dimensional internal state
         ↓
 Semantic compression (boundary object creation)
@@ -339,7 +339,7 @@ Software engineers have been building boundary object systems for decades withou
 
 Consider an HTTP API call:
 
-```
+```text
 Agent goal: "I need current weather for Austin, Texas"
         ↓
 Boundary object creation: GET /weather?city=austin&state=tx
@@ -357,7 +357,7 @@ When the response returns, it is initially just data—a string of characters. I
 
 This means **information bookends data transmission**:
 
-```
+```text
 INFORMATION          →    DATA           →    INFORMATION
 (boundary object         (channel            (boundary object
  creation)                transit)             integration)
@@ -465,7 +465,7 @@ Instead, we ask: *does enough semantic meaning survive the compression-integrati
 
 The social science insights, boundary object theory, and Actor-Network Theory we've traced through Sections 1-3 culminate in a single mathematical framework that makes information transfer effectiveness measurable for the first time:
 
-```
+```text
 C_pair(i ↔ j) = Hmean(C_out, C_in) × f_dim(D_eff) × P_ij
 
 Where:

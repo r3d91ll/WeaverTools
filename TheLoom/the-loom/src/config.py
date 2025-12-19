@@ -63,7 +63,8 @@ class ModelsConfig(BaseModel):
         default="auto", description="Default dtype: auto, float16, bfloat16, float32"
     )
     trust_remote_code: bool = Field(
-        default=True, description="Allow remote code execution for custom architectures"
+        default=False,
+        description="Allow remote code execution for custom architectures (security risk - enable only for trusted models)",
     )
     auto_unload_minutes: int = Field(
         default=20,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -475,6 +476,15 @@ class ModelManager:
         self.loaded_models: dict[str, LoadedModel] = {}
         self.access_order: list[str] = []  # For LRU eviction
         self.last_accessed: dict[str, float] = {}  # Track last access time per model
+        self._loading_locks: dict[str, threading.Lock] = {}  # Per-model locks to prevent concurrent loading
+        self._locks_lock = threading.Lock()  # Lock for accessing _loading_locks dict
+
+    def _get_model_lock(self, model_id: str) -> threading.Lock:
+        """Get or create a lock for the given model_id."""
+        with self._locks_lock:
+            if model_id not in self._loading_locks:
+                self._loading_locks[model_id] = threading.Lock()
+            return self._loading_locks[model_id]
 
     def get_or_load(
         self,
@@ -486,49 +496,55 @@ class ModelManager:
     ) -> LoadedModel:
         """
         Retrieve a LoadedModel by model_id, loading and caching it if not already present.
-        
+
+        Uses per-model locking to prevent duplicate concurrent loads of the same model.
+
         Parameters:
             model_id (str): Identifier of the model to retrieve.
             device (str | None): Target device for loading; when None the GPU manager's default device is used.
             dtype (str): Desired numeric dtype for the model (e.g., "float16", "float32", or "auto").
             loader_name (str | None): Specific loader to use; when None the loader will be auto-detected.
             quantization (str | None): Quantization mode to apply (e.g., "4bit", "8bit", "gptq", "awq"), if any.
-        
+
         Returns:
             LoadedModel: The loaded and cached model instance for the requested model_id.
         """
-        # Check if already loaded
-        if model_id in self.loaded_models:
-            # Update access order for LRU
-            if model_id in self.access_order:
-                self.access_order.remove(model_id)
+        # Get per-model lock to prevent concurrent loading of the same model
+        model_lock = self._get_model_lock(model_id)
+
+        with model_lock:
+            # Check if already loaded (double-check after acquiring lock)
+            if model_id in self.loaded_models:
+                # Update access order for LRU
+                if model_id in self.access_order:
+                    self.access_order.remove(model_id)
+                self.access_order.append(model_id)
+                self.last_accessed[model_id] = time.time()
+                return self.loaded_models[model_id]
+
+            # Evict if at capacity
+            while len(self.loaded_models) >= self.max_models:
+                self._evict_oldest()
+
+            # Resolve device
+            if device is None:
+                device = self.gpu_manager.default_device
+
+            # Load the model using registry (auto-detects loader if not specified)
+            logger.info(f"Loading model: {model_id}")
+            loaded = self.registry.load(
+                model_id,
+                device=device,
+                dtype=dtype,
+                loader_name=loader_name,
+                quantization=quantization,
+            )
+
+            self.loaded_models[model_id] = loaded
             self.access_order.append(model_id)
             self.last_accessed[model_id] = time.time()
-            return self.loaded_models[model_id]
 
-        # Evict if at capacity
-        while len(self.loaded_models) >= self.max_models:
-            self._evict_oldest()
-
-        # Resolve device
-        if device is None:
-            device = self.gpu_manager.default_device
-
-        # Load the model using registry (auto-detects loader if not specified)
-        logger.info(f"Loading model: {model_id}")
-        loaded = self.registry.load(
-            model_id,
-            device=device,
-            dtype=dtype,
-            loader_name=loader_name,
-            quantization=quantization,
-        )
-
-        self.loaded_models[model_id] = loaded
-        self.access_order.append(model_id)
-        self.last_accessed[model_id] = time.time()
-
-        return loaded
+            return loaded
 
     def _evict_oldest(self) -> None:
         """

@@ -41,8 +41,8 @@ def generate_deff_comparison(model_a_metrics: dict, model_b_metrics: dict, outpu
 
     # Model A
     layers_a = sorted(model_a_metrics.keys())
-    deff_means_a = [np.mean([p["d_eff"] for p in model_a_metrics[l].values()]) for l in layers_a]
-    deff_stds_a = [np.std([p["d_eff"] for p in model_a_metrics[l].values()]) for l in layers_a]
+    deff_means_a = [np.mean([p["d_eff"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
+    deff_stds_a = [np.std([p["d_eff"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
 
     axes[0].errorbar(layers_a, deff_means_a, yerr=deff_stds_a, fmt='o-', capsize=3, color='#2196F3')
     axes[0].fill_between(layers_a,
@@ -58,8 +58,8 @@ def generate_deff_comparison(model_a_metrics: dict, model_b_metrics: dict, outpu
 
     # Model B
     layers_b = sorted(model_b_metrics.keys())
-    deff_means_b = [np.mean([p["d_eff"] for p in model_b_metrics[l].values()]) for l in layers_b]
-    deff_stds_b = [np.std([p["d_eff"] for p in model_b_metrics[l].values()]) for l in layers_b]
+    deff_means_b = [np.mean([p["d_eff"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
+    deff_stds_b = [np.std([p["d_eff"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
 
     axes[1].errorbar(layers_b, deff_means_b, yerr=deff_stds_b, fmt='s-', capsize=3, color='#4CAF50')
     axes[1].fill_between(layers_b,
@@ -85,8 +85,8 @@ def generate_beta_comparison(model_a_metrics: dict, model_b_metrics: dict, outpu
 
     # Model A
     layers_a = sorted(model_a_metrics.keys())
-    beta_means_a = [np.mean([p["beta"] for p in model_a_metrics[l].values()]) for l in layers_a]
-    beta_stds_a = [np.std([p["beta"] for p in model_a_metrics[l].values()]) for l in layers_a]
+    beta_means_a = [np.mean([p["beta"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
+    beta_stds_a = [np.std([p["beta"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
 
     axes[0].errorbar(layers_a, beta_means_a, yerr=beta_stds_a, fmt='o-', capsize=3, color='#FF5722')
     axes[0].fill_between(layers_a,
@@ -102,8 +102,8 @@ def generate_beta_comparison(model_a_metrics: dict, model_b_metrics: dict, outpu
 
     # Model B
     layers_b = sorted(model_b_metrics.keys())
-    beta_means_b = [np.mean([p["beta"] for p in model_b_metrics[l].values()]) for l in layers_b]
-    beta_stds_b = [np.std([p["beta"] for p in model_b_metrics[l].values()]) for l in layers_b]
+    beta_means_b = [np.mean([p["beta"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
+    beta_stds_b = [np.std([p["beta"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
 
     axes[1].errorbar(layers_b, beta_means_b, yerr=beta_stds_b, fmt='s-', capsize=3, color='#9C27B0')
     axes[1].fill_between(layers_b,
@@ -129,8 +129,8 @@ def generate_activation_stats(model_a_metrics: dict, model_b_metrics: dict, outp
 
     # Model A - Mean activation
     layers_a = sorted(model_a_metrics.keys())
-    mean_acts_a = [np.mean([p["mean_activation"] for p in model_a_metrics[l].values()]) for l in layers_a]
-    std_acts_a = [np.mean([p["std_activation"] for p in model_a_metrics[l].values()]) for l in layers_a]
+    mean_acts_a = [np.mean([p["mean_activation"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
+    std_acts_a = [np.mean([p["std_activation"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
 
     axes[0, 0].plot(layers_a, mean_acts_a, 'o-', color='#2196F3', label='TinyLlama')
     axes[0, 0].set_xlabel('Layer Index')
@@ -148,8 +148,8 @@ def generate_activation_stats(model_a_metrics: dict, model_b_metrics: dict, outp
 
     # Model B
     layers_b = sorted(model_b_metrics.keys())
-    mean_acts_b = [np.mean([p["mean_activation"] for p in model_b_metrics[l].values()]) for l in layers_b]
-    std_acts_b = [np.mean([p["std_activation"] for p in model_b_metrics[l].values()]) for l in layers_b]
+    mean_acts_b = [np.mean([p["mean_activation"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
+    std_acts_b = [np.mean([p["std_activation"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
 
     axes[1, 0].plot(layers_b, mean_acts_b, 's-', color='#4CAF50', label='Qwen2.5')
     axes[1, 0].set_xlabel('Layer Index')
@@ -183,8 +183,8 @@ def generate_combined_overlay(model_a_metrics: dict, model_b_metrics: dict, outp
     norm_layers_a = (np.array(layers_a) - min(layers_a)) / (max(layers_a) - min(layers_a)) if len(layers_a) > 1 else [0.5]
     norm_layers_b = (np.array(layers_b) - min(layers_b)) / (max(layers_b) - min(layers_b)) if len(layers_b) > 1 else [0.5]
 
-    deff_means_a = [np.mean([p["d_eff"] for p in model_a_metrics[l].values()]) for l in layers_a]
-    deff_means_b = [np.mean([p["d_eff"] for p in model_b_metrics[l].values()]) for l in layers_b]
+    deff_means_a = [np.mean([p["d_eff"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
+    deff_means_b = [np.mean([p["d_eff"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
 
     axes[0].plot(norm_layers_a, deff_means_a, 'o-', color='#2196F3', label='TinyLlama 1.1B (2048d)', markersize=6)
     axes[0].plot(norm_layers_b, deff_means_b, 's-', color='#4CAF50', label='Qwen2.5 0.5B (896d)', markersize=6)
@@ -196,8 +196,8 @@ def generate_combined_overlay(model_a_metrics: dict, model_b_metrics: dict, outp
     axes[0].legend()
 
     # Beta comparison
-    beta_means_a = [np.mean([p["beta"] for p in model_a_metrics[l].values()]) for l in layers_a]
-    beta_means_b = [np.mean([p["beta"] for p in model_b_metrics[l].values()]) for l in layers_b]
+    beta_means_a = [np.mean([p["beta"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
+    beta_means_b = [np.mean([p["beta"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]
 
     axes[1].plot(norm_layers_a, beta_means_a, 'o-', color='#FF5722', label='TinyLlama 1.1B', markersize=6)
     axes[1].plot(norm_layers_b, beta_means_b, 's-', color='#9C27B0', label='Qwen2.5 0.5B', markersize=6)
@@ -238,8 +238,8 @@ def generate_summary_table(model_a_metrics: dict, model_b_metrics: dict,
     layers_a = sorted(model_a_metrics.keys())
     layers_b = sorted(model_b_metrics.keys())
 
-    deff_by_layer_a = {l: np.mean([p["d_eff"] for p in model_a_metrics[l].values()]) for l in layers_a}
-    deff_by_layer_b = {l: np.mean([p["d_eff"] for p in model_b_metrics[l].values()]) for l in layers_b}
+    deff_by_layer_a = {layer_idx: np.mean([p["d_eff"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a}
+    deff_by_layer_b = {layer_idx: np.mean([p["d_eff"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b}
 
     peak_layer_a = max(deff_by_layer_a, key=deff_by_layer_a.get)
     peak_layer_b = max(deff_by_layer_b, key=deff_by_layer_b.get)

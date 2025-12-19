@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Structure
 
-```
+```text
 TheLoom/
 ├── conveyance-hypothesis-v4.1.md           # Theoretical framework
 └── the-loom/                               # Implementation
@@ -23,7 +23,7 @@ TheLoom/
 
 Hidden state extraction for transformer models - the capability that production inference servers don't provide.
 
-```
+```text
 Input → [Transformer Layers] → Hidden State → [lm_head] → Logits → Tokens
                                     ↑
                           THE LOOM EXPOSES THIS
@@ -56,7 +56,7 @@ ruff check src tests        # Lint
 
 The primary equation measures bilateral information transfer effectiveness:
 
-```
+```text
 C_pair(i ↔ j) = Hmean(C_out, C_in) × f_dim(D_eff) × P_ij
 
 Where:

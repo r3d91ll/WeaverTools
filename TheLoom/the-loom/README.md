@@ -649,7 +649,7 @@ curl -X POST http://localhost:8080/models/load \
 - **Throughput**: Optimized for hidden state access, not maximum tokens/second
 - **Concurrency**: Single-request processing (no batched inference across requests)
 - **Memory**: Non-quantized models load fully into single GPU (no tensor parallelism)
-- **Chat Templates**: Raw prompts only - apply chat templates client-side if needed
+- **Chat Templates**: `/generate` endpoint uses raw prompts only; use `/v1/chat/completions` for automatic chat template application
 
 For production inference without hidden states, use vLLM, TGI, or similar.
 
@@ -659,9 +659,8 @@ Features under consideration for future releases:
 
 - [ ] **Explicit device_map control** - Expose HuggingFace device_map strategies (`auto`, `balanced`, `sequential`)
 - [ ] **Tensor parallelism** - Distribute large non-quantized models across multiple GPUs
-- [ ] **Chat template support** - Apply model-specific chat templates server-side
 - [ ] **Concurrent request handling** - Process multiple requests in parallel
-- [ ] **OpenAI-compatible API** - `/v1/completions` endpoint for drop-in compatibility
+- [ ] **OpenAI-compatible completions API** - `/v1/completions` endpoint for drop-in compatibility (chat completions already supported)
 - [ ] **Attention weight extraction** - Return attention patterns alongside hidden states
 
 Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md) or open an issue.

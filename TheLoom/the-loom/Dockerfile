@@ -36,15 +36,20 @@ FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Python and minimal dependencies
+# Install Python 3.11 from Deadsnakes PPA (not in Ubuntu 22.04 default repos)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
-    python3-pip \
+    python3.11-distutils \
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
 
 # Create non-root user for security
 RUN useradd -m -u 1000 -s /bin/bash loom

@@ -224,7 +224,14 @@ class GPUManager:
             logger.debug("Cleared CUDA cache on all devices")
         else:
             if isinstance(device, str):
-                device = int(device.split(":")[-1])
+                # Parse device string like "cuda:0" or just "0"
+                parts = device.split(":")
+                if len(parts) == 2 and parts[1].isdigit():
+                    device = int(parts[1])
+                elif parts[-1].isdigit():
+                    device = int(parts[-1])
+                else:
+                    raise ValueError(f"Invalid device string format: {device}")
             with torch.cuda.device(device):
                 torch.cuda.empty_cache()
             logger.debug(f"Cleared CUDA cache on device {device}")

@@ -421,7 +421,13 @@ class QwenLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract attention weights from generation output."""
+        """Extract attention weights from generation output.
+
+        Note: Unlike hidden_states which includes the embedding layer at index 0,
+        attention weights only have num_layers elements (one per transformer layer).
+        Therefore negative index calculation differs: num_layers + layer_idx
+        vs num_layers + 1 + layer_idx for hidden states.
+        """
         result: dict[int, torch.Tensor] = {}
 
         if not attentions:
@@ -430,6 +436,7 @@ class QwenLoader(ModelLoader):
         final_step = attentions[-1]
 
         for layer_idx in layers:
+            # Attention tuple has num_layers elements (no embedding layer)
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + layer_idx
 
             if 0 <= actual_idx < len(final_step):

@@ -367,7 +367,7 @@ class TestGenerativeModel:
                 "layer_shapes": {k: v["shape"] for k, v in hidden_states.items()},
             },
             "validation": {
-                "all_layers_present": all(str(l) in hidden_states for l in layers_to_request),
+                "all_layers_present": all(str(layer_idx) in hidden_states for layer_idx in layers_to_request),
                 "model_num_layers": num_layers,
             }
         }
@@ -573,7 +573,7 @@ class TestOutputFormat:
         print(f"Type: {type(embedding).__name__}")
         print(f"Length: {len(embedding)}")
         print(f"Element type: {type(embedding[0]).__name__}")
-        print(f"JSON round-trip: OK")
+        print("JSON round-trip: OK")
 
     def test_hidden_state_format_base64(self, app_client, examples_dir):
         """Validate base64 format for efficient transfer."""
@@ -627,7 +627,7 @@ class TestOutputFormat:
             print(f"Encoded length: {len(layer_data['data'])} chars")
             print(f"Decoded bytes: {len(decoded)}")
             print(f"Expected bytes: {expected_bytes}")
-            print(f"Decoding: OK")
+            print("Decoding: OK")
 
             # Map dtype for numpy
             numpy_dtype = {

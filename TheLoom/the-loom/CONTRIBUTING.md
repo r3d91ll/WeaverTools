@@ -79,7 +79,7 @@ pytest
 
 ### Project Structure
 
-```
+```text
 the-loom/
 ├── src/
 │   ├── loaders/          # Model loading (transformers, sentence_transformers, etc.)

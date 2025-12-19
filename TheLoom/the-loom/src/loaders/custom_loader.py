@@ -114,14 +114,21 @@ def register_custom_model(config: CustomModelConfig) -> None:
 def _resolve_callable(factory: Callable[..., Any] | str) -> Callable[..., Any]:
     """
     Resolve a callable from either a dotted import path string or return the callable unchanged.
-    
+
     Parameters:
         factory (Callable[..., Any] | str): A callable or a string in the form "module.submodule.callable_name".
-    
+
     Returns:
         Callable[..., Any]: The callable object. If `factory` was a string, the named attribute is imported and returned; otherwise `factory` is returned as-is.
+
+    Raises:
+        ValueError: If the string does not contain a dot separator.
     """
     if isinstance(factory, str):
+        if "." not in factory:
+            raise ValueError(
+                f"Invalid import path '{factory}': must be 'module.callable_name' format"
+            )
         module_path, func_name = factory.rsplit(".", 1)
         module = importlib.import_module(module_path)
         return cast(Callable[..., Any], getattr(module, func_name))

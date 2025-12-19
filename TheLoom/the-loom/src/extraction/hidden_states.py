@@ -227,6 +227,20 @@ def analyze_hidden_state(
     """
     vector = hidden_state.vector.flatten()
 
+    # Handle empty vector case (prevents ValueError from np.min/np.max on empty arrays)
+    if len(vector) == 0:
+        return {
+            "shape": hidden_state.shape,
+            "layer": hidden_state.layer,
+            "dtype": hidden_state.dtype,
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "l2_norm": 0.0,
+            "sparsity": 0.0,
+        }
+
     # Basic statistics
     analysis = {
         "shape": hidden_state.shape,
@@ -241,9 +255,8 @@ def analyze_hidden_state(
     }
 
     # Distribution metrics
-    if len(vector) > 0:
-        analysis["percentile_25"] = float(np.percentile(vector, 25))
-        analysis["percentile_50"] = float(np.percentile(vector, 50))
-        analysis["percentile_75"] = float(np.percentile(vector, 75))
+    analysis["percentile_25"] = float(np.percentile(vector, 25))
+    analysis["percentile_50"] = float(np.percentile(vector, 50))
+    analysis["percentile_75"] = float(np.percentile(vector, 75))
 
     return analysis

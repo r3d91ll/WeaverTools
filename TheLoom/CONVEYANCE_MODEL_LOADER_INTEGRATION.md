@@ -12,7 +12,7 @@
 
 WeaverCode is a Go-based CLI tool that orchestrates AI agents for software engineering tasks:
 
-```
+```text
 User → WeaverCode (Go) → Senior Engineer (Claude Code)
                       → Junior Engineer (Local LLM via Ollama/LM Studio)
 ```
@@ -22,7 +22,7 @@ User → WeaverCode (Go) → Senior Engineer (Claude Code)
 
 ### Current Architecture
 
-```
+```text
 go-port/
 ├── cmd/weaver/main.go           # CLI entry point
 ├── internal/
@@ -69,7 +69,7 @@ WeaverCode 2.0 will be a multi-agent research platform for validating the Convey
 
 ### The Critical Missing Data Point
 
-```
+```text
 Input → [Transformer Layers] → Final Hidden State → [lm_head] → Logits → Tokens
                                       ↑
                               THIS IS THE BOUNDARY OBJECT

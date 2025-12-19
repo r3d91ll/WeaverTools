@@ -11,6 +11,7 @@ Provides observability into model server performance including:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Lazy import to avoid hard dependency
 _prometheus_available = False
 _metrics_initialized = False
+_init_lock = threading.Lock()  # Lock for thread-safe lazy initialization
 
 try:
     from prometheus_client import (
@@ -64,7 +66,11 @@ _gpu_memory_total: Any = None
 
 
 def _init_metrics() -> None:
-    """Initialize Prometheus metrics (called lazily)."""
+    """Initialize Prometheus metrics (called lazily).
+
+    Uses double-checked locking to ensure thread-safe initialization
+    while avoiding lock overhead on subsequent calls.
+    """
     global _metrics_initialized
     global _request_counter, _request_latency
     global _tokens_generated, _generation_latency
@@ -72,85 +78,92 @@ def _init_metrics() -> None:
     global _models_loaded, _model_load_latency, _model_load_counter
     global _gpu_memory_used, _gpu_memory_total
 
+    # Quick check without lock
     if _metrics_initialized or not _prometheus_available:
         return
 
-    # Request metrics
-    _request_counter = Counter(
-        "loom_requests_total",
-        "Total HTTP requests",
-        ["endpoint", "method", "status"],
-    )
+    # Double-checked locking for thread safety
+    with _init_lock:
+        # Re-check after acquiring lock
+        if _metrics_initialized:
+            return
 
-    _request_latency = Histogram(
-        "loom_request_latency_seconds",
-        "Request latency in seconds",
-        ["endpoint", "method"],
-        buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
-    )
+        # Request metrics
+        _request_counter = Counter(
+            "loom_requests_total",
+            "Total HTTP requests",
+            ["endpoint", "method", "status"],
+        )
 
-    # Generation metrics
-    _tokens_generated = Counter(
-        "loom_tokens_generated_total",
-        "Total tokens generated",
-        ["model"],
-    )
+        _request_latency = Histogram(
+            "loom_request_latency_seconds",
+            "Request latency in seconds",
+            ["endpoint", "method"],
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+        )
 
-    _generation_latency = Histogram(
-        "loom_generation_latency_seconds",
-        "Generation latency in seconds",
-        ["model"],
-        buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
-    )
+        # Generation metrics
+        _tokens_generated = Counter(
+            "loom_tokens_generated_total",
+            "Total tokens generated",
+            ["model"],
+        )
 
-    # Embedding metrics
-    _embeddings_extracted = Counter(
-        "loom_embeddings_total",
-        "Total embeddings extracted",
-        ["model"],
-    )
+        _generation_latency = Histogram(
+            "loom_generation_latency_seconds",
+            "Generation latency in seconds",
+            ["model"],
+            buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
+        )
 
-    _embedding_latency = Histogram(
-        "loom_embedding_latency_seconds",
-        "Embedding extraction latency in seconds",
-        ["model"],
-        buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
-    )
+        # Embedding metrics
+        _embeddings_extracted = Counter(
+            "loom_embeddings_total",
+            "Total embeddings extracted",
+            ["model"],
+        )
 
-    # Model metrics
-    _models_loaded = Gauge(
-        "loom_models_loaded",
-        "Number of models currently loaded",
-    )
+        _embedding_latency = Histogram(
+            "loom_embedding_latency_seconds",
+            "Embedding extraction latency in seconds",
+            ["model"],
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+        )
 
-    _model_load_latency = Histogram(
-        "loom_model_load_latency_seconds",
-        "Model loading latency in seconds",
-        ["model", "loader", "quantization"],
-        buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
-    )
+        # Model metrics
+        _models_loaded = Gauge(
+            "loom_models_loaded",
+            "Number of models currently loaded",
+        )
 
-    _model_load_counter = Counter(
-        "loom_model_loads_total",
-        "Total model load operations",
-        ["model", "loader", "quantization", "status"],
-    )
+        _model_load_latency = Histogram(
+            "loom_model_load_latency_seconds",
+            "Model loading latency in seconds",
+            ["model", "loader", "quantization"],
+            buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+        )
 
-    # System metrics
-    _gpu_memory_used = Gauge(
-        "loom_gpu_memory_used_bytes",
-        "GPU memory used in bytes",
-        ["device"],
-    )
+        _model_load_counter = Counter(
+            "loom_model_loads_total",
+            "Total model load operations",
+            ["model", "loader", "quantization", "status"],
+        )
 
-    _gpu_memory_total = Gauge(
-        "loom_gpu_memory_total_bytes",
-        "Total GPU memory in bytes",
-        ["device"],
-    )
+        # System metrics
+        _gpu_memory_used = Gauge(
+            "loom_gpu_memory_used_bytes",
+            "GPU memory used in bytes",
+            ["device"],
+        )
 
-    _metrics_initialized = True
-    logger.info("Prometheus metrics initialized")
+        _gpu_memory_total = Gauge(
+            "loom_gpu_memory_total_bytes",
+            "Total GPU memory in bytes",
+            ["device"],
+        )
+
+        _metrics_initialized = True
+        logger.info("Prometheus metrics initialized")
 
 
 def is_metrics_available() -> bool:

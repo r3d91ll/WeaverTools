@@ -28,7 +28,7 @@ agents:
     backend: loom
     model: Qwen/Qwen2.5-Coder-7B-Instruct
     active: true
-    gpu: auto  # auto, 0, 1 (for cuda:0, cuda:1)
+    gpu: "auto"  # "auto", "0", "1" (for cuda:0, cuda:1)
     system_prompt: |
       You are the Junior Engineer in a multi-agent AI research system.
       Your role is to handle implementation tasks, file operations, and routine work.
@@ -88,7 +88,7 @@ agents:
     backend: loom
     model: Qwen/Qwen2.5-Coder-7B-Instruct
     active: false  # Enable for single-agent measurement experiments
-    gpu: auto
+    gpu: "auto"
     system_prompt: |
       You are a subject in a conveyance measurement experiment.
       Respond naturally to prompts. Your hidden states will be analyzed.
@@ -101,4 +101,6 @@ agents:
 session:
   measurement_mode: active  # active, passive, or off
   auto_export: true
+  # export_path is relative to current working directory when Weaver is launched
+  # Use absolute path (e.g., /home/user/experiments) if running from different directories
   export_path: ./experiments

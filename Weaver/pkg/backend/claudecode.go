@@ -61,8 +61,6 @@ func (c *ClaudeCode) Capabilities() Capabilities {
 	}
 }
 
-func (c *ClaudeCode) SupportsHiddenStates() bool { return false }
-
 func (c *ClaudeCode) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	start := time.Now()
 	prompt := c.buildPrompt(req.Messages)
@@ -138,7 +136,10 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 			return
 		}
 
-		stdin.Write([]byte(prompt))
+		if _, err := stdin.Write([]byte(prompt)); err != nil {
+			errs <- fmt.Errorf("failed to write prompt: %w", err)
+			return
+		}
 		stdin.Close()
 
 		scanner := bufio.NewScanner(stdout)
@@ -175,7 +176,13 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 			}
 		}
 
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			// Only send error if channel isn't full
+			select {
+			case errs <- fmt.Errorf("command failed: %w", err):
+			default:
+			}
+		}
 	}()
 
 	return chunks, errs

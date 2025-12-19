@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"syscall"
 
 	"github.com/r3d91ll/weaver/pkg/backend"
@@ -137,12 +138,30 @@ func main() {
 	agentMgr := runtime.NewManager(registry)
 
 	// Create agents from config (only active agents)
+	// Sort agent names for consistent output across runs
+	agentNames := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		agentNames = append(agentNames, name)
+	}
+	sort.Strings(agentNames)
+
 	fmt.Println("Agents:")
-	for name, agentCfg := range cfg.Agents {
+	for _, name := range agentNames {
+		agentCfg := cfg.Agents[name]
 		// Skip inactive agents
 		if !agentCfg.Active {
 			fmt.Printf("  - %-10s (inactive)\n", name)
 			continue
+		}
+
+		// Dereference pointer fields (guaranteed non-nil after InferenceDefaults)
+		temp := float64(0)
+		if agentCfg.Temperature != nil {
+			temp = *agentCfg.Temperature
+		}
+		topP := float64(0)
+		if agentCfg.TopP != nil {
+			topP = *agentCfg.TopP
 		}
 
 		def := wool.Agent{
@@ -156,9 +175,9 @@ func main() {
 			ToolsEnabled:  agentCfg.ToolsEnabled,
 			Active:        agentCfg.Active,
 			MaxTokens:     agentCfg.MaxTokens,
-			Temperature:   agentCfg.Temperature,
+			Temperature:   temp,
 			ContextLength: agentCfg.ContextLength,
-			TopP:          agentCfg.TopP,
+			TopP:          topP,
 			TopK:          agentCfg.TopK,
 			GPU:           agentCfg.GPU,
 		}
@@ -198,13 +217,19 @@ func main() {
 	homeDir, _ := os.UserHomeDir()
 	historyFile := filepath.Join(homeDir, ".weaver_history")
 
-	// Determine default agent
+	// Determine default agent (sorted for deterministic fallback)
 	defaultAgent := "senior"
 	if _, ok := cfg.Agents["senior"]; !ok {
-		// Use first available agent
+		// Use first active agent (sorted alphabetically for consistency)
+		names := make([]string, 0, len(cfg.Agents))
 		for name := range cfg.Agents {
-			defaultAgent = name
-			break
+			if cfg.Agents[name].Active {
+				names = append(names, name)
+			}
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			defaultAgent = names[0]
 		}
 	}
 

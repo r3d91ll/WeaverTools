@@ -53,11 +53,16 @@ func (r *Registry) List() []string {
 
 // Available returns all backends that are currently available.
 func (r *Registry) Available(ctx context.Context) []Backend {
+	// Copy backends slice to avoid holding lock during I/O
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	backends := make([]Backend, 0, len(r.backends))
+	for _, b := range r.backends {
+		backends = append(backends, b)
+	}
+	r.mu.RUnlock()
 
 	var result []Backend
-	for _, backend := range r.backends {
+	for _, backend := range backends {
 		if backend.IsAvailable(ctx) {
 			result = append(result, backend)
 		}
@@ -67,11 +72,16 @@ func (r *Registry) Available(ctx context.Context) []Backend {
 
 // Status returns availability status for all backends.
 func (r *Registry) Status(ctx context.Context) map[string]Status {
+	// Copy backends to avoid holding lock during I/O (IsAvailable may do network calls)
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	backends := make(map[string]Backend, len(r.backends))
+	for name, b := range r.backends {
+		backends[name] = b
+	}
+	r.mu.RUnlock()
 
 	result := make(map[string]Status)
-	for name, backend := range r.backends {
+	for name, backend := range backends {
 		result[name] = Status{
 			Name:         name,
 			Type:         backend.Type(),
@@ -93,7 +103,8 @@ type Status struct {
 // Default creates a registry with default backends.
 func Default(loomURL string) *Registry {
 	registry := NewRegistry()
-	registry.Register("claudecode", NewClaudeCode(ClaudeCodeConfig{}))
-	registry.Register("loom", NewLoom(LoomConfig{URL: loomURL}))
+	// Errors impossible here since registry is freshly created (no duplicates)
+	_ = registry.Register("claudecode", NewClaudeCode(ClaudeCodeConfig{}))
+	_ = registry.Register("loom", NewLoom(LoomConfig{URL: loomURL}))
 	return registry
 }

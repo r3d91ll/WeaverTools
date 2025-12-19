@@ -14,11 +14,11 @@ import (
 
 // Shell is the interactive command-line interface.
 type Shell struct {
-	agents  *runtime.Manager
-	session *yarn.Session
-	conv    *yarn.Conversation
-	rl      *readline.Instance
-	default_ string // Default agent to route messages to
+	agents       *runtime.Manager
+	session      *yarn.Session
+	conv         *yarn.Conversation
+	rl           *readline.Instance
+	defaultAgent string // Default agent to route messages to
 }
 
 // Config holds shell configuration.
@@ -50,11 +50,11 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 	}
 
 	return &Shell{
-		agents:   agents,
-		session:  session,
-		conv:     session.ActiveConversation(),
-		rl:       rl,
-		default_: defaultAgent,
+		agents:       agents,
+		session:      session,
+		conv:         session.ActiveConversation(),
+		rl:           rl,
+		defaultAgent: defaultAgent,
 	}, nil
 }
 
@@ -136,10 +136,10 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 
 	case "/default":
 		if len(parts) > 1 {
-			s.default_ = parts[1]
-			fmt.Printf("Default agent set to: %s\n", s.default_)
+			s.defaultAgent = parts[1]
+			fmt.Printf("Default agent set to: %s\n", s.defaultAgent)
 		} else {
-			fmt.Printf("Default agent: %s\n", s.default_)
+			fmt.Printf("Default agent: %s\n", s.defaultAgent)
 		}
 
 	default:
@@ -151,7 +151,7 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 
 func (s *Shell) handleMessage(ctx context.Context, line string) error {
 	// Parse @agent prefix
-	targetAgent := s.default_
+	targetAgent := s.defaultAgent
 	message := line
 
 	if strings.HasPrefix(line, "@") {
@@ -226,7 +226,7 @@ func (s *Shell) printAgents(ctx context.Context) {
 			hidden = " [hidden states]"
 		}
 		defaultMark := ""
-		if name == s.default_ {
+		if name == s.defaultAgent {
 			defaultMark = " (default)"
 		}
 		fmt.Printf("  %s %-10s (%s, %s)%s%s\n", ready, name, status.Role, status.Backend, hidden, defaultMark)

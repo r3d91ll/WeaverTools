@@ -28,17 +28,20 @@ func NewAgent(def wool.Agent, b backend.Backend) *Agent {
 
 // Chat sends messages to the agent and returns the response with optional hidden state.
 func (a *Agent) Chat(ctx context.Context, messages []*yarn.Message) (*yarn.Message, error) {
+	// Copy fields under lock, then release before I/O to avoid lock contention
 	a.mu.RLock()
-	defer a.mu.RUnlock()
+	def := a.Definition // Copy the definition struct
+	b := a.Backend      // Copy the backend pointer
+	a.mu.RUnlock()
 
 	// Convert Yarn messages to backend format
 	chatMessages := make([]backend.ChatMessage, 0, len(messages)+1)
 
 	// Add system prompt
-	if a.Definition.SystemPrompt != "" {
+	if def.SystemPrompt != "" {
 		chatMessages = append(chatMessages, backend.ChatMessage{
 			Role:    "system",
-			Content: a.Definition.SystemPrompt,
+			Content: def.SystemPrompt,
 		})
 	}
 
@@ -53,32 +56,32 @@ func (a *Agent) Chat(ctx context.Context, messages []*yarn.Message) (*yarn.Messa
 
 	// Build request - always request hidden states if backend supports it
 	// Convert GPU config to device string (e.g., "0" -> "cuda:0")
-	device := a.Definition.GPU
+	device := def.GPU
 	if device != "" && device != "auto" {
 		device = "cuda:" + device
 	}
 
 	req := backend.ChatRequest{
-		Model:              a.Definition.Model,
+		Model:              def.Model,
 		Messages:           chatMessages,
-		MaxTokens:          a.Definition.MaxTokens,
-		Temperature:        a.Definition.Temperature,
-		ReturnHiddenStates: a.Backend.SupportsHiddenStates(),
+		MaxTokens:          def.MaxTokens,
+		Temperature:        def.Temperature,
+		ReturnHiddenStates: b.Capabilities().SupportsHidden,
 		Device:             device,
 	}
 
-	// Call backend
-	resp, err := a.Backend.Chat(ctx, req)
+	// Call backend (lock already released)
+	resp, err := b.Chat(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("agent %s: %w", a.Definition.Name, err)
+		return nil, fmt.Errorf("agent %s: %w", def.Name, err)
 	}
 
 	// Create response message
 	result := yarn.NewAgentMessage(
 		yarn.RoleAssistant,
 		resp.Content,
-		a.Definition.ID,
-		a.Definition.Name,
+		def.ID,
+		def.Name,
 	)
 
 	// Attach hidden state if available
@@ -101,17 +104,21 @@ func (a *Agent) Chat(ctx context.Context, messages []*yarn.Message) (*yarn.Messa
 
 // Name returns the agent name.
 func (a *Agent) Name() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.Definition.Name
 }
 
 // Role returns the agent role.
 func (a *Agent) Role() wool.Role {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.Definition.Role
 }
 
 // SupportsHiddenStates returns true if this agent can provide hidden states.
 func (a *Agent) SupportsHiddenStates() bool {
-	return a.Backend.SupportsHiddenStates()
+	return a.Backend.Capabilities().SupportsHidden
 }
 
 // IsReady returns true if the agent's backend is available.
@@ -135,9 +142,15 @@ func NewManager(registry *backend.Registry) *Manager {
 }
 
 // Create creates a live agent from a Wool definition.
+// Returns an error if an agent with the same name already exists.
 func (m *Manager) Create(def wool.Agent) (*Agent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Check for duplicate
+	if _, exists := m.agents[def.Name]; exists {
+		return nil, fmt.Errorf("agent %q already exists", def.Name)
+	}
 
 	// Get backend
 	b, ok := m.registry.Get(def.Backend)

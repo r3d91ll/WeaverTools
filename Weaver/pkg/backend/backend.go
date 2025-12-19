@@ -83,7 +83,6 @@ type Backend interface {
 	Capabilities() Capabilities
 	Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 	ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamChunk, <-chan error)
-	SupportsHiddenStates() bool
 }
 
 // Config holds common backend configuration.

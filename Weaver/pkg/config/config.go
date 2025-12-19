@@ -44,11 +44,12 @@ type AgentConfig struct {
 	Active       bool     `yaml:"active"` // Whether agent is active for this session
 
 	// Inference parameters (for Loom backend)
-	MaxTokens     int     `yaml:"max_tokens"`
-	Temperature   float64 `yaml:"temperature"`
-	ContextLength int     `yaml:"context_length"`
-	TopP          float64 `yaml:"top_p"`
-	TopK          int     `yaml:"top_k"`
+	// Temperature and TopP are pointers to distinguish "not set" from "explicitly 0"
+	MaxTokens     int      `yaml:"max_tokens"`
+	Temperature   *float64 `yaml:"temperature"`
+	ContextLength int      `yaml:"context_length"`
+	TopP          *float64 `yaml:"top_p"`
+	TopK          int      `yaml:"top_k"`
 
 	// GPU assignment (for Loom backend)
 	// "auto" = let Loom decide, "0" = cuda:0, "1" = cuda:1, etc.
@@ -60,14 +61,16 @@ func (a *AgentConfig) InferenceDefaults() {
 	if a.MaxTokens == 0 {
 		a.MaxTokens = 2048
 	}
-	if a.Temperature == 0 {
-		a.Temperature = 0.7
+	if a.Temperature == nil {
+		defaultTemp := 0.7
+		a.Temperature = &defaultTemp
 	}
 	if a.ContextLength == 0 {
 		a.ContextLength = 32768
 	}
-	if a.TopP == 0 {
-		a.TopP = 0.9
+	if a.TopP == nil {
+		defaultTopP := 0.9
+		a.TopP = &defaultTopP
 	}
 }
 
@@ -157,15 +160,18 @@ func (c *Config) Save(path string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	data, err := yaml.Marshal(c)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
 }
 
 // DefaultConfigPath returns the default config file path.

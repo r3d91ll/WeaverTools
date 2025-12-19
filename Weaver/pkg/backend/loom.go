@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type Loom struct {
 	baseURL    string
 	model      string
 	httpClient *http.Client
+	mu         sync.RWMutex
 }
 
 // LoomConfig holds configuration for The Loom backend.
@@ -77,8 +79,6 @@ func (l *Loom) Capabilities() Capabilities {
 	}
 }
 
-func (l *Loom) SupportsHiddenStates() bool { return true }
-
 type loomRequest struct {
 	Model              string        `json:"model"`
 	Messages           []ChatMessage `json:"messages"`
@@ -109,7 +109,9 @@ func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 
 	model := req.Model
 	if model == "" {
+		l.mu.RLock()
 		model = l.model
+		l.mu.RUnlock()
 	}
 
 	loomReq := loomRequest{
@@ -121,7 +123,7 @@ func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 		Device:             req.Device,
 	}
 	if loomReq.MaxTokens == 0 {
-		loomReq.MaxTokens = 256
+		loomReq.MaxTokens = 1024 // Increased from 256 to avoid truncated responses
 	}
 	if loomReq.Temperature == 0 {
 		loomReq.Temperature = 0.7
@@ -205,7 +207,15 @@ func (l *Loom) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamCh
 }
 
 // SetModel updates the default model.
-func (l *Loom) SetModel(model string) { l.model = model }
+func (l *Loom) SetModel(model string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.model = model
+}
 
 // Model returns the current model.
-func (l *Loom) Model() string { return l.model }
+func (l *Loom) Model() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.model
+}

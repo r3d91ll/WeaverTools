@@ -9,6 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// float64Ptr returns a pointer to the given float64 value.
+func float64Ptr(v float64) *float64 { return &v }
+
 // Config is the root configuration structure.
 type Config struct {
 	Backends BackendsConfig         `yaml:"backends"`
@@ -114,9 +117,9 @@ You have access to tools for file manipulation and command execution.`,
 				Tools:         []string{"read_file", "write_file", "list_directory", "execute_command", "search_files", "context_read", "context_write"},
 				ToolsEnabled:  true,
 				MaxTokens:     2048,
-				Temperature:   0.7,
+				Temperature:   float64Ptr(0.7),
 				ContextLength: 32768,
-				TopP:          0.9,
+				TopP:          float64Ptr(0.9),
 			},
 		},
 		Session: SessionConfig{

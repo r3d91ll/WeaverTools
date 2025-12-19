@@ -17,11 +17,11 @@ const (
 
 // Capabilities describes what a backend can do.
 type Capabilities struct {
-	ContextLimit      int
-	SupportsTools     bool
-	SupportsStreaming bool
-	SupportsHidden    bool // Hidden state extraction
-	MaxTokens         int
+	ContextLimit      int  `json:"contextLimit"`
+	SupportsTools     bool `json:"supportsTools"`
+	SupportsStreaming bool `json:"supportsStreaming"`
+	SupportsHidden    bool `json:"supportsHidden"` // Hidden state extraction
+	MaxTokens         int  `json:"maxTokens"`
 }
 
 // ChatMessage represents a single message.

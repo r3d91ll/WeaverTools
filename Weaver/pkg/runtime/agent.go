@@ -116,6 +116,20 @@ func (a *Agent) Role() wool.Role {
 	return a.Definition.Role
 }
 
+// BackendName returns the configured backend name.
+func (a *Agent) BackendName() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.Definition.Backend
+}
+
+// ModelName returns the configured model name.
+func (a *Agent) ModelName() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.Definition.Model
+}
+
 // SupportsHiddenStates returns true if this agent can provide hidden states.
 func (a *Agent) SupportsHiddenStates() bool {
 	return a.Backend.Capabilities().SupportsHidden
@@ -195,8 +209,8 @@ func (m *Manager) Status(ctx context.Context) map[string]AgentStatus {
 		result[name] = AgentStatus{
 			Name:         name,
 			Role:         agent.Role(),
-			Backend:      agent.Definition.Backend,
-			Model:        agent.Definition.Model,
+			Backend:      agent.BackendName(),
+			Model:        agent.ModelName(),
 			Ready:        agent.IsReady(ctx),
 			HiddenStates: agent.SupportsHiddenStates(),
 		}

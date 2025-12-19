@@ -15,6 +15,7 @@ type ClaudeCode struct {
 	name         string
 	systemPrompt string
 	contextLimit int
+	maxTokens    int
 }
 
 // ClaudeCodeConfig holds configuration for Claude Code backend.
@@ -22,6 +23,7 @@ type ClaudeCodeConfig struct {
 	Name         string `yaml:"name"`
 	SystemPrompt string `yaml:"system_prompt"`
 	ContextLimit int    `yaml:"context_limit"`
+	MaxTokens    int    `yaml:"max_tokens"` // Default: 25000 (Claude CLI default)
 }
 
 // NewClaudeCode creates a new Claude Code backend.
@@ -34,10 +36,15 @@ func NewClaudeCode(cfg ClaudeCodeConfig) *ClaudeCode {
 	if contextLimit == 0 {
 		contextLimit = 200000
 	}
+	maxTokens := cfg.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 25000 // Claude CLI default (configurable via MAX_MCP_OUTPUT_TOKENS)
+	}
 	return &ClaudeCode{
 		name:         name,
 		systemPrompt: cfg.SystemPrompt,
 		contextLimit: contextLimit,
+		maxTokens:    maxTokens,
 	}
 }
 
@@ -57,7 +64,7 @@ func (c *ClaudeCode) Capabilities() Capabilities {
 		SupportsTools:     true,
 		SupportsStreaming: true,
 		SupportsHidden:    false,
-		MaxTokens:         8192,
+		MaxTokens:         c.maxTokens,
 	}
 }
 
@@ -89,6 +96,8 @@ func (c *ClaudeCode) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, 
 		content = resp.Result
 	}
 
+	// Token usage is estimated using a simple heuristic (chars/4)
+	// since Claude CLI doesn't provide actual token counts in its output
 	return &ChatResponse{
 		Content:      content,
 		Model:        "claude-code",
@@ -112,6 +121,10 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 
 		prompt := c.buildPrompt(req.Messages)
 
+		// --dangerously-skip-permissions is required for non-interactive streaming mode.
+		// Without it, Claude CLI prompts for confirmation which blocks the subprocess.
+		// This is safe in this context because Weaver is designed for automated agent
+		// orchestration where the user has already consented to agent operations.
 		cmd := exec.CommandContext(ctx, "claude",
 			"-p", "--verbose",
 			"--output-format", "stream-json",
@@ -142,6 +155,7 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 			errs <- fmt.Errorf("failed to write prompt: %w", err)
 			return
 		}
+		stdin.Close() // Close immediately to signal EOF to subprocess
 
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {

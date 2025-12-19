@@ -144,7 +144,7 @@ type SessionStats struct {
 }
 
 // Export writes the session to files (JSON + JSONL for measurements).
-func (s *Session) Export() error {
+func (s *Session) Export() (err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -169,15 +169,23 @@ func (s *Session) Export() error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	for _, m := range s.Measurements {
 		data, err := json.Marshal(m)
 		if err != nil {
 			return err
 		}
-		f.Write(data)
-		f.WriteString("\n")
+		if _, err := f.Write(data); err != nil {
+			return err
+		}
+		if _, err := f.WriteString("\n"); err != nil {
+			return err
+		}
 	}
 
 	return nil

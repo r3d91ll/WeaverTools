@@ -45,14 +45,16 @@ type Measurement struct {
 }
 
 // BetaStatus indicates the quality of the β value.
+// Beta (β) is the collapse indicator from the Conveyance Framework.
+// Lower values indicate better dimensional preservation.
 type BetaStatus string
 
 const (
-	BetaOptimal    BetaStatus = "optimal"    // β ∈ [1.5, 2.0]
-	BetaMonitor    BetaStatus = "monitor"    // β ∈ [2.0, 2.5]
-	BetaConcerning BetaStatus = "concerning" // β ∈ [2.5, 3.0]
-	BetaCritical   BetaStatus = "critical"   // β > 3.0
-	BetaUnknown    BetaStatus = "unknown"
+	BetaOptimal    BetaStatus = "optimal"    // β ∈ [1.5, 2.0) - ideal range
+	BetaMonitor    BetaStatus = "monitor"    // β ∈ [2.0, 2.5) - acceptable, watch for drift
+	BetaConcerning BetaStatus = "concerning" // β ∈ [2.5, 3.0) - dimensional compression detected
+	BetaCritical   BetaStatus = "critical"   // β ≥ 3.0 - severe collapse, intervention needed
+	BetaUnknown    BetaStatus = "unknown"    // β ≤ 0 or β ∈ (0, 1.5) - invalid or uncategorized
 )
 
 // NewMeasurement creates a new Measurement with a generated ID.

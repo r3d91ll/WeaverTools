@@ -35,11 +35,14 @@ type Message struct {
 }
 
 // HiddenState represents the boundary object - semantic state before text projection.
+// Memory note: Vector can be large (e.g., 4096 floats = 16KB for typical LLMs).
+// For models with larger hidden dimensions (e.g., 8192), expect ~32KB per state.
+// Consider streaming or lazy loading for batch processing of many messages.
 type HiddenState struct {
-	Vector []float32 `json:"vector"`
-	Shape  []int     `json:"shape"`
-	Layer  int       `json:"layer"`
-	DType  string    `json:"dtype"`
+	Vector []float32 `json:"vector"` // Hidden state vector, typically 2048-8192 float32 values
+	Shape  []int     `json:"shape"`  // Original tensor shape, e.g., [1, seq_len, hidden_dim]
+	Layer  int       `json:"layer"`  // Layer index this state was extracted from
+	DType  string    `json:"dtype"`  // Data type, typically "float32"
 }
 
 // NewMessage creates a new Message with a generated UUID.
@@ -82,8 +85,12 @@ func (m *Message) HasHiddenState() bool {
 }
 
 // Dimension returns the hidden dimension size.
+// Returns 0 if the HiddenState is nil.
 func (h *HiddenState) Dimension() int {
-	if h == nil || len(h.Shape) < 2 {
+	if h == nil {
+		return 0
+	}
+	if len(h.Shape) < 2 {
 		return len(h.Vector)
 	}
 	return h.Shape[len(h.Shape)-1]

@@ -211,7 +211,7 @@ class CustomLoader(ModelLoader):
         dtype: str = "auto",
         model_factory: ModelFactory | str | None = None,
         tokenizer_factory: TokenizerFactory | str | None = None,
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,  # Secure default; enable explicitly for custom architectures
         quantization: str | None = None,
         **kwargs: Any,
     ) -> LoadedModel:
@@ -258,6 +258,10 @@ class CustomLoader(ModelLoader):
             kwargs = {**config.extra_kwargs, **kwargs}
 
         # Load model
+        # Pass quantization in kwargs so custom factories can use it if they support it
+        if quantization is not None:
+            kwargs["quantization"] = quantization
+
         if model_factory is not None:
             factory = _resolve_callable(model_factory)
             model = factory(

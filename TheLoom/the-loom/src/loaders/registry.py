@@ -206,7 +206,7 @@ class LoaderRegistry:
             model_id,
             device=model_config["device"],
             dtype=model_config["dtype"],
-            trust_remote_code=model_config.get("trust_remote_code", True),
+            trust_remote_code=model_config.get("trust_remote_code", False),  # Secure default
             quantization=quantization,
             **kwargs,
         )

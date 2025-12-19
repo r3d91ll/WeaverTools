@@ -180,8 +180,8 @@ def generate_combined_overlay(model_a_metrics: dict, model_b_metrics: dict, outp
     layers_b = sorted(model_b_metrics.keys())
 
     # Normalize to 0-1 range for comparison (layers are negative, so map -N...-1 to 0...1)
-    norm_layers_a = (np.array(layers_a) - min(layers_a)) / (max(layers_a) - min(layers_a)) if len(layers_a) > 1 else [0.5]
-    norm_layers_b = (np.array(layers_b) - min(layers_b)) / (max(layers_b) - min(layers_b)) if len(layers_b) > 1 else [0.5]
+    norm_layers_a = (np.array(layers_a) - min(layers_a)) / (max(layers_a) - min(layers_a)) if len(layers_a) > 1 else np.array([0.5])
+    norm_layers_b = (np.array(layers_b) - min(layers_b)) / (max(layers_b) - min(layers_b)) if len(layers_b) > 1 else np.array([0.5])
 
     deff_means_a = [np.mean([p["d_eff"] for p in model_a_metrics[layer_idx].values()]) for layer_idx in layers_a]
     deff_means_b = [np.mean([p["d_eff"] for p in model_b_metrics[layer_idx].values()]) for layer_idx in layers_b]

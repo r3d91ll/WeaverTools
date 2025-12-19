@@ -295,8 +295,19 @@ def main() -> None:
     if args.unix_socket is not None:
         config.server.unix_socket = args.unix_socket
     if args.device is not None:
-        device_idx = int(args.device.split(":")[-1]) if ":" in args.device else int(args.device)
-        config.gpu.default_device = device_idx
+        # Handle cpu, cuda:N, or bare integer device index
+        device_str = args.device.lower()
+        if device_str == "cpu":
+            config.gpu.default_device = -1  # -1 indicates CPU
+        elif ":" in args.device:
+            device_idx = int(args.device.split(":")[-1])
+            config.gpu.default_device = device_idx
+        else:
+            try:
+                config.gpu.default_device = int(args.device)
+            except ValueError:
+                logger.warning(f"Invalid device '{args.device}', using default")
+                # Keep the default device from config
     if args.log_level is not None:
         config.logging.level = args.log_level
     if args.preload is not None:

@@ -101,7 +101,7 @@ class SentenceTransformersLoader(ModelLoader):
         model_id: str,
         device: str = "cuda:0",
         dtype: str = "auto",
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,  # Secure default; enable explicitly for custom architectures
         quantization: str | None = None,
         **kwargs: Any,
     ) -> LoadedModel:

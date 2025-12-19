@@ -102,15 +102,15 @@ func ComputeBetaStatus(beta float64) BetaStatus {
 	switch {
 	case beta <= 0:
 		return BetaUnknown
-	case beta >= 1.5 && beta < 2.0:
-		return BetaOptimal
-	case beta >= 2.0 && beta < 2.5:
-		return BetaMonitor
-	case beta >= 2.5 && beta < 3.0:
-		return BetaConcerning
-	case beta >= 3.0:
-		return BetaCritical
+	case beta < 1.5:
+		return BetaUnknown // Explicitly handle (0, 1.5) range
+	case beta < 2.0:
+		return BetaOptimal // β ∈ [1.5, 2.0)
+	case beta < 2.5:
+		return BetaMonitor // β ∈ [2.0, 2.5)
+	case beta < 3.0:
+		return BetaConcerning // β ∈ [2.5, 3.0)
 	default:
-		return BetaUnknown
+		return BetaCritical // β ≥ 3.0
 	}
 }

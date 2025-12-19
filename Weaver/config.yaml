@@ -1,0 +1,104 @@
+# Weaver Configuration
+# Multi-agent orchestrator for conveyance hypothesis research
+
+backends:
+  claudecode:
+    enabled: true
+  loom:
+    enabled: true
+    url: http://localhost:8080
+
+agents:
+  # Senior: The researcher/orchestrator (you via Claude Code)
+  senior:
+    role: senior
+    backend: claudecode
+    model: ""  # Claude Code handles model selection
+    active: true
+    system_prompt: |
+      You are the Senior Engineer in a multi-agent AI research system.
+      Your role is to handle complex reasoning, architecture decisions, and orchestration.
+      You can interact with other agents using @agent <message>.
+    tools: []  # Claude Code has its own tools
+    tools_enabled: true
+
+  # Junior: Helper for file ops, running experiments, tooling
+  junior:
+    role: junior
+    backend: loom
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+    active: true
+    gpu: auto  # auto, 0, 1 (for cuda:0, cuda:1)
+    system_prompt: |
+      You are the Junior Engineer in a multi-agent AI research system.
+      Your role is to handle implementation tasks, file operations, and routine work.
+      You have access to tools for file manipulation and command execution.
+    tools:
+      - read_file
+      - write_file
+      - list_directory
+      - execute_command
+      - search_files
+      - context_read
+      - context_write
+    tools_enabled: true
+    max_tokens: 2048
+    temperature: 0.7
+    context_length: 32768
+    top_p: 0.9
+    top_k: 50
+
+  # Conversant 1: Bilateral exchange participant for conveyance measurement
+  conversant1:
+    role: conversant
+    backend: loom
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+    active: false  # Enable when running conveyance experiments
+    gpu: "0"  # cuda:0
+    system_prompt: |
+      You are a conversant in a research experiment.
+      Engage naturally in conversation. Your responses will be analyzed.
+    tools: []
+    tools_enabled: false
+    max_tokens: 1024
+    temperature: 0.8
+    context_length: 8192
+    top_p: 0.9
+
+  # Conversant 2: Second participant for bilateral exchange
+  conversant2:
+    role: conversant
+    backend: loom
+    model: meta-llama/Llama-3.1-8B-Instruct
+    active: false  # Enable when running conveyance experiments
+    gpu: "1"  # cuda:1 - different GPU for parallel inference
+    system_prompt: |
+      You are a conversant in a research experiment.
+      Engage naturally in conversation. Your responses will be analyzed.
+    tools: []
+    tools_enabled: false
+    max_tokens: 1024
+    temperature: 0.8
+    context_length: 8192
+    top_p: 0.9
+
+  # Subject: Single agent target for conveyance measurement
+  subject:
+    role: subject
+    backend: loom
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+    active: false  # Enable for single-agent measurement experiments
+    gpu: auto
+    system_prompt: |
+      You are a subject in a conveyance measurement experiment.
+      Respond naturally to prompts. Your hidden states will be analyzed.
+    tools: []
+    tools_enabled: false
+    max_tokens: 1024
+    temperature: 0.7
+    context_length: 8192
+
+session:
+  measurement_mode: active  # active, passive, or off
+  auto_export: true
+  export_path: ./experiments

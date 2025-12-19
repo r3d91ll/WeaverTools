@@ -23,6 +23,9 @@ type Agent struct {
 	// GPU assignment (for Loom backend)
 	// "auto" = let Loom decide, "0" = cuda:0, "1" = cuda:1, etc.
 	GPU string `json:"gpu,omitempty" yaml:"gpu"`
+
+	// Capabilities this agent has
+	Capabilities []Capability `json:"capabilities,omitempty" yaml:"capabilities"`
 }
 
 // Config is an alias for Agent for YAML configuration loading.
@@ -45,6 +48,7 @@ func DefaultSenior() Agent {
 Your role is to handle complex reasoning, architecture decisions, and code review.
 You can delegate routine tasks to Junior agents using @junior <task>.`,
 		ToolsEnabled: true,
+		Active:       true,
 	}
 }
 
@@ -58,6 +62,7 @@ func DefaultJunior() Agent {
 Your role is to handle implementation tasks, file operations, and routine work.
 Report results back to Senior for review.`,
 		ToolsEnabled: true,
+		Active:       true,
 	}
 }
 
@@ -70,8 +75,12 @@ func DefaultSubject() Agent {
 		SystemPrompt: `You are a Subject in a conveyance measurement experiment.
 Respond naturally to prompts. Your hidden states will be analyzed.`,
 		ToolsEnabled: false,
+		Active:       true,
 	}
 }
+
+// ValidBackends defines the allowed backend values.
+var ValidBackends = []string{"loom", "claudecode"}
 
 // Validate checks if the agent configuration is valid.
 func (a *Agent) Validate() error {
@@ -84,6 +93,32 @@ func (a *Agent) Validate() error {
 	if a.Backend == "" {
 		return &ValidationError{Field: "backend", Message: "backend is required"}
 	}
+
+	// Validate backend against allowed values
+	validBackend := false
+	for _, b := range ValidBackends {
+		if a.Backend == b {
+			validBackend = true
+			break
+		}
+	}
+	if !validBackend {
+		return &ValidationError{Field: "backend", Message: "backend must be 'loom' or 'claudecode'"}
+	}
+
+	// Validate role-capability consistency
+	if a.ToolsEnabled && !a.Role.SupportsTools() {
+		return &ValidationError{Field: "tools_enabled", Message: "role does not support tools"}
+	}
+
+	// Validate inference parameter ranges
+	if a.Temperature < 0 || a.Temperature > 2.0 {
+		return &ValidationError{Field: "temperature", Message: "temperature must be between 0 and 2.0"}
+	}
+	if a.TopP < 0 || a.TopP > 1.0 {
+		return &ValidationError{Field: "top_p", Message: "top_p must be between 0 and 1.0"}
+	}
+
 	return nil
 }
 

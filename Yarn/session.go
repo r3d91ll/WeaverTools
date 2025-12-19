@@ -1,0 +1,184 @@
+package yarn
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// Session is a named research session grouping conversations and measurements.
+type Session struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	StartedAt   time.Time      `json:"started_at"`
+	EndedAt     *time.Time     `json:"ended_at,omitempty"`
+	Config      SessionConfig  `json:"config"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+
+	Conversations []*Conversation `json:"conversations"`
+	Measurements  []*Measurement  `json:"measurements"`
+
+	mu sync.RWMutex
+}
+
+// SessionConfig holds session configuration.
+type SessionConfig struct {
+	MeasurementMode MeasurementMode `json:"measurement_mode"`
+	AutoExport      bool            `json:"auto_export"`
+	ExportPath      string          `json:"export_path"`
+}
+
+// MeasurementMode determines when measurements are captured.
+type MeasurementMode string
+
+const (
+	MeasurePassive   MeasurementMode = "passive"   // Observe only
+	MeasureActive    MeasurementMode = "active"    // Every exchange
+	MeasureTriggered MeasurementMode = "triggered" // On request
+)
+
+// NewSession creates a new session.
+func NewSession(name, description string) *Session {
+	return &Session{
+		ID:            uuid.New().String(),
+		Name:          name,
+		Description:   description,
+		StartedAt:     time.Now(),
+		Conversations: make([]*Conversation, 0),
+		Measurements:  make([]*Measurement, 0),
+		Metadata:      make(map[string]any),
+		Config: SessionConfig{
+			MeasurementMode: MeasureActive,
+			AutoExport:      true,
+			ExportPath:      "./experiments",
+		},
+	}
+}
+
+// AddConversation adds a conversation to the session.
+func (s *Session) AddConversation(conv *Conversation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Conversations = append(s.Conversations, conv)
+}
+
+// AddMeasurement adds a measurement to the session.
+func (s *Session) AddMeasurement(m *Measurement) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m.SessionID = s.ID
+	s.Measurements = append(s.Measurements, m)
+}
+
+// ActiveConversation returns the most recent conversation, or creates one.
+func (s *Session) ActiveConversation() *Conversation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.Conversations) == 0 {
+		conv := NewConversation(s.Name + "-conv-1")
+		s.Conversations = append(s.Conversations, conv)
+	}
+	return s.Conversations[len(s.Conversations)-1]
+}
+
+// End marks the session as ended.
+func (s *Session) End() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.EndedAt = &now
+}
+
+// Stats returns session statistics.
+func (s *Session) Stats() SessionStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stats := SessionStats{
+		ConversationCount: len(s.Conversations),
+		MeasurementCount:  len(s.Measurements),
+	}
+
+	for _, conv := range s.Conversations {
+		stats.MessageCount += conv.Length()
+	}
+
+	if len(s.Measurements) > 0 {
+		var totalDEff, totalBeta, totalAlignment float64
+		var bilateralCount int
+
+		for _, m := range s.Measurements {
+			totalDEff += float64(m.DEff)
+			totalBeta += m.Beta
+			totalAlignment += m.Alignment
+			if m.IsBilateral() {
+				bilateralCount++
+			}
+		}
+
+		n := float64(len(s.Measurements))
+		stats.AvgDEff = totalDEff / n
+		stats.AvgBeta = totalBeta / n
+		stats.AvgAlignment = totalAlignment / n
+		stats.BilateralCount = bilateralCount
+	}
+
+	return stats
+}
+
+// SessionStats holds session statistics.
+type SessionStats struct {
+	ConversationCount int     `json:"conversation_count"`
+	MessageCount      int     `json:"message_count"`
+	MeasurementCount  int     `json:"measurement_count"`
+	BilateralCount    int     `json:"bilateral_count"`
+	AvgDEff           float64 `json:"avg_d_eff"`
+	AvgBeta           float64 `json:"avg_beta"`
+	AvgAlignment      float64 `json:"avg_alignment"`
+}
+
+// Export writes the session to files (JSON + JSONL for measurements).
+func (s *Session) Export() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	exportDir := filepath.Join(s.Config.ExportPath, s.ID)
+	if err := os.MkdirAll(exportDir, 0755); err != nil {
+		return err
+	}
+
+	// Export session metadata
+	sessionFile := filepath.Join(exportDir, "session.json")
+	sessionData, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(sessionFile, sessionData, 0644); err != nil {
+		return err
+	}
+
+	// Export measurements as JSONL
+	measurementsFile := filepath.Join(exportDir, "measurements.jsonl")
+	f, err := os.Create(measurementsFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for _, m := range s.Measurements {
+		data, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		f.Write(data)
+		f.WriteString("\n")
+	}
+
+	return nil
+}

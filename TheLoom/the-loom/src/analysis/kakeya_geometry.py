@@ -356,8 +356,9 @@ def _sample_convex_region(
         in_region = in_region & in_halfspace
 
         # Expected fraction under uniform spherical distribution
-        # Approximate: P(projection >= t) ≈ 0.5 for t=0, less for t>0
-        expected_fraction *= 0.5 * (1 - stats.norm.cdf(threshold * np.sqrt(n_features)))
+        # P(projection >= t) = 1 - CDF(t * sqrt(n)) for unit sphere projections
+        # For t=0: P = 0.5, for t>0: P < 0.5
+        expected_fraction *= 1 - stats.norm.cdf(threshold * np.sqrt(n_features))
 
     return normalized_vectors[in_region], expected_fraction
 

@@ -533,3 +533,190 @@ class TestV1GenerateAlias:
                 assert response.status_code == 200
                 data = response.json()
                 assert data["text"] == "Hello, world!"
+
+
+class TestGeometryAnalysisEndpoints:
+    """Tests for Kakeya geometry analysis endpoints."""
+
+    def test_analyze_geometry_basic(self, mock_config):
+        """Test basic geometry analysis with random vectors."""
+        import numpy as np
+
+        np.random.seed(42)
+        vectors = np.random.randn(50, 128).tolist()
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/geometry",
+                json={"vectors": vectors},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+
+            # Check response structure
+            assert "overall_health" in data
+            assert data["overall_health"].startswith(("healthy", "warning:", "unhealthy:"))
+            assert data["num_vectors"] == 50
+            assert data["ambient_dim"] == 128
+
+            # Check sub-components
+            assert "wolf_axiom" in data
+            assert data["wolf_axiom"]["max_density_ratio"] > 0
+            assert data["wolf_axiom"]["severity"] in ["none", "mild", "moderate", "severe"]
+
+            assert "directional_coverage" in data
+            assert data["directional_coverage"]["ambient_dim"] == 128
+            assert 0 <= data["directional_coverage"]["coverage_ratio"] <= 1
+            assert data["directional_coverage"]["coverage_quality"] in [
+                "degenerate", "sparse", "moderate", "full"
+            ]
+
+            assert "grain_analysis" in data
+            assert data["grain_analysis"]["num_grains"] >= 0
+            assert 0 <= data["grain_analysis"]["grain_coverage"] <= 1
+            assert data["grain_analysis"]["mean_grain_size"] >= 0
+            assert data["grain_analysis"]["mean_aspect_ratio"] >= 0
+
+    def test_analyze_geometry_minimum_vectors(self, mock_config):
+        """Test geometry analysis with minimum required vectors (3)."""
+        import numpy as np
+
+        np.random.seed(42)
+        vectors = np.random.randn(3, 64).tolist()
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/geometry",
+                json={"vectors": vectors},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["num_vectors"] == 3
+
+    def test_analyze_geometry_too_few_vectors(self, mock_config):
+        """Test geometry analysis fails with too few vectors (Pydantic validation)."""
+        vectors = [[0.1, 0.2], [0.3, 0.4]]  # Only 2 vectors
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/geometry",
+                json={"vectors": vectors},
+            )
+
+            # Pydantic validation catches min_length=3
+            assert response.status_code == 422
+
+    def test_analyze_bilateral_basic(self, mock_config):
+        """Test basic bilateral geometry comparison."""
+        import numpy as np
+
+        np.random.seed(42)
+        sender = np.random.randn(30, 128).tolist()
+        receiver = np.random.randn(30, 128).tolist()
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/bilateral",
+                json={
+                    "sender_vectors": sender,
+                    "receiver_vectors": receiver,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+
+            # Check all alignment metrics are present and in valid range
+            # Directional alignment is cosine similarity, can be negative
+            assert -1 <= data["directional_alignment"] <= 1
+            assert 0 <= data["subspace_overlap"] <= 1
+            assert 0 <= data["grain_alignment"] <= 1
+            assert 0 <= data["density_similarity"] <= 1
+            assert data["effective_dim_ratio"] > 0
+            assert 0 <= data["overall_alignment"] <= 1
+            assert data["analysis_time_ms"] > 0
+
+    def test_analyze_bilateral_identical_vectors(self, mock_config):
+        """Test bilateral comparison with identical vectors yields high alignment."""
+        import numpy as np
+
+        np.random.seed(42)
+        vectors = np.random.randn(30, 64).tolist()
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/bilateral",
+                json={
+                    "sender_vectors": vectors,
+                    "receiver_vectors": vectors,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+
+            # Identical vectors should have near-perfect alignment
+            assert data["directional_alignment"] > 0.99
+            assert data["subspace_overlap"] > 0.99
+            assert data["overall_alignment"] > 0.9
+
+    def test_analyze_bilateral_dimension_mismatch(self, mock_config):
+        """Test bilateral comparison fails with mismatched dimensions."""
+        sender = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]  # dim=3
+        receiver = [[0.1, 0.2], [0.3, 0.4]]  # dim=2
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/bilateral",
+                json={
+                    "sender_vectors": sender,
+                    "receiver_vectors": receiver,
+                },
+            )
+
+            assert response.status_code == 400
+            assert "mismatch" in response.json()["detail"].lower()
+
+    def test_analyze_bilateral_different_sample_counts(self, mock_config):
+        """Test bilateral comparison works with different sample counts."""
+        import numpy as np
+
+        np.random.seed(42)
+        sender = np.random.randn(20, 64).tolist()
+        receiver = np.random.randn(50, 64).tolist()
+
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/analyze/bilateral",
+                json={
+                    "sender_vectors": sender,
+                    "receiver_vectors": receiver,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert 0 <= data["overall_alignment"] <= 1

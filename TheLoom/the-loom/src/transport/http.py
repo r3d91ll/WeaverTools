@@ -18,6 +18,15 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import Config, get_config
+from ..analysis import (
+    BilateralGeometryResult,
+    DirectionalCoverageResult,
+    GrainAnalysisResult,
+    KakeyaGeometryReport,
+    WolfAxiomResult,
+    analyze_kakeya_geometry,
+    compare_bilateral_geometry,
+)
 from ..extraction.hidden_states import (
     HiddenStateResult,
     analyze_hidden_state,
@@ -332,6 +341,111 @@ class HealthResponse(BaseModel):
     model_loaded: str | None
     gpu_info: dict[str, Any]
     config: dict[str, Any]
+
+
+# ============================================================================
+# Kakeya Geometry Analysis Models (for Conveyance Measurement)
+# ============================================================================
+
+
+class BilateralAnalysisRequest(BaseModel):
+    """Request model for bilateral geometry analysis.
+
+    Compares geometric properties between sender and receiver hidden states
+    to measure potential information transfer compatibility.
+    """
+
+    sender_vectors: list[list[float]] = Field(
+        ...,
+        description="Hidden state vectors from sending agent [n_samples, hidden_dim]",
+        min_length=1,
+    )
+    receiver_vectors: list[list[float]] = Field(
+        ...,
+        description="Hidden state vectors from receiving agent [n_samples, hidden_dim]",
+        min_length=1,
+    )
+
+
+class WolfAxiomResponse(BaseModel):
+    """Wolf-inspired density analysis results."""
+
+    max_density_ratio: float = Field(description="Maximum density ratio across regions")
+    mean_density_ratio: float = Field(description="Average density ratio")
+    uniformity_p_value: float = Field(description="Statistical test p-value")
+    violation_count: int = Field(description="Regions exceeding threshold")
+    severity: str = Field(description="Violation severity: none, mild, moderate, severe")
+
+
+class DirectionalCoverageResponse(BaseModel):
+    """Directional coverage analysis results."""
+
+    ambient_dim: int = Field(description="Ambient space dimension")
+    effective_dim: int = Field(description="Effective dimensionality (95% variance)")
+    coverage_ratio: float = Field(description="effective_dim / ambient_dim")
+    coverage_quality: str = Field(description="Quality: degenerate, sparse, moderate, full")
+    spherical_uniformity: float = Field(description="Uniformity on unit sphere [0,1]")
+    isotropy_score: float = Field(description="Geometric mean / max eigenvalue ratio")
+
+
+class GrainAnalysisResponse(BaseModel):
+    """Grain (cluster) detection results."""
+
+    num_grains: int = Field(description="Number of detected clusters")
+    grain_coverage: float = Field(description="Fraction of points in clusters")
+    mean_grain_size: float = Field(description="Average size of clusters")
+    mean_aspect_ratio: float = Field(description="Average cluster elongation (1.0=spherical)")
+
+
+class GeometryAnalysisRequest(BaseModel):
+    """Request model for single-set geometry analysis."""
+
+    vectors: list[list[float]] = Field(
+        ...,
+        description="Hidden state vectors [n_samples, hidden_dim]",
+        min_length=3,
+    )
+
+
+class GeometryAnalysisResponse(BaseModel):
+    """Full Kakeya-inspired geometry analysis results."""
+
+    overall_health: str = Field(description="Overall health: healthy, warning:*, unhealthy:*")
+    num_vectors: int = Field(description="Number of vectors analyzed")
+    ambient_dim: int = Field(description="Ambient space dimension")
+    wolf_axiom: WolfAxiomResponse
+    directional_coverage: DirectionalCoverageResponse
+    grain_analysis: GrainAnalysisResponse
+
+
+class BilateralAnalysisResponse(BaseModel):
+    """Response model for bilateral geometry comparison.
+
+    Measures geometric compatibility between sender and receiver hidden states.
+    Higher alignment scores may predict better information transfer.
+    """
+
+    directional_alignment: float = Field(
+        description="Cosine similarity of mean directions [0,1]"
+    )
+    subspace_overlap: float = Field(
+        description="Principal subspace alignment [0,1]"
+    )
+    grain_alignment: float = Field(
+        description="Cluster structure correspondence [0,1]"
+    )
+    density_similarity: float = Field(
+        description="Wolf axiom profile similarity [0,1]"
+    )
+    effective_dim_ratio: float = Field(
+        description="Ratio of effective dimensions (min/max)"
+    )
+    overall_alignment: float = Field(
+        description="Weighted overall alignment score [0,1]"
+    )
+    analysis_time_ms: float = Field(
+        description="Time spent on analysis in milliseconds"
+    )
 
 
 # ============================================================================
@@ -1296,6 +1410,153 @@ def create_http_app(config: Config | None = None) -> FastAPI:
 
         except Exception as e:
             logger.exception(f"Analysis failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    # ========================================================================
+    # Kakeya Geometry Analysis Endpoints (Conveyance Measurement)
+    # ========================================================================
+
+    @app.post("/analyze/geometry", response_model=GeometryAnalysisResponse)
+    async def analyze_geometry(
+        request: GeometryAnalysisRequest,
+    ) -> GeometryAnalysisResponse:
+        """Perform Kakeya-inspired geometric analysis on hidden state vectors.
+
+        Analyzes a set of hidden state vectors for geometric properties that
+        may indicate information capacity and representation quality:
+
+        - Wolf axiom compliance: density concentration in convex regions
+        - Directional coverage: how well vectors span the ambient space
+        - Grain structure: clustering patterns in the representations
+
+        This endpoint accepts raw vectors (e.g., from multiple agent responses)
+        and returns a full geometric analysis report.
+
+        Example request:
+            {
+                "vectors": [[0.1, 0.2, ...], [0.3, 0.4, ...], ...]
+            }
+
+        Returns:
+            GeometryAnalysisResponse with Wolf axiom, coverage, and grain metrics.
+        """
+        import numpy as np
+
+        start_time = time.perf_counter()
+        try:
+            # Convert to numpy array
+            vectors = np.array(request.vectors, dtype=np.float32)
+
+            if vectors.shape[0] < 3:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Need at least 3 vectors for analysis, got {vectors.shape[0]}",
+                )
+
+            # Run full Kakeya geometry analysis
+            report: KakeyaGeometryReport = analyze_kakeya_geometry(vectors)
+
+            analysis_time = (time.perf_counter() - start_time) * 1000
+
+            return GeometryAnalysisResponse(
+                overall_health=report.overall_health,
+                num_vectors=report.num_vectors,
+                ambient_dim=report.ambient_dim,
+                wolf_axiom=WolfAxiomResponse(
+                    max_density_ratio=report.wolf_axiom.max_density_ratio,
+                    mean_density_ratio=report.wolf_axiom.mean_density_ratio,
+                    uniformity_p_value=report.wolf_axiom.uniformity_p_value,
+                    violation_count=report.wolf_axiom.violation_count,
+                    severity=report.wolf_axiom.severity,
+                ),
+                directional_coverage=DirectionalCoverageResponse(
+                    ambient_dim=report.directional_coverage.ambient_dim,
+                    effective_dim=report.directional_coverage.effective_dim,
+                    coverage_ratio=report.directional_coverage.coverage_ratio,
+                    coverage_quality=report.directional_coverage.coverage_quality,
+                    spherical_uniformity=report.directional_coverage.spherical_uniformity,
+                    isotropy_score=report.directional_coverage.isotropy_score,
+                ),
+                grain_analysis=GrainAnalysisResponse(
+                    num_grains=report.grain_analysis.num_grains,
+                    grain_coverage=report.grain_analysis.grain_coverage,
+                    mean_grain_size=report.grain_analysis.mean_grain_size,
+                    mean_aspect_ratio=report.grain_analysis.mean_aspect_ratio,
+                ),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Geometry analysis failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.post("/analyze/bilateral", response_model=BilateralAnalysisResponse)
+    async def analyze_bilateral(
+        request: BilateralAnalysisRequest,
+    ) -> BilateralAnalysisResponse:
+        """Compare geometric properties between sender and receiver hidden states.
+
+        This is the core conveyance measurement endpoint. It analyzes whether
+        the geometric representations of sender and receiver hidden states
+        align in ways that predict successful information transfer.
+
+        The analysis computes:
+        - Directional alignment: cosine similarity of mean directions
+        - Subspace overlap: principal component space alignment
+        - Grain alignment: cluster structure correspondence
+        - Density similarity: Wolf axiom profile similarity
+        - Effective dimension ratio: relative dimensionality
+
+        HYPOTHESIS: Higher alignment scores should correlate with better
+        task performance / information transfer success.
+
+        Example request:
+            {
+                "sender_vectors": [[0.1, 0.2, ...], [0.3, 0.4, ...], ...],
+                "receiver_vectors": [[0.5, 0.6, ...], [0.7, 0.8, ...], ...]
+            }
+
+        Returns:
+            BilateralAnalysisResponse with alignment metrics.
+        """
+        import numpy as np
+
+        start_time = time.perf_counter()
+        try:
+            # Convert to numpy arrays
+            sender = np.array(request.sender_vectors, dtype=np.float32)
+            receiver = np.array(request.receiver_vectors, dtype=np.float32)
+
+            # Validate dimensions match
+            if sender.shape[1] != receiver.shape[1]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Dimension mismatch: sender has {sender.shape[1]}, "
+                    f"receiver has {receiver.shape[1]}",
+                )
+
+            # Run bilateral geometry comparison
+            result: BilateralGeometryResult = compare_bilateral_geometry(
+                sender, receiver
+            )
+
+            analysis_time = (time.perf_counter() - start_time) * 1000
+
+            return BilateralAnalysisResponse(
+                directional_alignment=result.directional_alignment,
+                subspace_overlap=result.subspace_overlap,
+                grain_alignment=result.grain_alignment,
+                density_similarity=result.density_similarity,
+                effective_dim_ratio=result.effective_dim_ratio,
+                overall_alignment=result.overall_alignment,
+                analysis_time_ms=analysis_time,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Bilateral analysis failed: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     @app.post("/generate/stream")

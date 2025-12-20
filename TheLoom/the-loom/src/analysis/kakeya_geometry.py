@@ -66,6 +66,15 @@ from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
 
 # ============================================================================
+# Constants
+# ============================================================================
+
+# Minimum samples required for meaningful geometric analysis.
+# With fewer samples, PCA, DBSCAN, and spherical uniformity produce
+# degenerate or unreliable results.
+MIN_SAMPLES_FOR_ANALYSIS = 3
+
+# ============================================================================
 # Data Classes for Results
 # ============================================================================
 
@@ -743,20 +752,31 @@ class BilateralGeometryResult:
 
         DESIGN DECISION (2024-12): Geometric mean vs Harmonic mean
         -----------------------------------------------------------
-        This is a SIMILARITY metric measuring how well sender/receiver
-        geometries "comport" with each other in high-dimensional space.
+        RE: Coding guidelines specify "harmonic mean constraint where bilateral
+        transfer is limited by the weaker participant." This applies to CAPACITY
+        metrics (C_pair), not similarity metrics like overall_alignment.
+
+        Key distinction:
+        - overall_alignment: SIMILARITY metric - how well do geometries match?
+        - C_pair (conveyance): CAPACITY metric - how much can be transferred?
+
+        These are different questions:
+        - High alignment + low capacity: Compatible structure, but one side
+          has limited throughput (e.g., small model receiving from large model)
+        - Low alignment + high capacity: Both sides capable, but geometric
+          mismatch may cause information loss during transfer
+
+        Current choice: Geometric mean for alignment (similarity).
 
         - Geometric mean: Appropriate for similarity/compatibility metrics.
           Measures structural alignment without bottleneck semantics.
 
-        - Harmonic mean: Appropriate for CAPACITY metrics (like C_pair in
+        - Harmonic mean: Reserved for CAPACITY metrics (like C_pair in
           the Conveyance Framework). Captures "limited by weakest link"
           semantics where transfer is bounded by the lesser participant.
 
-        Current choice: Geometric mean, because alignment can be high even
-        when capacity is low (compatible structure doesn't guarantee high
-        throughput). If empirical results show alignment should predict
-        transfer success more directly, consider switching to harmonic mean:
+        If empirical results show alignment should behave more like capacity
+        (predicting transfer success directly), consider switching to harmonic:
 
             # Harmonic mean alternative:
             # components = [self.directional_alignment, self.subspace_overlap,
@@ -999,12 +1019,25 @@ def run_conveyance_experiment(
     """Run a complete conveyance experiment correlating geometry with success.
 
     Parameters:
-        sender_states: List of sender hidden state vectors per interaction
-        receiver_states: List of receiver hidden state vectors per interaction
-        task_success: Whether each interaction succeeded
+        sender_states: List of sender hidden state arrays per interaction.
+            Each array should be shape (n_samples, n_features) with n_samples >= 3
+            for reliable analysis. Single vectors will be skipped with a warning.
+        receiver_states: List of receiver hidden state arrays per interaction.
+            Same shape requirements as sender_states.
+        task_success: Whether each interaction succeeded (same length as states).
 
     Returns:
-        Dictionary with correlation analysis
+        Dictionary with correlation analysis including:
+        - n_interactions: Total number of interactions provided
+        - n_analyzed: Number actually analyzed (may be < n_interactions)
+        - n_skipped: Number skipped due to insufficient samples
+        - alignment, wolf_violations_sender, coverage_sender: Metrics
+        - hypothesis_support: Boolean flags for hypothesis testing
+
+    Note:
+        Interactions with fewer than MIN_SAMPLES_FOR_ANALYSIS (3) vectors per
+        side are skipped, as PCA, DBSCAN, and spherical uniformity calculations
+        produce degenerate results with single samples.
 
     This is the key falsification test:
     - If geometric alignment predicts success → hypothesis supported
@@ -1019,32 +1052,78 @@ def run_conveyance_experiment(
     coverage_ratios_sender: list[float] = []
     coverage_ratios_receiver: list[float] = []
 
+    skipped_count = 0
     for sender, receiver in zip(sender_states, receiver_states, strict=True):
+        # Reshape to 2D if needed
+        sender_2d = sender.reshape(1, -1) if sender.ndim == 1 else sender
+        receiver_2d = receiver.reshape(1, -1) if receiver.ndim == 1 else receiver
+
+        # Check minimum sample requirements for meaningful analysis
+        # Single vectors (n_samples=1) cause degenerate PCA/DBSCAN/uniformity
+        if sender_2d.shape[0] < MIN_SAMPLES_FOR_ANALYSIS or receiver_2d.shape[0] < MIN_SAMPLES_FOR_ANALYSIS:
+            warnings.warn(
+                f"Skipping interaction: sender has {sender_2d.shape[0]} samples, "
+                f"receiver has {receiver_2d.shape[0]} samples. "
+                f"Minimum {MIN_SAMPLES_FOR_ANALYSIS} required for reliable analysis.",
+                UserWarning,
+                stacklevel=2,
+            )
+            skipped_count += 1
+            continue
+
         # Bilateral comparison
-        bilateral = compare_bilateral_geometry(
-            sender.reshape(1, -1) if sender.ndim == 1 else sender,
-            receiver.reshape(1, -1) if receiver.ndim == 1 else receiver,
-        )
+        bilateral = compare_bilateral_geometry(sender_2d, receiver_2d)
         alignments.append(bilateral.overall_alignment)
 
         # Individual analyses
-        sender_report = analyze_kakeya_geometry(
-            sender.reshape(1, -1) if sender.ndim == 1 else sender
-        )
-        receiver_report = analyze_kakeya_geometry(
-            receiver.reshape(1, -1) if receiver.ndim == 1 else receiver
-        )
+        sender_report = analyze_kakeya_geometry(sender_2d)
+        receiver_report = analyze_kakeya_geometry(receiver_2d)
 
         wolf_violations_sender.append(sender_report.wolf_axiom.max_density_ratio)
         wolf_violations_receiver.append(receiver_report.wolf_axiom.max_density_ratio)
         coverage_ratios_sender.append(sender_report.directional_coverage.coverage_ratio)
         coverage_ratios_receiver.append(receiver_report.directional_coverage.coverage_ratio)
 
-    # Compute correlations with task success
-    success_numeric = np.array(task_success, dtype=float)
+    # Handle case where all interactions were skipped
+    n_analyzed = len(alignments)
+    if n_analyzed == 0:
+        warnings.warn(
+            f"All {len(task_success)} interactions skipped due to insufficient samples. "
+            f"Provide batches with at least {MIN_SAMPLES_FOR_ANALYSIS} vectors per interaction.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return {
+            "n_interactions": len(task_success),
+            "n_analyzed": 0,
+            "n_skipped": skipped_count,
+            "success_rate": float(np.mean(task_success)),
+            "alignment": {"mean": 0.0, "std": 0.0, "correlation_with_success": 0.0, "p_value": 1.0},
+            "wolf_violations_sender": {"mean": 0.0, "correlation_with_success": 0.0, "p_value": 1.0},
+            "coverage_sender": {"mean": 0.0, "correlation_with_success": 0.0, "p_value": 1.0},
+            "hypothesis_support": {
+                "alignment_predicts_success": False,
+                "wolf_violation_hurts": False,
+                "coverage_helps": False,
+            },
+        }
+
+    # Filter task_success to only include analyzed interactions
+    # (We need to track which were analyzed vs skipped)
+    # Since we skip based on sample count, we need to rebuild the success array
+    analyzed_success: list[bool] = []
+    idx = 0
+    for sender, receiver in zip(sender_states, receiver_states, strict=True):
+        sender_2d = sender.reshape(1, -1) if sender.ndim == 1 else sender
+        receiver_2d = receiver.reshape(1, -1) if receiver.ndim == 1 else receiver
+        if sender_2d.shape[0] >= MIN_SAMPLES_FOR_ANALYSIS and receiver_2d.shape[0] >= MIN_SAMPLES_FOR_ANALYSIS:
+            analyzed_success.append(task_success[idx])
+        idx += 1
+
+    success_numeric = np.array(analyzed_success, dtype=float)
 
     def safe_correlation(x: list[float], y: np.ndarray) -> tuple[float, float]:
-        if np.std(x) < 1e-10 or np.std(y) < 1e-10:
+        if len(x) < 3 or np.std(x) < 1e-10 or np.std(y) < 1e-10:
             return 0.0, 1.0
         result = stats.pearsonr(x, y)
         return float(result.statistic), float(result.pvalue)
@@ -1055,7 +1134,9 @@ def run_conveyance_experiment(
 
     return {
         "n_interactions": len(task_success),
-        "success_rate": float(np.mean(success_numeric)),
+        "n_analyzed": n_analyzed,
+        "n_skipped": skipped_count,
+        "success_rate": float(np.mean(success_numeric)) if len(success_numeric) > 0 else 0.0,
         "alignment": {
             "mean": float(np.mean(alignments)),
             "std": float(np.std(alignments)),

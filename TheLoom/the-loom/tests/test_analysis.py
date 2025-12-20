@@ -88,26 +88,28 @@ class TestWolfAxiomAnalysis:
 
     def test_wolf_axiom_severity_levels(self) -> None:
         """Test severity classification."""
-        # Create result with known density ratio
-        result = WolfAxiomResult(
-            max_density_ratio=1.0,
-            mean_density_ratio=1.0,
-            density_ratios=[1.0],
-            uniformity_p_value=0.5,
-            violation_count=0,
-            violation_threshold=2.5,
-            num_regions_tested=10,
-        )
-        assert result.severity == "none"
+        # Base kwargs for all results
+        base_kwargs = {
+            "mean_density_ratio": 1.0,
+            "density_ratios": [1.0],
+            "uniformity_p_value": 0.5,
+            "violation_count": 0,
+            "violation_threshold": 2.5,
+            "num_regions_tested": 10,
+        }
 
-        result.max_density_ratio = 2.0
-        assert result.severity == "mild"
+        # Test each severity level with a separate instance
+        result_none = WolfAxiomResult(max_density_ratio=1.0, **base_kwargs)
+        assert result_none.severity == "none"
 
-        result.max_density_ratio = 4.0
-        assert result.severity == "moderate"
+        result_mild = WolfAxiomResult(max_density_ratio=2.0, **base_kwargs)
+        assert result_mild.severity == "mild"
 
-        result.max_density_ratio = 6.0
-        assert result.severity == "severe"
+        result_moderate = WolfAxiomResult(max_density_ratio=4.0, **base_kwargs)
+        assert result_moderate.severity == "moderate"
+
+        result_severe = WolfAxiomResult(max_density_ratio=6.0, **base_kwargs)
+        assert result_severe.severity == "severe"
 
     def test_wolf_axiom_deterministic(self) -> None:
         """Test that results are deterministic with same random state."""

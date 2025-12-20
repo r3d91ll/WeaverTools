@@ -230,6 +230,9 @@ def experiment_3_bilateral(weaver_session):
 **Question:** Does artificially violating Kakeya properties hurt performance?
 
 ```python
+import numpy as np
+from sklearn.decomposition import PCA
+
 def experiment_4_perturbation(model_loader, test_prompts: list[str]):
     """Test if violating Kakeya geometry degrades task performance."""
 

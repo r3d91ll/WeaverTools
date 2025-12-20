@@ -1,19 +1,54 @@
-"""Kakeya Geometry Analysis for Hidden States.
+"""Kakeya-Inspired Geometric Analysis for Hidden States.
 
-This module implements geometric tests inspired by Kakeya set theory to analyze
-whether transformer hidden states exhibit properties that might constrain or
-enable effective information transfer (conveyance).
+This module implements geometric analysis inspired by (but not mathematically
+equivalent to) Kakeya set theory, to test whether transformer hidden states
+exhibit properties that might constrain or enable information transfer.
 
-HYPOTHESIS UNDER INVESTIGATION:
+MATHEMATICAL GROUNDING
+======================
+- Effective dimensionality via PCA: Directly grounded in Whiteley et al.
+  "Statistical exploration of the Manifold Hypothesis" (arXiv:2208.11665).
+  The Latent Metric Model explains why data concentrates on low-dimensional
+  manifolds, justifying PCA-based intrinsic dimension estimation.
+
+- Coverage ratio thresholds: Heuristic based on manifold hypothesis literature.
+  Thresholds (0.1, 0.3, 0.6) are empirical, not theoretically derived.
+
+KAKEYA-INSPIRED HEURISTICS (conceptually inspired, NOT mathematically equivalent)
+=================================================================================
+- Wolf density analysis: Adapted from Wang & Zahl "Volume estimates for unions
+  of convex sets, and the Kakeya set conjecture in three dimensions"
+  (arXiv:2502.17655). The original Wolf axioms constrain δ-tubes in R³;
+  we adapt to point distributions in R^d. This captures the intuition that
+  "vectors shouldn't concentrate in thin slabs" but is not a rigorous
+  implementation of the axioms.
+
+- Grain detection: DBSCAN clustering as a proxy for Kakeya grain structure.
+  Wang-Zahl grains are tube intersection regions with specific geometry;
+  DBSCAN clusters are density-reachable regions in cosine space. The
+  connection is intuitive (both identify "where things come together")
+  but not mathematically rigorous.
+
+NOVEL METHODOLOGY (experimental design for hypothesis testing)
+==============================================================
+- Bilateral alignment metrics: Not derived from source papers. Measures
+  sender/receiver geometric compatibility through directional alignment,
+  subspace overlap, grain correspondence, and density profile similarity.
+
+HYPOTHESIS UNDER INVESTIGATION
+==============================
 If Kakeya-like geometric constraints govern semantic representation, then:
-1. Hidden states should exhibit bounded density in convex regions (Wolf axioms)
+1. Hidden states should exhibit bounded density in convex regions
 2. Directional coverage should be "full" relative to effective dimensionality
-3. "Grains" (semantic intersection regions) should have consistent structure
+3. "Grains" (semantic clusters) should have consistent structure
 
-FALSIFICATION CRITERIA:
+FALSIFICATION CRITERIA
+======================
 - If Wolf density violations correlate with BETTER task performance → reject
 - If directional sparsity correlates with BETTER conveyance → reject
 - If grain structure shows no relationship to transfer success → reject
+- If random vectors show BETTER geometric properties than learned embeddings → reject
+- If layer-wise geometry shows no systematic evolution → weaken hypothesis
 
 Integration: Designed to work with TheLoom's HiddenStateResult class.
 """
@@ -37,15 +72,26 @@ from sklearn.decomposition import PCA
 
 @dataclass
 class WolfAxiomResult:
-    """Results from Wolf axiom density analysis.
+    """Results from Wolf-inspired density concentration analysis.
 
-    The Wolf axioms in Kakeya theory constrain how tubes can be distributed
-    in convex regions. We adapt this to embeddings: vectors shouldn't be
-    overly concentrated in any convex subregion of the space.
+    NOTE: This is a HEURISTIC ADAPTATION, not a mathematical implementation.
+
+    The original Wang-Zahl Wolf axioms constrain how δ-tubes (extended objects
+    with direction) can be distributed in convex regions of R³. We adapt this
+    to point distributions in high-dimensional embedding space:
+
+    Original (Wang-Zahl):     Our Adaptation:
+    - δ-tubes in R³           → Points (vectors) in R^d
+    - Convex set geometry     → Random halfspace intersections
+    - Measure-theoretic       → Statistical density ratios
+
+    The core intuition preserved: "vectors shouldn't concentrate in thin slabs."
+    This is NOT mathematically equivalent to the Wolf axioms but captures a
+    similar geometric property that may be relevant to information capacity.
 
     Interpretation:
-    - max_density_ratio > 2.0: Potential concentration violation
-    - max_density_ratio > 5.0: Strong violation (slab-like structure)
+    - max_density_ratio > 2.0: Potential concentration (slab-like structure)
+    - max_density_ratio > 5.0: Strong concentration
     - uniformity_p_value < 0.05: Statistically significant non-uniformity
     """
 
@@ -120,11 +166,17 @@ class DirectionalCoverageResult:
 
 @dataclass
 class Grain:
-    """A detected grain (semantic intersection region).
+    """A detected grain (dense cluster in embedding space).
 
-    In Kakeya theory, grains are where multiple tubes intersect - they have
-    characteristic dimensions δ × δ × δ/ρ. In embedding space, we look for
-    regions where multiple semantic directions converge.
+    NOTE: This is a DBSCAN PROXY, not a true Kakeya grain.
+
+    In Wang-Zahl Kakeya theory, grains are tube intersection regions with
+    specific geometry (dimensions δ × δ × δ/ρ). We use DBSCAN clustering
+    as an operationalization: regions where vectors cluster densely.
+
+    The connection is intuitive (both identify "where things come together")
+    but not mathematically rigorous - DBSCAN clusters are defined by density
+    reachability in cosine space, not by tube intersection geometry.
     """
 
     center: np.ndarray  # Centroid of the grain
@@ -141,12 +193,16 @@ class Grain:
 
 @dataclass
 class GrainAnalysisResult:
-    """Results from grain detection and analysis.
+    """Results from grain (cluster) detection and analysis.
+
+    NOTE: "Grains" here are DBSCAN clusters, not true Kakeya grains.
+    See Grain docstring for the distinction.
 
     Interpretation:
-    - num_grains: How many distinct semantic intersection regions
-    - grain_alignment: Do grains align across samples? (important for conveyance)
-    - dimension_consistency: Is local_dim consistent across grains?
+    - num_grains: How many distinct dense clusters detected
+    - grain_coverage: Fraction of vectors in clusters (vs noise)
+    - dimension_consistency: Std of local_dim across clusters (lower = more consistent)
+    - mean_aspect_ratio: Average elongation (1.0 = spherical clusters)
     """
 
     grains: list[Grain]
@@ -238,21 +294,30 @@ def check_wolf_axioms(
     violation_threshold: float = 2.5,
     random_state: int | None = None,
 ) -> WolfAxiomResult:
-    """Check Wolf-axiom-like density constraints on embedding distribution.
+    """Check Wolf-inspired density constraints on embedding distribution.
 
-    The Wolf axioms (Castile-Wolf and Frostman-Wolf) constrain how Kakeya
-    tubes can be distributed in convex regions. We adapt this to embeddings:
+    NOTE: HEURISTIC ADAPTATION, not mathematically equivalent to Wolf axioms.
+
+    The original Wang-Zahl Wolf axioms (Castile-Wolf and Frostman-Wolf)
+    constrain how δ-tubes can be distributed in convex regions of R³.
+    We adapt the intuition to point distributions in R^d:
 
     For any convex region W:
         density(vectors in W) ≤ C × expected_density
 
-    If vectors are uniformly distributed, density should be proportional to
-    region volume. Violations indicate "slab-like" concentration.
+    If vectors are uniformly distributed on the sphere, density should be
+    proportional to region volume. Violations indicate concentration in
+    "thin slabs" which may constrain information capacity.
+
+    Key differences from original:
+    - We test points, not extended tubes
+    - We use random halfspace intersections, not geometric convex sets
+    - We compute statistical density ratios, not measure-theoretic bounds
 
     Parameters:
         vectors: Array of shape (n_samples, n_features), should be L2-normalized
         num_regions: Number of random convex regions to test
-        violation_threshold: Ratio above which to flag violation
+        violation_threshold: Ratio above which to flag violation (default 2.5)
         random_state: For reproducibility
 
     Returns:
@@ -494,22 +559,29 @@ def analyze_grains(
     min_samples: int = 3,
     local_pca_neighbors: int = 10,
 ) -> GrainAnalysisResult:
-    """Detect and analyze grains (semantic intersection regions).
+    """Detect and analyze grains (dense clusters) in embedding space.
 
-    In Kakeya theory, grains are where multiple tubes intersect. They have
-    characteristic structure (δ × δ × δ/ρ). In embeddings, we look for
-    analogous structures: regions where multiple semantic directions converge.
+    NOTE: Uses DBSCAN clustering as a PROXY for Kakeya grain detection.
+
+    In Wang-Zahl Kakeya theory, grains are tube intersection regions with
+    specific geometry (δ × δ × δ/ρ). We operationalize this via DBSCAN:
+    dense clusters in cosine-distance space.
+
+    The connection is intuitive (both identify "where things come together")
+    but not mathematically rigorous:
+    - Kakeya grains: Defined by tube intersection geometry
+    - DBSCAN clusters: Defined by density reachability in cosine space
 
     Parameters:
         vectors: Array of shape (n_samples, n_features)
-        eps: DBSCAN epsilon (auto-computed if None)
-        min_samples: Minimum samples for a grain
-        local_pca_neighbors: Neighbors for local dimensionality
+        eps: DBSCAN epsilon (auto-computed via k-NN heuristic if None)
+        min_samples: Minimum samples for a cluster to be a "grain"
+        local_pca_neighbors: Neighbors for local dimensionality estimation
 
     Returns:
-        GrainAnalysisResult with grain structure analysis
+        GrainAnalysisResult with cluster structure analysis
 
-    FALSIFICATION: If grain structure shows no correlation with
+    FALSIFICATION: If grain/cluster structure shows no correlation with
     conveyance success, the Kakeya-grain hypothesis is weakened.
     """
     n_samples, n_features = vectors.shape
@@ -642,8 +714,17 @@ def _analyze_single_grain(
 class BilateralGeometryResult:
     """Geometric comparison between two sets of hidden states.
 
-    For measuring conveyance: how well do geometric properties align
-    between sender and receiver representations?
+    NOTE: NOVEL METHODOLOGY - not derived from Kakeya theory papers.
+
+    This is experimental design for testing the conveyance hypothesis:
+    do geometric properties of sender/receiver representations predict
+    successful information transfer?
+
+    Components measured:
+    - directional_alignment: Cosine similarity of mean directions
+    - subspace_overlap: Principal component space alignment
+    - grain_alignment: Cluster structure correspondence
+    - density_similarity: Wolf-inspired density profile similarity
     """
 
     directional_alignment: float  # Cosine similarity of mean directions

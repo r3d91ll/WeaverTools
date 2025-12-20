@@ -322,7 +322,7 @@ class TransformersLoader(ModelLoader):
         start_time = time.time()
 
         with torch.no_grad():
-            outputs = model.generate(**inputs, **gen_kwargs)
+            outputs = model.generate(**inputs, **gen_kwargs)  # type: ignore[operator]
 
         inference_time = time.time() - start_time
 
@@ -631,7 +631,7 @@ class TransformersLoader(ModelLoader):
 
         # Create streamer
         streamer = TextIteratorStreamer(
-            tokenizer,
+            tokenizer,  # type: ignore[arg-type]
             skip_prompt=True,
             skip_special_tokens=True,
         )
@@ -665,7 +665,7 @@ class TransformersLoader(ModelLoader):
             """
             nonlocal generation_output
             with torch.no_grad():
-                generation_output = model.generate(**inputs, **gen_kwargs)
+                generation_output = model.generate(**inputs, **gen_kwargs)  # type: ignore[operator]
 
         thread = threading.Thread(target=generate_thread)
         thread.start()

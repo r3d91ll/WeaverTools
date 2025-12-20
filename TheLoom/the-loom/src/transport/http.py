@@ -1207,8 +1207,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     @app.post("/v1/generate", response_model=GenerateResponse)
     async def generate_v1(request: GenerateRequest) -> GenerateResponse:
         """Alias for /generate with /v1/ prefix for API consistency."""
-        result: GenerateResponse = await generate(request)
-        return result
+        return await generate(request)
 
     @app.post("/embed", response_model=EmbedResponse)
     async def embed(request: EmbedRequest) -> EmbedResponse:

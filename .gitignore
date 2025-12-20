@@ -75,6 +75,3 @@ htmlcov/
 *.pem
 *.key
 credentials.json
-
-# Local workspace for testing
-weaver-testing/

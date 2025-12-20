@@ -152,7 +152,7 @@ class LoaderRegistry:
         base_config = {
             "device": "cuda:0",
             "dtype": "auto",
-            "trust_remote_code": True,
+            "trust_remote_code": False,  # Secure default; enable explicitly for custom architectures
         }
 
         if model_id in self.loader_configs:

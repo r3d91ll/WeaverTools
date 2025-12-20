@@ -300,13 +300,16 @@ def main() -> None:
         if device_str == "cpu":
             config.gpu.default_device = -1  # -1 indicates CPU
         elif ":" in args.device:
-            device_idx = int(args.device.split(":")[-1])
-            config.gpu.default_device = device_idx
+            try:
+                device_idx = int(args.device.split(":")[-1])
+                config.gpu.default_device = device_idx
+            except ValueError:
+                print(f"Warning: Invalid device '{args.device}', using default")
         else:
             try:
                 config.gpu.default_device = int(args.device)
             except ValueError:
-                logger.warning(f"Invalid device '{args.device}', using default")
+                print(f"Warning: Invalid device '{args.device}', using default")
                 # Keep the default device from config
     if args.log_level is not None:
         config.logging.level = args.log_level
@@ -330,7 +333,8 @@ def main() -> None:
         logger.info(f"HTTP: {config.server.http_host}:{config.server.http_port}")
     if config.server.transport in ("unix", "both"):
         logger.info(f"Unix Socket: {config.server.unix_socket}")
-    logger.info(f"Default device: cuda:{config.gpu.default_device}")
+    device_display = "cpu" if config.gpu.default_device == -1 else f"cuda:{config.gpu.default_device}"
+    logger.info(f"Default device: {device_display}")
     logger.info(f"Max loaded models: {config.models.max_loaded}")
     logger.info("=" * 60)
 

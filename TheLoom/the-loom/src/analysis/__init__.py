@@ -5,23 +5,23 @@ studying transformer hidden state representations.
 """
 
 from .kakeya_geometry import (
-    # Main analysis function
-    analyze_kakeya_geometry,
-    analyze_hidden_state_batch,
-    # Bilateral comparison
-    compare_bilateral_geometry,
-    run_conveyance_experiment,
-    # Individual analyses
-    check_wolf_axioms,
-    analyze_directional_coverage,
-    analyze_grains,
+    BilateralGeometryResult,
+    DirectionalCoverageResult,
+    Grain,
+    GrainAnalysisResult,
     # Result types
     KakeyaGeometryReport,
     WolfAxiomResult,
-    DirectionalCoverageResult,
-    GrainAnalysisResult,
-    Grain,
-    BilateralGeometryResult,
+    analyze_directional_coverage,
+    analyze_grains,
+    analyze_hidden_state_batch,
+    # Main analysis function
+    analyze_kakeya_geometry,
+    # Individual analyses
+    check_wolf_axioms,
+    # Bilateral comparison
+    compare_bilateral_geometry,
+    run_conveyance_experiment,
 )
 
 __all__ = [

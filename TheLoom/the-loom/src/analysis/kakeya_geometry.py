@@ -20,17 +20,15 @@ Integration: Designed to work with TheLoom's HiddenStateResult class.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
-from typing import Any, List, Tuple, Optional
+from typing import Any
+
 import numpy as np
 from scipy import stats
-from scipy.spatial import ConvexHull
 from scipy.spatial.distance import cdist
-from sklearn.decomposition import PCA
 from sklearn.cluster import DBSCAN
-from sklearn.random_projection import GaussianRandomProjection
-import warnings
-
+from sklearn.decomposition import PCA
 
 # ============================================================================
 # Data Classes for Results
@@ -53,7 +51,7 @@ class WolfAxiomResult:
 
     max_density_ratio: float  # max(observed/expected) across regions
     mean_density_ratio: float  # average density ratio
-    density_ratios: List[float]  # per-region ratios
+    density_ratios: list[float]  # per-region ratios
     uniformity_p_value: float  # statistical test for uniform distribution
     violation_count: int  # regions exceeding threshold
     violation_threshold: float  # threshold used
@@ -130,7 +128,7 @@ class Grain:
     """
 
     center: np.ndarray  # Centroid of the grain
-    members: List[int]  # Indices of vectors in this grain
+    members: list[int]  # Indices of vectors in this grain
     density: float  # Local density
     principal_directions: np.ndarray  # Local PCA directions
     local_dim: int  # Local effective dimensionality
@@ -151,7 +149,7 @@ class GrainAnalysisResult:
     - dimension_consistency: Is local_dim consistent across grains?
     """
 
-    grains: List[Grain]
+    grains: list[Grain]
     num_grains: int
     mean_grain_size: float
     grain_coverage: float  # Fraction of vectors in grains
@@ -238,7 +236,7 @@ def check_wolf_axioms(
     vectors: np.ndarray,
     num_regions: int = 50,
     violation_threshold: float = 2.5,
-    random_state: Optional[int] = None,
+    random_state: int | None = None,
 ) -> WolfAxiomResult:
     """Check Wolf-axiom-like density constraints on embedding distribution.
 
@@ -330,7 +328,7 @@ def _sample_convex_region(
     n_features: int,
     rng: np.random.RandomState,
     num_halfspaces: int = 3,
-) -> Tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, float]:
     """Sample a random convex region and return vectors inside it.
 
     Creates region by intersection of random halfspaces.
@@ -491,7 +489,7 @@ def _compute_spherical_uniformity(normalized_vectors: np.ndarray) -> float:
 
 def analyze_grains(
     vectors: np.ndarray,
-    eps: Optional[float] = None,
+    eps: float | None = None,
     min_samples: int = 3,
     local_pca_neighbors: int = 10,
 ) -> GrainAnalysisResult:
@@ -581,7 +579,7 @@ def analyze_grains(
 
 def _analyze_single_grain(
     grain_vectors: np.ndarray,
-    member_indices: List[int],
+    member_indices: list[int],
     n_neighbors: int,
 ) -> Grain:
     """Analyze structure of a single grain."""
@@ -750,8 +748,8 @@ def _compute_subspace_overlap(
 
     # Compute principal angles between subspaces
     # Use SVD of V1.T @ V2
-    V1 = pca1.components_.T  # (features, n_comp)
-    V2 = pca2.components_.T
+    V1 = pca1.components_.T  # (features, n_comp)  # noqa: N806
+    V2 = pca2.components_.T  # noqa: N806
 
     cross = V1.T @ V2
     _, s, _ = np.linalg.svd(cross)
@@ -792,7 +790,7 @@ def analyze_kakeya_geometry(
     wolf_num_regions: int = 50,
     wolf_violation_threshold: float = 2.5,
     grain_min_samples: int = 3,
-    random_state: Optional[int] = None,
+    random_state: int | None = None,
 ) -> KakeyaGeometryReport:
     """Complete Kakeya geometry analysis of hidden state vectors.
 
@@ -848,7 +846,7 @@ def analyze_kakeya_geometry(
 
 
 def analyze_hidden_state_batch(
-    hidden_state_results: List[Any],  # List[HiddenStateResult]
+    hidden_state_results: list[Any],  # list[HiddenStateResult]
     normalize: bool = True,
 ) -> KakeyaGeometryReport:
     """Analyze a batch of HiddenStateResult objects from TheLoom.
@@ -883,9 +881,9 @@ def analyze_hidden_state_batch(
 
 
 def run_conveyance_experiment(
-    sender_states: List[np.ndarray],
-    receiver_states: List[np.ndarray],
-    task_success: List[bool],
+    sender_states: list[np.ndarray],
+    receiver_states: list[np.ndarray],
+    task_success: list[bool],
 ) -> dict:
     """Run a complete conveyance experiment correlating geometry with success.
 
@@ -901,16 +899,16 @@ def run_conveyance_experiment(
     - If geometric alignment predicts success → hypothesis supported
     - If geometric alignment uncorrelated with success → hypothesis weakened
     """
-    if len(sender_states) != len(receiver_states) != len(task_success):
+    if not (len(sender_states) == len(receiver_states) == len(task_success)):
         raise ValueError("All lists must have same length")
 
-    alignments = []
-    wolf_violations_sender = []
-    wolf_violations_receiver = []
-    coverage_ratios_sender = []
-    coverage_ratios_receiver = []
+    alignments: list[float] = []
+    wolf_violations_sender: list[float] = []
+    wolf_violations_receiver: list[float] = []
+    coverage_ratios_sender: list[float] = []
+    coverage_ratios_receiver: list[float] = []
 
-    for sender, receiver in zip(sender_states, receiver_states):
+    for sender, receiver in zip(sender_states, receiver_states, strict=True):
         # Bilateral comparison
         bilateral = compare_bilateral_geometry(
             sender.reshape(1, -1) if sender.ndim == 1 else sender,
@@ -934,7 +932,7 @@ def run_conveyance_experiment(
     # Compute correlations with task success
     success_numeric = np.array(task_success, dtype=float)
 
-    def safe_correlation(x: List[float], y: np.ndarray) -> Tuple[float, float]:
+    def safe_correlation(x: list[float], y: np.ndarray) -> tuple[float, float]:
         if np.std(x) < 1e-10 or np.std(y) < 1e-10:
             return 0.0, 1.0
         result = stats.pearsonr(x, y)
@@ -982,14 +980,14 @@ if __name__ == "__main__":
     report = analyze_kakeya_geometry(test_vectors)
 
     print(f"\nOverall Health: {report.overall_health}")
-    print(f"\nWolf Axiom Analysis:")
+    print("\nWolf Axiom Analysis:")
     print(f"  Max Density Ratio: {report.wolf_axiom.max_density_ratio:.3f}")
     print(f"  Severity: {report.wolf_axiom.severity}")
-    print(f"\nDirectional Coverage:")
+    print("\nDirectional Coverage:")
     print(f"  Effective Dim: {report.directional_coverage.effective_dim} / {report.directional_coverage.ambient_dim}")
     print(f"  Coverage Ratio: {report.directional_coverage.coverage_ratio:.3f}")
     print(f"  Quality: {report.directional_coverage.coverage_quality}")
-    print(f"\nGrain Analysis:")
+    print("\nGrain Analysis:")
     print(f"  Num Grains: {report.grain_analysis.num_grains}")
     print(f"  Coverage: {report.grain_analysis.grain_coverage:.3f}")
 

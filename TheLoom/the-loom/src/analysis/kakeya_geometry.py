@@ -57,9 +57,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import stats
 from scipy.spatial.distance import cdist
 from sklearn.cluster import DBSCAN
@@ -73,6 +74,31 @@ from sklearn.decomposition import PCA
 # With fewer samples, PCA, DBSCAN, and spherical uniformity produce
 # degenerate or unreliable results.
 MIN_SAMPLES_FOR_ANALYSIS = 3
+
+
+# ============================================================================
+# Protocols for Type Safety
+# ============================================================================
+
+
+@runtime_checkable
+class HiddenStateProtocol(Protocol):
+    """Protocol for hidden state result objects from TheLoom.
+
+    Supports duck typing while providing type safety. Objects must have
+    either a `vector` attribute or a `to_list` method for vector extraction.
+    Optional `l2_normalize` method for normalization.
+    """
+
+    @property
+    def vector(self) -> NDArray[np.floating[Any]]:
+        """The hidden state vector."""
+        ...
+
+    def l2_normalize(self) -> HiddenStateProtocol:
+        """Return L2-normalized version of this result."""
+        ...
+
 
 # ============================================================================
 # Data Classes for Results
@@ -148,10 +174,10 @@ class DirectionalCoverageResult:
     ambient_dim: int  # Original dimensionality
     effective_dim: int  # Dimensions needed for 95% variance
     effective_dim_99: int  # Dimensions needed for 99% variance
-    variance_explained: np.ndarray  # Per-component variance
+    variance_explained: NDArray[np.floating[Any]]  # Per-component variance ratios (1D)
     spherical_uniformity: float  # 0-1, how uniform on unit sphere
     coverage_ratio: float  # effective_dim / ambient_dim
-    principal_angles: np.ndarray  # Angles of top principal components
+    principal_angles: NDArray[np.floating[Any]]  # Angles of top principal components (1D)
     isotropy_score: float  # How isotropic (vs elongated) the distribution is
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -188,10 +214,10 @@ class Grain:
     reachability in cosine space, not by tube intersection geometry.
     """
 
-    center: np.ndarray  # Centroid of the grain
+    center: NDArray[np.floating[Any]]  # Centroid of the grain (1D, n_features)
     members: list[int]  # Indices of vectors in this grain
     density: float  # Local density
-    principal_directions: np.ndarray  # Local PCA directions
+    principal_directions: NDArray[np.floating[Any]]  # Local PCA directions (2D, n_components x n_features)
     local_dim: int  # Local effective dimensionality
     aspect_ratio: float  # Elongation (1.0 = spherical)
 
@@ -604,12 +630,24 @@ def analyze_grains(
     if eps is None:
         # Use k-th nearest neighbor distance heuristic
         k = min(min_samples, n_samples - 1)
-        distances = cdist(normalized, normalized)
-        np.fill_diagonal(distances, np.inf)
-        kth_distances = np.partition(distances, k, axis=1)[:, k]
-        # 1.5x median k-NN distance provides slack for natural cluster
-        # separation while avoiding over-merging (common DBSCAN heuristic)
-        eps = float(np.median(kth_distances) * 1.5)
+        if k < 1:
+            # Too few samples for k-NN, use default eps
+            eps = 0.5
+        else:
+            distances = cdist(normalized, normalized)
+            np.fill_diagonal(distances, np.inf)
+            kth_distances = np.partition(distances, k, axis=1)[:, k]
+            # Filter out inf values before computing median
+            finite_distances = kth_distances[np.isfinite(kth_distances)]
+            if len(finite_distances) == 0:
+                eps = 0.5  # Default fallback
+            else:
+                # 1.5x median k-NN distance provides slack for natural cluster
+                # separation while avoiding over-merging (common DBSCAN heuristic)
+                eps = float(np.median(finite_distances) * 1.5)
+                # Ensure eps is positive and finite
+                if not np.isfinite(eps) or eps <= 0:
+                    eps = 0.5
 
     # Cluster using DBSCAN (finds dense regions)
     clustering = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine')
@@ -784,12 +822,14 @@ class BilateralGeometryResult:
             # weights = [0.3, 0.3, 0.2, 0.2]
             # return sum(weights) / sum(w/c for w, c in zip(weights, components))
         """
-        return float(
-            self.directional_alignment ** 0.3 *
-            self.subspace_overlap ** 0.3 *
-            self.grain_alignment ** 0.2 *
-            self.density_similarity ** 0.2
-        )
+        # Clamp components to [0, 1] to avoid complex numbers from negative bases
+        # (e.g., directional_alignment can be negative if directions oppose)
+        da = max(0.0, min(1.0, self.directional_alignment))
+        so = max(0.0, min(1.0, self.subspace_overlap))
+        ga = max(0.0, min(1.0, self.grain_alignment))
+        ds = max(0.0, min(1.0, self.density_similarity))
+
+        return float(da ** 0.3 * so ** 0.3 * ga ** 0.2 * ds ** 0.2)
 
 
 def compare_bilateral_geometry(
@@ -977,20 +1017,28 @@ def analyze_kakeya_geometry(
 
 
 def analyze_hidden_state_batch(
-    hidden_state_results: list[Any],  # list[HiddenStateResult]
+    hidden_state_results: list[HiddenStateProtocol | Any],
     normalize: bool = True,
 ) -> KakeyaGeometryReport:
     """Analyze a batch of HiddenStateResult objects from TheLoom.
 
     Parameters:
-        hidden_state_results: List of HiddenStateResult from TheLoom extraction
+        hidden_state_results: List of objects conforming to HiddenStateProtocol
+            (or duck-typed equivalents with `vector` attribute or `to_list` method)
         normalize: Whether to L2-normalize before analysis
 
     Returns:
         KakeyaGeometryReport for the batch
+
+    Note:
+        Accepts any object with:
+        - A `vector` property returning an ndarray, OR
+        - A `to_list()` method returning list[float], OR
+        - Direct conversion to ndarray via np.array()
+        Optionally with `l2_normalize()` method for normalization.
     """
     # Extract vectors
-    vectors = []
+    vectors: list[NDArray[np.floating[Any]]] = []
     for result in hidden_state_results:
         if normalize and hasattr(result, 'l2_normalize'):
             result = result.l2_normalize()
@@ -1002,8 +1050,8 @@ def analyze_hidden_state_batch(
         else:
             vectors.append(np.array(result).flatten())
 
-    vectors = np.stack(vectors)
-    return analyze_kakeya_geometry(vectors)
+    stacked = np.stack(vectors)
+    return analyze_kakeya_geometry(stacked)
 
 
 # ============================================================================

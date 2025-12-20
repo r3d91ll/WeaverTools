@@ -358,12 +358,12 @@ class BilateralAnalysisRequest(BaseModel):
     sender_vectors: list[list[float]] = Field(
         ...,
         description="Hidden state vectors from sending agent [n_samples, hidden_dim]",
-        min_length=1,
+        min_length=3,
     )
     receiver_vectors: list[list[float]] = Field(
         ...,
         description="Hidden state vectors from receiving agent [n_samples, hidden_dim]",
-        min_length=1,
+        min_length=3,
     )
 
 

@@ -682,8 +682,8 @@ class TestGeometryAnalysisEndpoints:
 
     def test_analyze_bilateral_dimension_mismatch(self, mock_config):
         """Test bilateral comparison fails with mismatched dimensions."""
-        sender = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]  # dim=3
-        receiver = [[0.1, 0.2], [0.3, 0.4]]  # dim=2
+        sender = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]  # dim=3
+        receiver = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]  # dim=2
 
         with patch("src.transport.http.GPUManager"):
             app = create_http_app(mock_config)

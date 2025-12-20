@@ -525,6 +525,8 @@ def analyze_grains(
         distances = cdist(normalized, normalized)
         np.fill_diagonal(distances, np.inf)
         kth_distances = np.partition(distances, k, axis=1)[:, k]
+        # 1.5x median k-NN distance provides slack for natural cluster
+        # separation while avoiding over-merging (common DBSCAN heuristic)
         eps = float(np.median(kth_distances) * 1.5)
 
     # Cluster using DBSCAN (finds dense regions)
@@ -654,8 +656,9 @@ class BilateralGeometryResult:
     def overall_alignment(self) -> float:
         """Weighted overall alignment score with zero-propagation.
 
-        Uses multiplicative structure so any zero component yields zero overall,
-        following the conveyance framework's zero-propagation principle.
+        Uses geometric mean (multiplicative structure) so any zero component
+        yields zero overall. This is a similarity metric, not a conveyance
+        capacity measure, so geometric mean is preferred over harmonic mean.
         """
         return float(
             self.directional_alignment ** 0.3 *

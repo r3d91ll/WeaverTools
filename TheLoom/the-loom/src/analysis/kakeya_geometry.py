@@ -652,12 +652,16 @@ class BilateralGeometryResult:
 
     @property
     def overall_alignment(self) -> float:
-        """Weighted overall alignment score."""
-        return (
-            0.3 * self.directional_alignment +
-            0.3 * self.subspace_overlap +
-            0.2 * self.grain_alignment +
-            0.2 * self.density_similarity
+        """Weighted overall alignment score with zero-propagation.
+
+        Uses multiplicative structure so any zero component yields zero overall,
+        following the conveyance framework's zero-propagation principle.
+        """
+        return float(
+            self.directional_alignment ** 0.3 *
+            self.subspace_overlap ** 0.3 *
+            self.grain_alignment ** 0.2 *
+            self.density_similarity ** 0.2
         )
 
 

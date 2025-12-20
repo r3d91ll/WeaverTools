@@ -8,7 +8,7 @@ This document describes how to integrate the `kakeya_geometry.py` module with Th
 
 The `kakeya_geometry.py` module is located in the analysis directory:
 
-```
+```text
 TheLoom/
 └── the-loom/
     └── src/
@@ -82,7 +82,7 @@ if return_hidden_states and hidden_state_result:
 
 ```python
 import numpy as np
-from kakeya_geometry import analyze_kakeya_geometry
+from the_loom.src.analysis import analyze_kakeya_geometry
 
 def experiment_1_baseline(model_loader, test_prompts: list[str]):
     """Compare real hidden states to random baseline."""
@@ -180,7 +180,7 @@ This mirrors the "hunchback" pattern observed in intrinsic dimension research.
 **Question:** Does geometric alignment predict successful information transfer?
 
 ```python
-from kakeya_geometry import compare_bilateral_geometry, run_conveyance_experiment
+from the_loom.src.analysis import compare_bilateral_geometry, run_conveyance_experiment
 
 def experiment_3_bilateral(weaver_session):
     """Test if Kakeya geometry alignment predicts conveyance success."""
@@ -333,7 +333,7 @@ Coverage quality thresholds:
 
 After running experiments, use this framework:
 
-```
+```text
 IF baseline_experiment shows real ≠ random geometry:
     → Transformers learn structured representations (continue)
 ELSE:

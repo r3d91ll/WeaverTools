@@ -184,7 +184,7 @@ class TestLoaderRegistry:
 
         assert config["device"] == "cuda:0"
         assert config["dtype"] == "auto"
-        assert config["trust_remote_code"] is True
+        assert config["trust_remote_code"] is False  # Secure default
 
     def test_get_model_config_with_override(self):
         registry = LoaderRegistry(

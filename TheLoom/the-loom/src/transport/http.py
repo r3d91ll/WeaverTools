@@ -429,7 +429,7 @@ class BilateralAnalysisResponse(BaseModel):
     """
 
     directional_alignment: float = Field(
-        description="Cosine similarity of mean directions [0,1]"
+        description="Cosine similarity of mean directions [-1,1]"
     )
     subspace_overlap: float = Field(
         description="Principal subspace alignment [0,1]"

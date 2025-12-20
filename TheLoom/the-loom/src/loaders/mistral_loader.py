@@ -209,7 +209,8 @@ class MistralTokenizerWrapper:
             decode_kwargs["special_token_policy"] = SpecialTokenPolicy.IGNORE
 
         # Use the underlying tekken tokenizer for decoding
-        return self._tekken.decode(token_ids, **decode_kwargs)
+        result: str = self._tekken.decode(token_ids, **decode_kwargs)
+        return result
 
     def to(self, device: torch.device | str) -> MistralTokenizerWrapper:
         """No-op for device placement (tokenizers don't need GPU)."""

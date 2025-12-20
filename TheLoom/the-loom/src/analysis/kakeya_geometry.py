@@ -658,8 +658,30 @@ class BilateralGeometryResult:
         """Weighted overall alignment score with zero-propagation.
 
         Uses geometric mean (multiplicative structure) so any zero component
-        yields zero overall. This is a similarity metric, not a conveyance
-        capacity measure, so geometric mean is preferred over harmonic mean.
+        yields zero overall.
+
+        DESIGN DECISION (2024-12): Geometric mean vs Harmonic mean
+        -----------------------------------------------------------
+        This is a SIMILARITY metric measuring how well sender/receiver
+        geometries "comport" with each other in high-dimensional space.
+
+        - Geometric mean: Appropriate for similarity/compatibility metrics.
+          Measures structural alignment without bottleneck semantics.
+
+        - Harmonic mean: Appropriate for CAPACITY metrics (like C_pair in
+          the Conveyance Framework). Captures "limited by weakest link"
+          semantics where transfer is bounded by the lesser participant.
+
+        Current choice: Geometric mean, because alignment can be high even
+        when capacity is low (compatible structure doesn't guarantee high
+        throughput). If empirical results show alignment should predict
+        transfer success more directly, consider switching to harmonic mean:
+
+            # Harmonic mean alternative:
+            # components = [self.directional_alignment, self.subspace_overlap,
+            #               self.grain_alignment, self.density_similarity]
+            # weights = [0.3, 0.3, 0.2, 0.2]
+            # return sum(weights) / sum(w/c for w, c in zip(weights, components))
         """
         return float(
             self.directional_alignment ** 0.3 *

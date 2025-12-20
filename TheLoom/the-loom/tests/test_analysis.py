@@ -215,9 +215,11 @@ class TestBilateralComparison:
         sender = np.random.randn(50, 128)
         # Create receiver in a different subspace
         receiver = np.random.randn(50, 128)
-        # Orthogonalize receiver against sender mean
+        # Orthogonalize each receiver row against sender mean
         sender_mean = sender.mean(axis=0)
-        receiver = receiver - np.outer(receiver @ sender_mean, sender_mean) / np.dot(sender_mean, sender_mean)
+        # Per-row scalar projection onto sender_mean, then subtract projection
+        projections = (receiver @ sender_mean)[:, None] * sender_mean / np.dot(sender_mean, sender_mean)
+        receiver = receiver - projections
 
         bilateral = compare_bilateral_geometry(sender, receiver)
 

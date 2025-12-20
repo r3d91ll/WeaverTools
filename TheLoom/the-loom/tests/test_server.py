@@ -581,6 +581,9 @@ class TestGeometryAnalysisEndpoints:
             assert data["grain_analysis"]["mean_grain_size"] >= 0
             assert data["grain_analysis"]["mean_aspect_ratio"] >= 0
 
+            # Check timing field
+            assert data["analysis_time_ms"] > 0
+
     def test_analyze_geometry_minimum_vectors(self, mock_config):
         """Test geometry analysis with minimum required vectors (3)."""
         import numpy as np

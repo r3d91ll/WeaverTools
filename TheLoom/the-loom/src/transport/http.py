@@ -416,6 +416,9 @@ class GeometryAnalysisResponse(BaseModel):
     wolf_axiom: WolfAxiomResponse
     directional_coverage: DirectionalCoverageResponse
     grain_analysis: GrainAnalysisResponse
+    analysis_time_ms: float = Field(
+        description="Time spent on analysis in milliseconds"
+    )
 
 
 class BilateralAnalysisResponse(BaseModel):
@@ -1483,6 +1486,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     mean_grain_size=report.grain_analysis.mean_grain_size,
                     mean_aspect_ratio=report.grain_analysis.mean_aspect_ratio,
                 ),
+                analysis_time_ms=analysis_time,
             )
 
         except HTTPException:

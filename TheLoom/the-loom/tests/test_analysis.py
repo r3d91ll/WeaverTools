@@ -156,6 +156,16 @@ class TestDirectionalCoverage:
         # Effective dim should be close to 5
         assert result.effective_dim <= 10  # Some tolerance
 
+    def test_directional_coverage_deterministic(self) -> None:
+        """Test that results are deterministic with same random state."""
+        vectors = np.random.randn(100, 64)
+
+        result1 = analyze_directional_coverage(vectors, random_state=42)
+        result2 = analyze_directional_coverage(vectors, random_state=42)
+
+        assert result1.spherical_uniformity == result2.spherical_uniformity
+        assert result1.effective_dim == result2.effective_dim
+
 
 class TestGrainAnalysis:
     """Tests for grain (cluster) detection."""

@@ -472,6 +472,7 @@ def analyze_directional_coverage(
     vectors: np.ndarray,
     variance_threshold_95: float = 0.95,
     variance_threshold_99: float = 0.99,
+    random_state: int | None = None,
 ) -> DirectionalCoverageResult:
     """Analyze how completely vectors cover the available directions.
 
@@ -483,6 +484,7 @@ def analyze_directional_coverage(
         vectors: Array of shape (n_samples, n_features)
         variance_threshold_95: Variance threshold for effective_dim
         variance_threshold_99: Variance threshold for effective_dim_99
+        random_state: Random state for reproducibility (used in spherical uniformity)
 
     Returns:
         DirectionalCoverageResult with coverage analysis
@@ -516,7 +518,8 @@ def analyze_directional_coverage(
     norms = np.where(norms > 0, norms, 1)
     normalized = vectors / norms
 
-    spherical_uniformity = _compute_spherical_uniformity(normalized)
+    rng = np.random.RandomState(random_state) if random_state is not None else None
+    spherical_uniformity = _compute_spherical_uniformity(normalized, rng=rng)
 
     # Isotropy score: ratio of smallest to largest eigenvalue
     # 1.0 = perfectly isotropic, 0.0 = completely anisotropic
@@ -544,11 +547,18 @@ def analyze_directional_coverage(
     )
 
 
-def _compute_spherical_uniformity(normalized_vectors: np.ndarray) -> float:
+def _compute_spherical_uniformity(
+    normalized_vectors: np.ndarray,
+    rng: np.random.RandomState | None = None,
+) -> float:
     """Compute how uniformly vectors are distributed on the unit sphere.
 
     Uses pairwise cosine similarity distribution. For uniform distribution
     on high-dimensional sphere, pairwise cosines should be ~N(0, 1/d).
+
+    Parameters:
+        normalized_vectors: L2-normalized vectors
+        rng: Random state for reproducibility (used when sampling pairs)
 
     Returns value in [0, 1] where 1 = perfectly uniform.
     """
@@ -557,12 +567,15 @@ def _compute_spherical_uniformity(normalized_vectors: np.ndarray) -> float:
     if n_samples < 10:
         return 0.5  # Not enough samples to assess
 
+    if rng is None:
+        rng = np.random.RandomState()
+
     # Sample pairwise cosine similarities (avoid O(n²) for large n)
     max_pairs = 5000
     if n_samples * (n_samples - 1) // 2 > max_pairs:
         # Random sample of pairs
-        idx1 = np.random.randint(0, n_samples, max_pairs)
-        idx2 = np.random.randint(0, n_samples, max_pairs)
+        idx1 = rng.randint(0, n_samples, max_pairs)
+        idx2 = rng.randint(0, n_samples, max_pairs)
         # Ensure different indices
         mask = idx1 != idx2
         idx1, idx2 = idx1[mask], idx2[mask]

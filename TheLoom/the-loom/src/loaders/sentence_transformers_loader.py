@@ -244,7 +244,7 @@ class SentenceTransformersLoader(ModelLoader):
         # Encode the prompt to get hidden states
         # We use encode with output_value parameter to get embeddings
         with torch.no_grad():
-            embedding = model.encode(  # type: ignore[operator]
+            embedding = model.encode(
                 prompt,
                 convert_to_tensor=True,
                 show_progress_bar=False,
@@ -313,7 +313,7 @@ class SentenceTransformersLoader(ModelLoader):
 
         # Encode using sentence-transformers
         with torch.no_grad():
-            embedding = model.encode(  # type: ignore[operator]
+            embedding = model.encode(
                 text,
                 convert_to_tensor=True,
                 normalize_embeddings=normalize,
@@ -362,7 +362,7 @@ class SentenceTransformersLoader(ModelLoader):
         """
         model = loaded_model.model
 
-        embeddings: np.ndarray = model.encode(  # type: ignore[operator]
+        embeddings: np.ndarray = model.encode(
             texts,
             batch_size=batch_size,
             normalize_embeddings=normalize,

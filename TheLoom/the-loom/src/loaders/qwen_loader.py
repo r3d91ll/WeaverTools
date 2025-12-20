@@ -337,7 +337,7 @@ class QwenLoader(ModelLoader):
         start_time = time.time()
 
         with torch.no_grad():
-            outputs = model.generate(**inputs, **gen_kwargs)  # type: ignore[operator]
+            outputs = model.generate(**inputs, **gen_kwargs)
 
         inference_time = time.time() - start_time
 

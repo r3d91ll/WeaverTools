@@ -498,7 +498,7 @@ class CustomLoader(ModelLoader):
 
         with torch.no_grad():
             try:
-                outputs = model.generate(**inputs, **gen_kwargs)  # type: ignore[operator]
+                outputs = model.generate(**inputs, **gen_kwargs)
             except Exception as e:
                 raise RuntimeError(
                     f"Generation failed for model {loaded_model.model_id}: {e}"

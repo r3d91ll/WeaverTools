@@ -83,7 +83,7 @@ class LoadedModel:
         """
         if isinstance(device, str):
             device = torch.device(device)
-        self.model = self.model.to(device)  # type: ignore[arg-type]
+        self.model = self.model.to(device)
         self.device = device
         return self
 

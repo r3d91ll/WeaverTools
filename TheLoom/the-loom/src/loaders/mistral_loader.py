@@ -209,7 +209,8 @@ class MistralTokenizerWrapper:
             decode_kwargs["special_token_policy"] = SpecialTokenPolicy.IGNORE
 
         # Use the underlying tekken tokenizer for decoding
-        return self._tekken.decode(token_ids, **decode_kwargs)
+        result: str = self._tekken.decode(token_ids, **decode_kwargs)
+        return result
 
     def to(self, device: torch.device | str) -> MistralTokenizerWrapper:
         """No-op for device placement (tokenizers don't need GPU)."""
@@ -547,7 +548,7 @@ class MistralLoader(ModelLoader):
         start_time = time.time()
 
         with torch.no_grad():
-            outputs = model.generate(**inputs, **gen_kwargs)  # type: ignore[operator]
+            outputs = model.generate(**inputs, **gen_kwargs)
 
         inference_time = time.time() - start_time
 

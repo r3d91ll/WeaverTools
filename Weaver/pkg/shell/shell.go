@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -328,26 +329,19 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid count: %s", args[1])
 		}
+		if n <= 0 {
+			return fmt.Errorf("count must be positive")
+		}
+		if n > 100 {
+			return fmt.Errorf("count exceeds maximum (100)")
+		}
 		count = n
 	}
 
-	// Find an agent with hidden state support (deterministic selection)
-	var extractAgent *runtime.Agent
-	status := s.agents.Status(ctx)
-	names := make([]string, 0, len(status))
-	for name := range status {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		agent, ok := s.agents.Get(name)
-		if ok && agent.SupportsHiddenStates() {
-			extractAgent = agent
-			break
-		}
-	}
-	if extractAgent == nil {
-		return fmt.Errorf("no agent with hidden state support available")
+	// Find an agent with hidden state support
+	extractAgent, err := s.findHiddenStateAgent(ctx)
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("\033[33mExtracting %d samples for '%s' using %s...\033[0m\n", count, concept, extractAgent.Name())
@@ -504,23 +498,10 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 		iterations = n
 	}
 
-	// Find an agent with hidden state support (deterministic selection)
-	var extractAgent *runtime.Agent
-	status := s.agents.Status(ctx)
-	names := make([]string, 0, len(status))
-	for name := range status {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		agent, ok := s.agents.Get(name)
-		if ok && agent.SupportsHiddenStates() {
-			extractAgent = agent
-			break
-		}
-	}
-	if extractAgent == nil {
-		return fmt.Errorf("no agent with hidden state support available")
+	// Find an agent with hidden state support
+	extractAgent, err := s.findHiddenStateAgent(ctx)
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("\033[33mValidating '%s' with %d iterations...\033[0m\n\n", concept, iterations)
@@ -565,7 +546,7 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 	fmt.Printf("\n\033[36m=== Consistency Report ===\033[0m\n")
 
 	var sumDeff, sumCoverage, sumDensity float64
-	var minDeff, maxDeff int = 999999, 0
+	var minDeff, maxDeff int = math.MaxInt, 0
 	var minCoverage, maxCoverage float64 = 1.0, 0.0
 
 	for _, r := range results {
@@ -685,6 +666,24 @@ func formatHealth(health string) string {
 		return "\033[33m" + health + "\033[0m"
 	}
 	return "\033[31m" + health + "\033[0m"
+}
+
+// findHiddenStateAgent returns the first agent that supports hidden states,
+// selected deterministically by sorted name.
+func (s *Shell) findHiddenStateAgent(ctx context.Context) (*runtime.Agent, error) {
+	status := s.agents.Status(ctx)
+	names := make([]string, 0, len(status))
+	for name := range status {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		agent, ok := s.agents.Get(name)
+		if ok && agent.SupportsHiddenStates() {
+			return agent, nil
+		}
+	}
+	return nil, fmt.Errorf("no agent with hidden state support available")
 }
 
 // Close closes the shell.

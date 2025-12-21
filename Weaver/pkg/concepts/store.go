@@ -228,9 +228,7 @@ func (s *Store) Save(dir string) error {
 
 // Load loads concepts from a directory.
 func (s *Store) Load(dir string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// Perform I/O outside the lock
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -239,6 +237,8 @@ func (s *Store) Load(dir string) error {
 		return err
 	}
 
+	// Read and unmarshal files outside the lock
+	loaded := make(map[string]*Concept)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -255,7 +255,14 @@ func (s *Store) Load(dir string) error {
 			return fmt.Errorf("unmarshal %s: %w", entry.Name(), err)
 		}
 
-		s.concepts[concept.Name] = &concept
+		loaded[concept.Name] = &concept
+	}
+
+	// Acquire lock only for map update
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, concept := range loaded {
+		s.concepts[name] = concept
 	}
 
 	return nil

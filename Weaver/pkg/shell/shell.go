@@ -490,6 +490,12 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid iterations: %s", args[1])
 		}
+		if n <= 0 {
+			return fmt.Errorf("iterations must be positive")
+		}
+		if n > 20 {
+			return fmt.Errorf("iterations exceeds maximum (20)")
+		}
 		iterations = n
 	}
 

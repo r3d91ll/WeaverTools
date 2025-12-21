@@ -57,11 +57,6 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		defaultAgent = "senior"
 	}
 
-	loomURL := cfg.LoomURL
-	if loomURL == "" {
-		loomURL = "http://localhost:8080"
-	}
-
 	return &Shell{
 		agents:         agents,
 		session:        session,
@@ -69,7 +64,7 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		rl:             rl,
 		defaultAgent:   defaultAgent,
 		conceptStore:   concepts.NewStore(),
-		analysisClient: analysis.NewClient(loomURL),
+		analysisClient: analysis.NewClient(cfg.LoomURL), // NewClient defaults to localhost:8080
 	}, nil
 }
 
@@ -522,7 +517,11 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 			continue
 		}
 
-		tempConcept, _ := tempStore.Get(concept)
+		tempConcept, ok := tempStore.Get(concept)
+		if !ok {
+			fmt.Printf(" \033[31mfailed: concept not found after extraction\033[0m\n")
+			continue
+		}
 		vectors := tempConcept.VectorsAsFloat64()
 
 		fmt.Printf(" analyzing...")
@@ -651,7 +650,10 @@ func (s *Shell) printConcepts() {
 
 	fmt.Println("Stored concepts:")
 	for name, count := range concepts {
-		concept, _ := s.conceptStore.Get(name)
+		concept, ok := s.conceptStore.Get(name)
+		if !ok {
+			continue // Skip if somehow missing
+		}
 		dim := concept.Dimension()
 		fmt.Printf("  %-15s %3d samples (%d-dim)\n", name, count, dim)
 	}
@@ -660,12 +662,14 @@ func (s *Shell) printConcepts() {
 
 // formatHealth formats the health status with color.
 func formatHealth(health string) string {
-	if strings.HasPrefix(health, "healthy") {
+	switch {
+	case strings.HasPrefix(health, "healthy"):
 		return "\033[32m" + health + "\033[0m"
-	} else if strings.HasPrefix(health, "warning") {
+	case strings.HasPrefix(health, "warning"):
 		return "\033[33m" + health + "\033[0m"
+	default:
+		return "\033[31m" + health + "\033[0m"
 	}
-	return "\033[31m" + health + "\033[0m"
 }
 
 // findHiddenStateAgent returns the first agent that supports hidden states,

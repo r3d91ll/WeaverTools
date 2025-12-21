@@ -44,6 +44,38 @@ func (c *Concept) Dimension() int {
 	return 0
 }
 
+// ValidateDimensions checks that all samples have consistent dimensions.
+// Returns the dimension and any mismatched sample IDs.
+func (c *Concept) ValidateDimensions() (dim int, mismatched []string) {
+	if len(c.Samples) == 0 {
+		return 0, nil
+	}
+
+	// Find the first valid dimension
+	for _, s := range c.Samples {
+		if s.HiddenState != nil && s.HiddenState.Dimension() > 0 {
+			dim = s.HiddenState.Dimension()
+			break
+		}
+	}
+
+	if dim == 0 {
+		return 0, nil
+	}
+
+	// Check all samples against the expected dimension
+	for _, s := range c.Samples {
+		if s.HiddenState == nil {
+			continue
+		}
+		if s.HiddenState.Dimension() != dim {
+			mismatched = append(mismatched, s.ID)
+		}
+	}
+
+	return dim, mismatched
+}
+
 // Vectors returns all hidden state vectors as [][]float32.
 // Skips samples without hidden states.
 func (c *Concept) Vectors() [][]float32 {
@@ -102,12 +134,25 @@ func (s *Store) Add(conceptName string, sample Sample) {
 }
 
 // Get retrieves a concept by name.
+// The returned Concept is a copy to prevent external mutation of internal state.
 func (s *Store) Get(name string) (*Concept, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	concept, ok := s.concepts[name]
-	return concept, ok
+	if !ok {
+		return nil, false
+	}
+
+	// Return a shallow copy to protect internal state
+	cpy := &Concept{
+		Name:      concept.Name,
+		Samples:   make([]Sample, len(concept.Samples)),
+		CreatedAt: concept.CreatedAt,
+		UpdatedAt: concept.UpdatedAt,
+	}
+	copy(cpy.Samples, concept.Samples)
+	return cpy, true
 }
 
 // List returns all concept names with sample counts.
@@ -153,19 +198,26 @@ func (s *Store) Count() int {
 
 // Save persists all concepts to a directory.
 func (s *Store) Save(dir string) error {
+	// Copy data under lock, then release before I/O
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	toSave := make(map[string][]byte)
+	for name, concept := range s.concepts {
+		data, err := json.MarshalIndent(concept, "", "  ")
+		if err != nil {
+			s.mu.RUnlock()
+			return fmt.Errorf("marshal %s: %w", name, err)
+		}
+		toSave[name] = data
+	}
+	s.mu.RUnlock()
 
+	// Perform I/O without holding the lock
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	for name, concept := range s.concepts {
+	for name, data := range toSave {
 		path := filepath.Join(dir, name+".json")
-		data, err := json.MarshalIndent(concept, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshal %s: %w", name, err)
-		}
 		if err := os.WriteFile(path, data, 0644); err != nil {
 			return fmt.Errorf("write %s: %w", name, err)
 		}

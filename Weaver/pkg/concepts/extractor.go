@@ -14,14 +14,23 @@ import (
 type Extractor struct {
 	backend backend.Backend
 	store   *Store
+	model   string // Model to use for extraction
 }
 
 // NewExtractor creates a new concept extractor.
+// The model parameter specifies which model to use; if empty, uses the backend's default.
 func NewExtractor(b backend.Backend, store *Store) *Extractor {
 	return &Extractor{
 		backend: b,
 		store:   store,
+		model:   "", // Use backend default
 	}
+}
+
+// WithModel sets the model to use for extraction.
+func (e *Extractor) WithModel(model string) *Extractor {
+	e.model = model
+	return e
 }
 
 // ExtractionConfig controls the extraction process.
@@ -96,6 +105,7 @@ func (e *Extractor) Extract(ctx context.Context, cfg ExtractionConfig) (*Extract
 // extractSingle extracts a single concept example.
 func (e *Extractor) extractSingle(ctx context.Context, prompt string, cfg ExtractionConfig) (Sample, error) {
 	req := backend.ChatRequest{
+		Model: e.model, // Use configured model (empty uses backend default)
 		Messages: []backend.ChatMessage{
 			{Role: "user", Content: prompt},
 		},

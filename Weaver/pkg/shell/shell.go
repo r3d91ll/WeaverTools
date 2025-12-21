@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -330,9 +331,15 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 		count = n
 	}
 
-	// Find an agent with hidden state support
+	// Find an agent with hidden state support (deterministic selection)
 	var extractAgent *runtime.Agent
-	for name := range s.agents.Status(ctx) {
+	status := s.agents.Status(ctx)
+	names := make([]string, 0, len(status))
+	for name := range status {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		agent, ok := s.agents.Get(name)
 		if ok && agent.SupportsHiddenStates() {
 			extractAgent = agent
@@ -497,9 +504,15 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 		iterations = n
 	}
 
-	// Find an agent with hidden state support
+	// Find an agent with hidden state support (deterministic selection)
 	var extractAgent *runtime.Agent
-	for name := range s.agents.Status(ctx) {
+	status := s.agents.Status(ctx)
+	names := make([]string, 0, len(status))
+	for name := range status {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		agent, ok := s.agents.Get(name)
 		if ok && agent.SupportsHiddenStates() {
 			extractAgent = agent

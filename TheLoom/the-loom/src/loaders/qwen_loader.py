@@ -577,15 +577,28 @@ class QwenLoader(ModelLoader):
         pooling: str = "last_token",
         **kwargs: Any,
     ) -> EmbeddingOutput:
-        """Extract embedding from text.
+        """
+        Compute an embedding for the given text using the provided loaded model and pooling strategy.
 
-        Args:
-            loaded_model: Previously loaded model
-            text: Text to embed
-            pooling: Pooling strategy (last_token, mean, first_token)
+        The default "last_token" pooling is recommended for decoder-only models because the final
+        token's hidden state accumulates context from all previous tokens via causal attention.
+
+        Parameters:
+            loaded_model (LoadedModel): Loaded model container with `.model`, `.tokenizer`, `.device`.
+            text (str): Input text to embed.
+            pooling (str): Pooling strategy to reduce token-level hidden states to a single vector:
+                - "last_token": Use the last non-padding token's hidden state (recommended).
+                - "mean": Mean-pool hidden states across non-padding tokens.
+                - "first_token": Use the first token's hidden state.
 
         Returns:
-            EmbeddingOutput with embedding tensor
+            EmbeddingOutput: Contains:
+                - embedding: CPU tensor of the resulting embedding (batch dimension removed).
+                - shape: Shape of the embedding tensor.
+                - metadata: Dict with keys including "pooling", "inference_time_ms", etc.
+
+        Raises:
+            ValueError: If an unknown pooling strategy is provided.
         """
         model = loaded_model.model
         tokenizer = loaded_model.tokenizer
@@ -606,27 +619,43 @@ class QwenLoader(ModelLoader):
 
         inference_time = time.time() - start_time
 
-        # Get last layer hidden states
+        # Get last layer hidden states: [batch, seq_len, hidden_size]
+        # Index -1 retrieves the final transformer layer's output (best for embeddings).
         last_hidden = outputs.hidden_states[-1]
 
-        # Apply pooling
+        # Apply pooling strategy to reduce token-level representations to a single vector.
+        # For decoder-only models, last_token is preferred because the final position
+        # has "seen" all previous tokens via causal attention, accumulating full context.
         attention_mask = inputs.attention_mask
         if pooling == "last_token":
+            # Use attention_mask to find the actual last token (not padding).
+            # attention_mask is 1 for real tokens, 0 for padding.
+            # sum(dim=1) gives sequence lengths; subtract 1 to get 0-indexed position.
             seq_lengths = attention_mask.sum(dim=1) - 1
             batch_size = last_hidden.shape[0]
+            # Advanced indexing: select [batch_i, seq_lengths[batch_i], :] for each batch.
+            # This correctly handles variable-length sequences in the same batch.
             embedding = last_hidden[torch.arange(batch_size, device=device), seq_lengths]
         elif pooling == "mean":
+            # Mean pooling: average all non-padding token representations.
+            # Expand mask to [batch, seq, 1] for broadcasting with hidden states.
             mask = attention_mask.unsqueeze(-1)
-            mask_sum = mask.sum(dim=1).clamp(min=1)  # Avoid division by zero
+            # Sum hidden states weighted by mask, divide by number of real tokens.
+            # clamp(min=1) prevents division by zero for edge cases.
+            mask_sum = mask.sum(dim=1).clamp(min=1)
             embedding = (last_hidden * mask).sum(dim=1) / mask_sum
         elif pooling == "first_token":
+            # First token (often [CLS] or BOS) - mainly for encoder-style models.
             embedding = last_hidden[:, 0, :]
         else:
-            raise ValueError(f"Unknown pooling: {pooling}")
+            raise ValueError(f"Unknown pooling: {pooling}. Use: last_token, mean, first_token")
 
+        # Transfer embedding to CPU for storage/serialization.
         embedding = embedding.cpu()
 
         return EmbeddingOutput(
+            # squeeze(0) removes the batch dimension [1, hidden_size] -> [hidden_size]
+            # for single-input API consistency. The caller expects a 1D embedding vector.
             embedding=embedding.squeeze(0),
             shape=tuple(embedding.shape),
             metadata={

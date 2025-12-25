@@ -78,4 +78,70 @@
 //	    Layer:  24,
 //	    DType:  "float32",
 //	})
+//
+// # HiddenState (Boundary Object)
+//
+// HiddenState is the boundary object that bridges the gap between what a model
+// "thinks" and what it says. It captures the semantic representation from an
+// intermediate layer of the language model - the high-dimensional vector that
+// exists just before projection to token probabilities.
+//
+// Use HiddenState when you need to:
+//   - Analyze the internal structure of what was communicated
+//   - Compare semantic representations between sender and receiver
+//   - Compute conveyance metrics (DEff, Beta, Alignment, CPair)
+//   - Study how meaning transforms as it passes between models
+//
+// A HiddenState contains:
+//   - Vector: The hidden state values (typically 2048-8192 float32 values)
+//   - Shape: Original tensor dimensions, e.g., [1, seq_len, hidden_dim]
+//   - Layer: Which transformer layer this was extracted from
+//   - DType: Data type, typically "float32"
+//
+// Memory note: Hidden states can be large (8-32KB each). Consider streaming
+// or lazy loading when processing many messages with hidden states.
+//
+// # Measurement (Conveyance Metrics)
+//
+// Measurement captures conveyance metrics from a single point in a conversation.
+// While Messages store what was said, Measurements quantify how effectively
+// meaning transferred between agents by analyzing their hidden states.
+//
+// Measurements live as a parallel collection under Session (not nested under
+// Conversation). They reference Conversation and Session by ID, enabling
+// flexible analysis workflows where measurements can be computed lazily or
+// by external analysis services.
+//
+// Use Measurement when you need to:
+//   - Quantify how well meaning transferred in a conversation turn
+//   - Track dimensional health of the representation space over time
+//   - Detect semantic collapse or drift patterns
+//   - Compare bilateral (both directions) vs unilateral conveyance
+//
+// Core conveyance metrics:
+//
+//	DEff (Effective Dimensionality): How many dimensions carry meaningful
+//	information. Higher is better - indicates a rich representation space.
+//
+//	Beta (β): Collapse indicator from the Conveyance Framework. Lower values
+//	indicate better dimensional preservation. Quality thresholds:
+//	  - Optimal:    β ∈ [1.5, 2.0) - ideal range
+//	  - Monitor:    β ∈ [2.0, 2.5) - acceptable, watch for drift
+//	  - Concerning: β ∈ [2.5, 3.0) - dimensional compression detected
+//	  - Critical:   β ≥ 3.0       - severe collapse, intervention needed
+//
+//	Alignment: Cosine similarity between sender and receiver hidden states.
+//	Measures how similar the semantic representations are (range: -1 to 1).
+//
+//	CPair (Bilateral Conveyance): Combined conveyance score when both sender
+//	and receiver hidden states are available. Requires IsBilateral() == true.
+//
+// Create a measurement for a conversation turn:
+//
+//	m := yarn.NewMeasurementForTurn(session.ID, conv.ID, turnNumber)
+//	m.SetSender(agentID, "Claude", "assistant", senderHidden)
+//	m.SetReceiver(agentID, "User", "user", receiverHidden)
+//	m.DEff = 1847
+//	m.Beta = 1.72
+//	m.BetaStatus = yarn.ComputeBetaStatus(m.Beta)
 package yarn

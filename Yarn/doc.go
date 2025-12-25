@@ -144,4 +144,110 @@
 //	m.DEff = 1847
 //	m.Beta = 1.72
 //	m.BetaStatus = yarn.ComputeBetaStatus(m.Beta)
+//
+// # Example: Complete Research Workflow
+//
+// This example demonstrates a complete workflow: creating a session, building
+// a conversation with messages, attaching hidden states for analysis, and
+// recording conveyance measurements.
+//
+//	// 1. Create a research session
+//	session := yarn.NewSession("alignment-study", "Testing Claude alignment")
+//	session.Config.MeasurementMode = yarn.MeasureActive
+//
+//	// 2. Get or create a conversation
+//	conv := session.ActiveConversation()
+//
+//	// 3. Add messages to the conversation
+//	userMsg := yarn.NewAgentMessage(
+//	    yarn.RoleUser,
+//	    "What is the meaning of life?",
+//	    "user-001",
+//	    "Human",
+//	)
+//	conv.Add(userMsg)
+//
+//	// 4. Create an assistant message with hidden state
+//	assistantMsg := yarn.NewAgentMessage(
+//	    yarn.RoleAssistant,
+//	    "The meaning of life is a philosophical question...",
+//	    "claude-001",
+//	    "Claude",
+//	)
+//
+//	// Attach the hidden state (boundary object from model internals)
+//	assistantMsg.WithHiddenState(&yarn.HiddenState{
+//	    Vector: extractedVector,  // []float32 from model layer
+//	    Shape:  []int{1, 1, 4096},
+//	    Layer:  24,
+//	    DType:  "float32",
+//	})
+//	conv.Add(assistantMsg)
+//
+//	// 5. Record a conveyance measurement for this exchange
+//	m := yarn.NewMeasurementForTurn(session.ID, conv.ID, 1)
+//	m.SetSender("claude-001", "Claude", "assistant", assistantMsg.HiddenState)
+//	m.SetReceiver("user-001", "Human", "user", nil) // No hidden state for human
+//	m.IsUnilateral = true // Only sender has hidden state
+//
+//	// Set the computed metrics (from your analysis code)
+//	m.DEff = 1847
+//	m.Beta = 1.72
+//	m.BetaStatus = yarn.ComputeBetaStatus(m.Beta) // Returns BetaOptimal
+//	m.Alignment = 0.89
+//	m.MessageContent = assistantMsg.Content
+//
+//	// Add measurement to session
+//	session.AddMeasurement(m)
+//
+//	// 6. Check session statistics
+//	stats := session.Stats()
+//	fmt.Printf("Messages: %d, Measurements: %d, Avg β: %.2f\n",
+//	    stats.MessageCount, stats.MeasurementCount, stats.AvgBeta)
+//
+//	// 7. End session and export data
+//	session.End()
+//	if err := session.Export(); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// # Example: Bilateral Measurement
+//
+// When both sender and receiver are language models with hidden states,
+// you can perform bilateral conveyance analysis:
+//
+//	// Two AI agents conversing
+//	claudeMsg := yarn.NewAgentMessage(yarn.RoleAssistant, "Hello!", "claude-001", "Claude")
+//	claudeMsg.WithHiddenState(&yarn.HiddenState{Vector: claudeVector, Layer: 24, DType: "float32"})
+//	conv.Add(claudeMsg)
+//
+//	gptMsg := yarn.NewAgentMessage(yarn.RoleAssistant, "Hi there!", "gpt-001", "GPT-4")
+//	gptMsg.WithHiddenState(&yarn.HiddenState{Vector: gptVector, Layer: 32, DType: "float32"})
+//	conv.Add(gptMsg)
+//
+//	// Bilateral measurement with both hidden states
+//	m := yarn.NewMeasurementForTurn(session.ID, conv.ID, 1)
+//	m.SetSender("claude-001", "Claude", "assistant", claudeMsg.HiddenState)
+//	m.SetReceiver("gpt-001", "GPT-4", "assistant", gptMsg.HiddenState)
+//
+//	// Now IsBilateral() returns true, enabling CPair analysis
+//	if m.IsBilateral() {
+//	    m.CPair = computeBilateralConveyance(m.SenderHidden, m.ReceiverHidden)
+//	}
+//
+// # Example: Filtering Messages with Hidden States
+//
+// When you need to analyze only messages that have hidden state data:
+//
+//	// Get all messages with hidden states for batch analysis
+//	messagesWithStates := conv.MessagesWithHiddenStates()
+//	for _, msg := range messagesWithStates {
+//	    dim := msg.HiddenState.Dimension()
+//	    fmt.Printf("%s: %d-dimensional hidden state\n", msg.AgentName, dim)
+//	}
+//
+//	// Check individual messages
+//	if msg.HasHiddenState() {
+//	    analyzeHiddenState(msg.HiddenState)
+//	}
 package yarn

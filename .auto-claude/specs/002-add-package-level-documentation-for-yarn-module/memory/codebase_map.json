@@ -6,9 +6,9 @@
       "discovered_at": "2025-12-25T18:41:24.555442+00:00"
     },
     "Yarn/message.go": {
-      "description": "Type hierarchy: Message is atomic unit with optional *HiddenState. HiddenState is the \"boundary object\" containing semantic state before text projection (Vector typically 2048-8192 float32 values).",
+      "description": "HiddenState is the 'boundary object' - semantic state before text projection. Contains Vector ([]float32, typically 2048-8192 values = 8-32KB), Shape (tensor dimensions), Layer (extraction layer index), DType. Attached to Message via WithHiddenState() method. Represents the internal LLM representation before projection to token probabilities - key to conveyance measurement.",
       "category": "architecture",
-      "discovered_at": "2025-12-25T18:41:24.580777+00:00"
+      "discovered_at": "2025-12-25T18:43:19.807642+00:00"
     },
     "Weaver/pkg/analysis/client.go": {
       "description": "Package documentation style: First line synopsis, second line contextualizes purpose. Type comments start with type name and explain purpose. Method comments start with function name.",
@@ -26,10 +26,15 @@
       "discovered_at": "2025-12-25T18:41:24.576517+00:00"
     },
     "Yarn/measurement.go": {
-      "description": "Measurement captures conveyance metrics: DEff (effective dimensionality), Beta (collapse indicator), Alignment (cosine similarity), CPair (bilateral conveyance). BetaStatus categorizes quality (optimal, monitor, concerning, critical).",
+      "description": "Measurement and HiddenState integration: Measurement stores SenderHidden and ReceiverHidden as *HiddenState. This enables bilateral conveyance analysis (CPair) when both are present. IsBilateral() checks both exist. Core metrics are DEff (effective dimensionality), Beta (collapse indicator with BetaStatus quality categorization), Alignment (cosine similarity), and CPair (bilateral conveyance). Measurements link to Session/Conversation by ID strings, not direct references.",
       "category": "architecture",
-      "discovered_at": "2025-12-25T18:41:24.586678+00:00"
+      "discovered_at": "2025-12-25T18:43:19.802671+00:00"
+    },
+    "Yarn/": {
+      "description": "Type hierarchy mental model: Session \u2192 [*Conversation] \u2192 [*Message] with optional *HiddenState. Session also has [*Measurement] as a parallel collection (not nested under Conversation). Session is the top-level research container. Conversation is an ordered sequence of messages with participant tracking. Message is the atomic unit that can carry an optional HiddenState boundary object. Measurement captures conveyance metrics between sender/receiver at a point in time, storing its own copies of HiddenStates.",
+      "category": "architecture",
+      "discovered_at": "2025-12-25T18:43:19.796631+00:00"
     }
   },
-  "last_updated": "2025-12-25T18:41:24.586691+00:00"
+  "last_updated": "2025-12-25T18:43:19.807649+00:00"
 }

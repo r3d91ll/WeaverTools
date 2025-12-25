@@ -1,0 +1,162 @@
+{
+  "feature": "Add package-level documentation for Yarn module",
+  "description": "The Yarn package (conversation, message, measurement, session) has individual function comments but lacks package-level documentation explaining how these types work together. New developers must read all 4 source files to understand the data model for research sessions and conveyance measurements.",
+  "created_at": "2025-12-25T18:32:52.243Z",
+  "updated_at": "2025-12-25T18:40:00.000Z",
+  "status": "in_progress",
+  "planStatus": "complete",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Research & Planning",
+      "description": "Analyze existing code structure and documentation patterns to design comprehensive package documentation",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Review existing package documentation patterns in codebase",
+          "description": "Examine other packages (Wool, Weaver) to understand documentation conventions and style used in this project",
+          "status": "completed",
+          "files": [
+            "Wool/agent.go",
+            "Wool/role.go",
+            "Weaver/pkg/analysis/client.go"
+          ],
+          "estimated_effort": "small",
+          "notes": "Examined Wool/role.go, Wool/agent.go, Weaver/pkg/analysis/client.go. Found documentation conventions: two-line package doc format (synopsis + metaphor), type comments start with type name, complete sentences, domain concepts woven in. No doc.go files exist yet in codebase - Yarn will establish the pattern.",
+          "updated_at": "2025-12-25T18:41:51.616922+00:00"
+        },
+        {
+          "id": "1.2",
+          "title": "Document the type relationships and data flow",
+          "description": "Create a clear mental model of Session \u2192 Conversation \u2192 Message hierarchy and how Measurement/HiddenState integrate",
+          "status": "pending",
+          "files": [
+            "Yarn/session.go",
+            "Yarn/conversation.go",
+            "Yarn/message.go",
+            "Yarn/measurement.go"
+          ],
+          "estimated_effort": "small",
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Documentation Creation",
+      "description": "Create the doc.go file with comprehensive package documentation",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Create doc.go with package overview",
+          "description": "Create Yarn/doc.go with: package synopsis, the 'yarn as thread' metaphor explanation, high-level purpose statement",
+          "status": "pending",
+          "files": [
+            "Yarn/doc.go"
+          ],
+          "estimated_effort": "medium",
+          "notes": ""
+        },
+        {
+          "id": "2.2",
+          "title": "Document core type hierarchy",
+          "description": "Add documentation section explaining Session \u2192 Conversation \u2192 Message relationship, including when to use each type",
+          "status": "pending",
+          "files": [
+            "Yarn/doc.go"
+          ],
+          "estimated_effort": "medium",
+          "notes": ""
+        },
+        {
+          "id": "2.3",
+          "title": "Document Measurement and HiddenState system",
+          "description": "Add documentation explaining conveyance metrics, HiddenState boundary objects, and how they integrate with messages for analysis",
+          "status": "pending",
+          "files": [
+            "Yarn/doc.go"
+          ],
+          "estimated_effort": "medium",
+          "notes": ""
+        },
+        {
+          "id": "2.4",
+          "title": "Add usage examples",
+          "description": "Include practical code examples showing: creating a session, adding messages, attaching hidden states, recording measurements",
+          "status": "pending",
+          "files": [
+            "Yarn/doc.go"
+          ],
+          "estimated_effort": "medium",
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Cleanup & Validation",
+      "description": "Remove duplicate documentation and validate the package documentation",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Update message.go package comment",
+          "description": "Remove or simplify the existing brief package comment in message.go since doc.go now contains the canonical package documentation",
+          "status": "pending",
+          "files": [
+            "Yarn/message.go"
+          ],
+          "estimated_effort": "small",
+          "notes": ""
+        },
+        {
+          "id": "3.2",
+          "title": "Verify godoc rendering",
+          "description": "Run 'go doc' commands to verify the package documentation renders correctly and is discoverable",
+          "status": "pending",
+          "files": [
+            "Yarn/doc.go"
+          ],
+          "estimated_effort": "small",
+          "notes": ""
+        },
+        {
+          "id": "3.3",
+          "title": "Verify package compiles",
+          "description": "Run 'go build' to ensure no syntax errors were introduced",
+          "status": "pending",
+          "files": [
+            "Yarn/doc.go"
+          ],
+          "estimated_effort": "small",
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "workflow_type": "development",
+  "services_involved": [
+    "Yarn"
+  ],
+  "dependencies": {
+    "external": [],
+    "internal": [
+      "Yarn package source files"
+    ]
+  },
+  "qa_signoff": {
+    "status": "pending",
+    "issues": "",
+    "tests_passed": ""
+  },
+  "final_acceptance": [
+    "doc.go file exists with comprehensive package documentation",
+    "Documentation explains Session \u2192 Conversation \u2192 Message hierarchy",
+    "Documentation explains Measurement and HiddenState integration",
+    "Documentation includes usage examples",
+    "Package compiles without errors",
+    "go doc renders documentation correctly"
+  ],
+  "spec_file": "spec.md",
+  "notes": "The Yarn package currently has a minimal 2-line package comment in message.go. Creating a dedicated doc.go is the Go convention for comprehensive package documentation. The documentation should explain the research session data model and conveyance measurement framework without duplicating the individual type/function godoc comments.",
+  "last_updated": "2025-12-25T18:41:51.616928+00:00"
+}

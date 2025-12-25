@@ -1,0 +1,35 @@
+{
+  "discovered_files": {
+    "Wool/role.go": {
+      "description": "Package documentation convention: Two-line format - first line is synopsis (// Package name description.), second line explains naming metaphor (// Wool is the raw material that becomes agents - defining WHAT an agent IS.)",
+      "category": "documentation-pattern",
+      "discovered_at": "2025-12-25T18:41:24.555442+00:00"
+    },
+    "Yarn/message.go": {
+      "description": "Type hierarchy: Message is atomic unit with optional *HiddenState. HiddenState is the \"boundary object\" containing semantic state before text projection (Vector typically 2048-8192 float32 values).",
+      "category": "architecture",
+      "discovered_at": "2025-12-25T18:41:24.580777+00:00"
+    },
+    "Weaver/pkg/analysis/client.go": {
+      "description": "Package documentation style: First line synopsis, second line contextualizes purpose. Type comments start with type name and explain purpose. Method comments start with function name.",
+      "category": "documentation-pattern",
+      "discovered_at": "2025-12-25T18:41:24.567669+00:00"
+    },
+    "Yarn/session.go": {
+      "description": "Type hierarchy: Session contains []*Conversation and []*Measurement. Session is the top-level container for research. MeasurementMode can be passive, active, or triggered.",
+      "category": "architecture",
+      "discovered_at": "2025-12-25T18:41:24.572100+00:00"
+    },
+    "Yarn/conversation.go": {
+      "description": "Type hierarchy: Conversation contains []*Message and tracks Participants. Thread-safe with sync.RWMutex. Messages can be filtered by HasHiddenState().",
+      "category": "architecture",
+      "discovered_at": "2025-12-25T18:41:24.576517+00:00"
+    },
+    "Yarn/measurement.go": {
+      "description": "Measurement captures conveyance metrics: DEff (effective dimensionality), Beta (collapse indicator), Alignment (cosine similarity), CPair (bilateral conveyance). BetaStatus categorizes quality (optimal, monitor, concerning, critical).",
+      "category": "architecture",
+      "discovered_at": "2025-12-25T18:41:24.586678+00:00"
+    }
+  },
+  "last_updated": "2025-12-25T18:41:24.586691+00:00"
+}

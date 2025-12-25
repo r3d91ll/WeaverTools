@@ -1,0 +1,74 @@
+# Build Progress: Add package-level documentation for Yarn module
+
+## Status: Ready for Implementation
+
+## 2025-12-25 - Initial Analysis
+
+### Codebase Analysis
+- Located Yarn package at `Yarn/` with 4 source files:
+  - `session.go` - Session management (research session container)
+  - `conversation.go` - Conversation tracking with participants
+  - `message.go` - Message types with HiddenState support
+  - `measurement.go` - Conveyance metrics (DEff, Beta, Alignment, CPair)
+
+### Current Documentation State
+- Minimal 2-line package comment exists in message.go
+- Individual types have godoc comments but no architectural overview
+- No doc.go file exists
+
+### Type Hierarchy Identified
+```
+Session (research container)
+  └── Conversations[] (ordered message sequences)
+        └── Messages[] (atomic communication units)
+              └── HiddenState (boundary object)
+  └── Measurements[] (conveyance metrics per turn)
+```
+
+### Implementation Approach
+- Phase 1: Research & review existing documentation patterns
+- Phase 2: Create doc.go with comprehensive documentation
+- Phase 3: Cleanup duplicate comments and validate
+
+## Phase 1 Progress
+
+### Subtask 1.1 - Completed (2025-12-25)
+**Review existing package documentation patterns in codebase**
+
+Examined Wool/role.go, Wool/agent.go, Weaver/pkg/analysis/client.go
+
+#### Documentation Conventions Found:
+
+1. **Package-level Documentation Format:**
+   - Two-line format in a source file
+   - Line 1: Synopsis `// Package <name> <description>.`
+   - Line 2: Metaphor/context explanation
+   - Example from Wool:
+     ```go
+     // Package wool defines agent roles and capabilities.
+     // Wool is the raw material that becomes agents - defining WHAT an agent IS.
+     package wool
+     ```
+
+2. **Type Documentation Style:**
+   - Type comments start with type name: `// Message is the atomic unit of communication...`
+   - Constant comments explain the value: `// RoleSenior is for high-level reasoning...`
+   - Method comments start with function name: `// Add appends a message...`
+   - Memory/performance notes included where relevant (e.g., HiddenState vector size)
+
+3. **Codebase Conventions:**
+   - No separate doc.go files exist in other packages yet (opportunity to establish pattern)
+   - Rich inline comments for complex fields
+   - Comments are complete sentences
+   - Domain concepts woven into explanations (e.g., "boundary object")
+
+4. **Current Yarn Package Documentation (message.go):**
+   ```go
+   // Package yarn manages conversations, measurements, and data storage.
+   // Yarn is the thread that connects everything - tracking WHAT HAPPENED.
+   ```
+   This follows the pattern but needs expansion to cover type relationships.
+
+## Next Steps
+- Subtask 1.2: Document the type relationships and data flow
+- Create Yarn/doc.go with comprehensive package documentation

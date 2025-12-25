@@ -714,22 +714,58 @@ class MistralLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract hidden states for all generated tokens (manifold)."""
+        """Extract hidden states for ALL generated tokens (manifold construction).
+
+        This creates the full geometric representation of the generation -
+        each token's position in the model's semantic space, forming the
+        "boundary object" manifold.
+
+        The hidden_states tuple from generate() is structured as:
+        - Tuple of generation steps (one per token generated)
+        - Each step has tuple of (num_layers + 1) tensors
+        - Each tensor is [batch, seq_len, hidden_size]
+
+        We extract the last token position from each step, giving us
+        the newly generated token's representation at each step.
+
+        Mistral models follow the standard HuggingFace format, identical to
+        TransformersLoader and QwenLoader implementations.
+
+        Returns:
+            dict mapping layer_idx to tensor of shape [num_tokens, hidden_size]
+        """
         result: dict[int, torch.Tensor] = {}
 
         if not hidden_states:
             return result
 
         for layer_idx in layers:
+            # Convert negative indices using num_layers + 1 (same as _extract_hidden_states)
+            # because hidden_states tuple includes embedding layer at index 0.
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + 1 + layer_idx
 
+            # Build manifold: collect one hidden vector per generation step.
+            # Each step represents one newly generated token's position in
+            # the model's semantic space. Together they trace out the
+            # "boundary object" geometry of the full generation.
             step_vectors = []
             for step in hidden_states:
                 if 0 <= actual_idx < len(step):
+                    # Extract the newly generated token's hidden state from this step.
+                    # Slice [0, -1, :] selects:
+                    #   - 0: first batch (single input assumption)
+                    #   - -1: last sequence position (the token just generated)
+                    #   - :: all hidden dimensions
+                    # Result shape: [hidden_size] (1D vector for this token)
+                    # .cpu() transfers to CPU for collection/serialization.
                     token_hidden = step[actual_idx][0, -1, :].cpu()
                     step_vectors.append(token_hidden)
 
             if step_vectors:
+                # Stack all token vectors into a single matrix.
+                # Final shape: [num_tokens, hidden_size] where num_tokens = number
+                # of generation steps = number of tokens generated.
+                # This matrix represents the manifold/trajectory through semantic space.
                 sequence_tensor = torch.stack(step_vectors, dim=0)
                 result[layer_idx] = sequence_tensor
 

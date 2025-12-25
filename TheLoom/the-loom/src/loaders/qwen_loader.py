@@ -451,25 +451,54 @@ class QwenLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract attention weights from generation output.
+        """
+        Extract the attention weights for the requested layers from generation output.
 
-        Note: Unlike hidden_states which includes the embedding layer at index 0,
-        attention weights only have num_layers elements (one per transformer layer).
-        Therefore negative index calculation differs: num_layers + layer_idx
-        vs num_layers + 1 + layer_idx for hidden states.
+        CRITICAL INDEXING DIFFERENCE from _extract_hidden_states():
+        - hidden_states tuple has (num_layers + 1) entries: embedding layer at index 0,
+          then transformer layers 1 through num_layers
+        - attention tuple has only num_layers entries: NO embedding layer, just
+          transformer layers 0 through (num_layers - 1)
+
+        Therefore negative index resolution differs:
+        - hidden_states: actual_idx = num_layers + 1 + layer_idx  (e.g., -1 -> 32 for 32-layer model)
+        - attention:     actual_idx = num_layers + layer_idx      (e.g., -1 -> 31 for 32-layer model)
+
+        The attentions tuple structure is:
+        - Outer tuple: one entry per generation step (each new token)
+        - Inner tuple: num_layers tensors (NO embedding layer, unlike hidden_states)
+        - Each tensor: shape [batch, num_heads, query_seq_len, key_seq_len]
+
+        Parameters:
+            attentions: Generation output attention weights: tuple[step][layer]
+            layers: List of layer indices to extract (negative indices supported)
+            num_layers: Number of model layers (for negative index resolution)
+
+        Returns:
+            dict mapping layer index to tensor of shape [batch, num_heads, key_seq_len]
         """
         result: dict[int, torch.Tensor] = {}
 
         if not attentions:
             return result
 
+        # Get the final generation step's attention weights
         final_step = attentions[-1]
 
         for layer_idx in layers:
-            # Attention tuple has num_layers elements (no embedding layer)
+            # Convert negative indices: use num_layers (NOT num_layers + 1) because
+            # attention tuple has no embedding layer entry. For a 32-layer model:
+            #   - Index 0-31 = attention weights for transformer layers 1-32
+            #   - Index -1 resolves to 31 (last transformer layer's attention)
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + layer_idx
 
             if 0 <= actual_idx < len(final_step):
+                # Attention tensor shape: [batch, num_heads, query_seq_len, key_seq_len]
+                # Slice [:, :, -1, :] selects all batches, all heads, last query position
+                # (the newly generated token attending to all previous positions),
+                # and all key positions.
+                # Result shape: [batch, num_heads, key_seq_len]
+                # .cpu() transfers tensor from GPU to CPU for serialization/storage.
                 layer_attn = final_step[actual_idx][:, :, -1, :].cpu()
                 result[layer_idx] = layer_attn
 

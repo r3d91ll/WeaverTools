@@ -142,7 +142,7 @@
           "title": "Comment _extract_attention() in mistral_loader.py",
           "description": "Add comments explaining attention extraction with indexing differences",
           "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
-          "status": "pending",
+          "status": "completed",
           "acceptance_criteria": [
             "Comments explain attention tuple structure (no embedding layer)",
             "Comments explain negative index calculation difference"
@@ -153,7 +153,7 @@
           "title": "Comment _extract_sequence_hidden_states() in mistral_loader.py",
           "description": "Add comments explaining sequence-wide hidden state collection",
           "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
-          "status": "pending",
+          "status": "completed",
           "acceptance_criteria": [
             "Comments explain manifold construction purpose",
             "Comments explain tensor stacking and final shape"
@@ -164,7 +164,7 @@
           "title": "Comment embed() pooling in mistral_loader.py",
           "description": "Add comments explaining pooling strategies with dict-style input handling",
           "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
-          "status": "pending",
+          "status": "completed",
           "acceptance_criteria": [
             "Comments explain pooling strategies",
             "Comments note dict-style input handling for MistralTokenizerWrapper"

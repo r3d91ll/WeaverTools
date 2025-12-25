@@ -665,18 +665,44 @@ class MistralLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract attention weights from generation output."""
+        """
+        Extract the attention weights for the requested layers from a generation output.
+
+        If `attentions` is empty, returns an empty dict. Negative layer indices are interpreted
+        relative to `num_layers` (Python-style). For each requested layer that exists in the final
+        generation step, returns the attention scores for the last query position with shape
+        [batch, heads, seq].
+
+        Returns:
+            dict[int, torch.Tensor]: Mapping from the requested layer index (as passed in `layers`)
+            to a tensor of attention weights of shape [batch, heads, seq].
+        """
         result: dict[int, torch.Tensor] = {}
 
         if not attentions:
             return result
 
+        # Similar structure to hidden_states but WITHOUT embedding layer.
+        # Structure: attentions is tuple[step][layer] where:
+        #   - Outer tuple: one entry per generation step
+        #   - Inner tuple: num_layers tensors (NO embedding layer, unlike hidden_states)
+        #   - Each tensor: shape [batch, num_heads, query_seq_len, key_seq_len]
         final_step = attentions[-1]
 
         for layer_idx in layers:
+            # Convert negative indices: use num_layers (NOT num_layers + 1) because
+            # attention tuple has no embedding layer entry. For a 32-layer model:
+            #   - Index 0-31 = attention weights for transformer layers 1-32
+            #   - Index -1 resolves to 31 (last transformer layer's attention)
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + layer_idx
 
             if 0 <= actual_idx < len(final_step):
+                # Attention tensor shape: [batch, num_heads, query_seq_len, key_seq_len]
+                # Slice [:, :, -1, :] selects all batches, all heads, last query position
+                # (the newly generated token attending to all previous positions),
+                # and all key positions.
+                # Result shape: [batch, num_heads, key_seq_len]
+                # .cpu() transfers tensor from GPU to CPU for serialization/storage.
                 layer_attn = final_step[actual_idx][:, :, -1, :].cpu()
                 result[layer_idx] = layer_attn
 

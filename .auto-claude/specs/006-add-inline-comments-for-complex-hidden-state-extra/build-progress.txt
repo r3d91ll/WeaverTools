@@ -1,0 +1,39 @@
+# Build Progress: Add inline comments for complex hidden state extraction logic
+
+## Status: In Progress (Phase 2: 3/4 subtasks complete)
+
+## Summary
+Adding explanatory inline comments to hidden state extraction logic in TheLoom loaders.
+Target files:
+- transformers_loader.py (reference implementation)
+- qwen_loader.py
+- mistral_loader.py
+
+## Key Areas to Document
+1. **Tensor Indexing**: hidden_states tuple structure (step -> layer -> tensor)
+2. **Layer Selection**: Negative index resolution with num_layers+1 for embedding layer
+3. **Shape Operations**: [:, -1, :] slicing, batch dimension squeezing
+4. **CPU Transfer**: .cpu() calls for serialization
+
+## Phase Structure
+- Phase 1: Document transformers_loader.py (4 subtasks) ✅ COMPLETE
+- Phase 2: Document qwen_loader.py (4 subtasks)
+- Phase 3: Document mistral_loader.py (4 subtasks)
+- Phase 4: Verify consistency & run tests (2 subtasks)
+
+## Progress Log
+- 2025-12-25: Created implementation plan with 4 phases and 14 subtasks
+- 2025-12-25: Phase 1 Complete - Added inline comments to transformers_loader.py:
+  - 1.1: _extract_hidden_states() - tuple structure, negative index, [:,-1,:], .cpu()
+  - 1.2: _extract_attention() - no embedding layer, [:,:,-1,:] for last query
+  - 1.3: _extract_sequence_hidden_states() - manifold construction, [0,-1,:]
+  - 1.4: embed() - pooling strategies, attention_mask, squeeze(0)
+- 2025-12-25: Phase 2 in progress - Documenting qwen_loader.py:
+  - 2.1: _extract_hidden_states() - COMPLETE
+  - 2.2: _extract_attention() - COMPLETE - Enhanced with CRITICAL INDEXING DIFFERENCE
+    section explaining num_layers vs num_layers+1, specific 32-layer model examples,
+    tensor shape [batch, num_heads, query_seq_len, key_seq_len], inline comments
+  - 2.3: _extract_sequence_hidden_states() - COMPLETE - Added comprehensive docstring
+    explaining manifold construction purpose, step-by-step collection with [0,-1,:]
+    indexing, final tensor shape [num_tokens, hidden_size] as trajectory through
+    semantic space

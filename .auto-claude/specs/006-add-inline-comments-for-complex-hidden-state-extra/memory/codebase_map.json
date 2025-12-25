@@ -1,0 +1,15 @@
+{
+  "discovered_files": {
+    "TheLoom/the-loom/src/loaders/transformers_loader.py": {
+      "description": "Hidden state extraction uses num_layers+1 for negative indexing because tuple includes embedding layer at index 0. Attention uses num_layers (no embedding). Tensor slicing: [:,-1,:] for last token, [0,-1,:] for single batch last token.",
+      "category": "hidden_state_extraction",
+      "discovered_at": "2025-12-25T18:45:08.700578+00:00"
+    },
+    "TheLoom/the-loom/src/loaders/qwen_loader.py": {
+      "description": "QwenLoader._extract_hidden_states() follows identical hidden_states format as TransformersLoader. Uses num_layers+1 for negative indexing because tuple includes embedding layer at index 0. Tensor slicing [:,-1,:] extracts last token's hidden state.",
+      "category": "hidden_state_extraction",
+      "discovered_at": "2025-12-25T18:47:24.342440+00:00"
+    }
+  },
+  "last_updated": "2025-12-25T18:47:24.342454+00:00"
+}

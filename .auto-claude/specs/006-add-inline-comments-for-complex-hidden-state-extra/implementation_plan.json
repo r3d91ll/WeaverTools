@@ -113,7 +113,7 @@
           "title": "Comment embed() pooling in qwen_loader.py",
           "description": "Add comments explaining pooling strategies and tensor operations",
           "file_path": "TheLoom/the-loom/src/loaders/qwen_loader.py",
-          "status": "pending",
+          "status": "completed",
           "acceptance_criteria": [
             "Comments explain each pooling strategy",
             "Comments explain mask operations and dimension squeezing"
@@ -131,7 +131,7 @@
           "title": "Comment _extract_hidden_states() in mistral_loader.py",
           "description": "Add comments explaining hidden state extraction with any Mistral-specific considerations",
           "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
-          "status": "pending",
+          "status": "completed",
           "acceptance_criteria": [
             "Comments explain tuple structure and tensor indexing",
             "Comments note standard pattern matching other loaders"

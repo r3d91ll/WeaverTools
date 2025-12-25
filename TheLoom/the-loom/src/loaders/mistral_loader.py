@@ -609,18 +609,51 @@ class MistralLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract hidden states from generation output."""
+        """
+        Extract the last-token hidden-state vectors for specified layers from generation output.
+
+        Mistral models follow the standard HuggingFace hidden_states format, identical to
+        TransformersLoader and QwenLoader. The hidden_states tuple structure is:
+        - Outer tuple: one entry per generation step (each new token)
+        - Inner tuple: (num_layers + 1) tensors - embedding layer at index 0,
+          then transformer layers 1 through num_layers
+        - Each tensor: shape [batch, seq_len, hidden_size]
+
+        Note: Both standard Mistral models (handled here) and those using mistral_common
+        tokenizer produce the same hidden_states format from HuggingFace's generate().
+
+        Parameters:
+            hidden_states: Generation output hidden states: tuple[step][layer]
+            layers: List of layer indices to extract (negative indices supported)
+            num_layers: Number of model layers (for negative index resolution)
+
+        Returns:
+            dict mapping layer index to tensor of shape [batch, hidden_size]
+        """
         result: dict[int, torch.Tensor] = {}
 
         if not hidden_states:
             return result
 
+        # Get the final generation step's hidden states.
+        # The last step (-1) contains hidden states after generating the final token.
         final_step = hidden_states[-1]
 
         for layer_idx in layers:
+            # Convert negative indices: use num_layers + 1 (not num_layers) because
+            # the tuple includes the embedding layer at index 0. So for a 32-layer model:
+            #   - Index 0 = embedding output
+            #   - Index 1-32 = transformer layer outputs
+            #   - Index -1 resolves to 32 (last transformer layer)
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + 1 + layer_idx
 
             if 0 <= actual_idx < len(final_step):
+                # Extract last token's hidden state from this layer.
+                # Tensor shape: [batch, seq_len, hidden_size]
+                # Slice [:, -1, :] selects all batches, last sequence position (the
+                # newly generated token), and all hidden dimensions.
+                # Result shape: [batch, hidden_size]
+                # .cpu() transfers tensor from GPU to CPU for serialization/storage.
                 layer_hidden = final_step[actual_idx][:, -1, :].cpu()
                 result[layer_idx] = layer_hidden
 

@@ -88,6 +88,17 @@ type loomRequest struct {
 	Device             string        `json:"device,omitempty"` // GPU: "auto", "cuda:0", "cuda:1"
 }
 
+// loomStreamingRequest extends loomRequest with streaming flag.
+type loomStreamingRequest struct {
+	Model              string        `json:"model"`
+	Messages           []ChatMessage `json:"messages"`
+	MaxTokens          int           `json:"max_tokens,omitempty"`
+	Temperature        float64       `json:"temperature,omitempty"`
+	ReturnHiddenStates bool          `json:"return_hidden_states,omitempty"`
+	Device             string        `json:"device,omitempty"`
+	Stream             bool          `json:"stream"`
+}
+
 type loomResponse struct {
 	Text        string `json:"text"`
 	Usage       struct {
@@ -102,6 +113,49 @@ type loomResponse struct {
 		DType string    `json:"dtype"`
 	} `json:"hidden_state,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// buildStreamingRequest creates an HTTP request for streaming chat completions.
+// It sets stream=true in the JSON body and Accept: text/event-stream header
+// to enable Server-Sent Events streaming from The Loom server.
+func (l *Loom) buildStreamingRequest(ctx context.Context, req ChatRequest) (*http.Request, error) {
+	model := req.Model
+	if model == "" {
+		l.mu.RLock()
+		model = l.model
+		l.mu.RUnlock()
+	}
+
+	streamReq := loomStreamingRequest{
+		Model:              model,
+		Messages:           req.Messages,
+		MaxTokens:          req.MaxTokens,
+		Temperature:        req.Temperature,
+		ReturnHiddenStates: req.ReturnHiddenStates,
+		Device:             req.Device,
+		Stream:             true,
+	}
+	if streamReq.MaxTokens == 0 {
+		streamReq.MaxTokens = 1024
+	}
+	if streamReq.Temperature == 0 {
+		streamReq.Temperature = 0.7
+	}
+
+	body, err := json.Marshal(streamReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal streaming request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", l.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create streaming request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	return httpReq, nil
 }
 
 func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {

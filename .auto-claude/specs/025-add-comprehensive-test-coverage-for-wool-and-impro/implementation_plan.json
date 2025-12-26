@@ -1,0 +1,374 @@
+{
+  "feature": "Comprehensive Test Coverage for Wool, Weaver Spinner, TheLoom, and E2E",
+  "workflow_type": "feature",
+  "workflow_rationale": "This task creates new test infrastructure across 4 packages rather than fixing bugs or refactoring. Wool test suite is net-new, TheLoom GPU separation establishes new CI capability, E2E harness automates manual workflow.",
+  "phases": [
+    {
+      "id": "phase-1-wool-tests",
+      "name": "Wool Test Suite Creation",
+      "type": "implementation",
+      "description": "Create comprehensive test suite for Wool package from scratch (currently 0% coverage)",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Create Wool/agent_test.go with agent validation tests",
+          "service": "Wool",
+          "files_to_modify": [],
+          "files_to_create": ["Wool/agent_test.go"],
+          "patterns_from": ["Yarn/message_test.go", "Yarn/session_test.go"],
+          "verification": {
+            "type": "command",
+            "command": "cd Wool && go test -run TestAgent -v",
+            "expected": "PASS"
+          },
+          "status": "pending",
+          "notes": "Table-driven tests for Agent.Validate(), DefaultSenior(), DefaultJunior(), DefaultSubject(). Test required fields, backend validation, role-capability consistency, inference parameter ranges."
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Create Wool/role_test.go with role capability tests",
+          "service": "Wool",
+          "files_to_modify": [],
+          "files_to_create": ["Wool/role_test.go"],
+          "patterns_from": ["Yarn/message_test.go"],
+          "verification": {
+            "type": "command",
+            "command": "cd Wool && go test -run TestRole -v",
+            "expected": "PASS"
+          },
+          "status": "pending",
+          "notes": "Test all Role methods: IsValid(), RequiresHiddenStates(), SupportsTools(), CanGenerateResponses(), Description(). Cover all 5 roles: Senior, Junior, Conversant, Subject, Observer."
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Verify Wool test coverage exceeds 80%",
+          "service": "Wool",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd Wool && go test -cover ./... | grep coverage",
+            "expected": "coverage: 80% or higher"
+          },
+          "status": "pending",
+          "notes": "Measure coverage with go test -cover. If <80%, add tests for uncovered edge cases."
+        }
+      ]
+    },
+    {
+      "id": "phase-2-weaver-spinner-fixes",
+      "name": "Weaver Spinner Test Fixes",
+      "type": "implementation",
+      "description": "Fix 3 failing spinner tests related to terminal color detection",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Fix TestSuccess and TestFail color detection",
+          "service": "Weaver",
+          "files_to_modify": ["Weaver/pkg/spinner/spinner_test.go"],
+          "files_to_create": [],
+          "patterns_from": ["Weaver/pkg/spinner/spinner_test.go"],
+          "verification": {
+            "type": "command",
+            "command": "cd Weaver && go test -v -run 'TestSuccess|TestFail' ./pkg/spinner",
+            "expected": "PASS (0 failures)"
+          },
+          "status": "pending",
+          "notes": "Use explicit IsTTY: boolPtr(true) configuration for color tests (lines 251-329). Test both TTY and non-TTY modes separately. Don't rely on automatic terminal detection."
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Fix TestRenderWithElapsedTime timing verification",
+          "service": "Weaver",
+          "files_to_modify": ["Weaver/pkg/spinner/spinner_test.go"],
+          "files_to_create": [],
+          "patterns_from": ["Weaver/pkg/spinner/spinner_test.go"],
+          "verification": {
+            "type": "command",
+            "command": "cd Weaver && go test -v -run TestRenderWithElapsedTime ./pkg/spinner",
+            "expected": "PASS"
+          },
+          "status": "pending",
+          "notes": "Verify elapsed time format '(X.Xs)' or '(Xm Ys)' regardless of color codes. Don't check for ANSI sequences in all environments."
+        },
+        {
+          "id": "subtask-2-3",
+          "description": "Run full Weaver spinner test suite",
+          "service": "Weaver",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd Weaver && go test -v ./pkg/spinner",
+            "expected": "PASS (all tests passing)"
+          },
+          "status": "pending",
+          "notes": "Ensure no regressions in existing passing tests. All spinner tests must pass."
+        }
+      ]
+    },
+    {
+      "id": "phase-3-theloom-gpu-separation",
+      "name": "TheLoom GPU Test Separation",
+      "type": "implementation",
+      "description": "Separate GPU-dependent tests from unit tests to enable CI execution",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Add pytest GPU marker configuration to pyproject.toml",
+          "service": "TheLoom",
+          "files_to_modify": ["TheLoom/the-loom/pyproject.toml"],
+          "files_to_create": [],
+          "patterns_from": ["TheLoom/the-loom/pyproject.toml"],
+          "verification": {
+            "type": "command",
+            "command": "cd TheLoom/the-loom && grep -A2 '\\[tool.pytest.ini_options\\]' pyproject.toml | grep gpu",
+            "expected": "gpu marker configured"
+          },
+          "status": "pending",
+          "notes": "Add 'gpu: marks tests as requiring GPU (deselect with -m \"not gpu\")' to markers list in [tool.pytest.ini_options]."
+        },
+        {
+          "id": "subtask-3-2",
+          "description": "Mark GPU-dependent tests in test_server.py",
+          "service": "TheLoom",
+          "files_to_modify": ["TheLoom/the-loom/tests/test_server.py"],
+          "files_to_create": [],
+          "patterns_from": ["TheLoom/the-loom/tests/test_config.py"],
+          "verification": {
+            "type": "command",
+            "command": "cd TheLoom/the-loom && grep -c '@pytest.mark.gpu' tests/test_server.py",
+            "expected": "6 or more markers"
+          },
+          "status": "pending",
+          "notes": "Add @pytest.mark.gpu decorator to server geometry endpoint tests (6 failures identified in bug hunt). Leave non-GPU tests unmarked."
+        },
+        {
+          "id": "subtask-3-3",
+          "description": "Mark GPU-dependent tests in test_analysis.py",
+          "service": "TheLoom",
+          "files_to_modify": ["TheLoom/the-loom/tests/test_analysis.py"],
+          "files_to_create": [],
+          "patterns_from": ["TheLoom/the-loom/tests/test_config.py"],
+          "verification": {
+            "type": "command",
+            "command": "cd TheLoom/the-loom && grep -c '@pytest.mark.gpu' tests/test_analysis.py",
+            "expected": "9 or more markers"
+          },
+          "status": "pending",
+          "notes": "Add @pytest.mark.gpu to streaming SSE tests (9 failures). Mark Kakeya geometry analysis tests that require GPU computation."
+        },
+        {
+          "id": "subtask-3-4",
+          "description": "Mark or mock GPU-dependent integration tests",
+          "service": "TheLoom",
+          "files_to_modify": ["TheLoom/the-loom/tests/test_integration.py"],
+          "files_to_create": [],
+          "patterns_from": ["TheLoom/the-loom/tests/test_config.py"],
+          "verification": {
+            "type": "command",
+            "command": "cd TheLoom/the-loom && pytest -v -m 'not gpu' tests/test_integration.py",
+            "expected": "0 errors (14 integration test errors resolved)"
+          },
+          "status": "pending",
+          "notes": "Mark integration tests requiring GPU with @pytest.mark.gpu. Create mocks for server geometry endpoint tests to verify API contract without GPU."
+        },
+        {
+          "id": "subtask-3-5",
+          "description": "Verify all non-GPU tests pass",
+          "service": "TheLoom",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd TheLoom/the-loom && poetry run pytest -v -m 'not gpu' --tb=short",
+            "expected": "PASS (137+ passing, 0 failures, 0 errors)"
+          },
+          "status": "pending",
+          "notes": "All unit tests must run successfully without GPU. This enables CI execution."
+        }
+      ]
+    },
+    {
+      "id": "phase-4-e2e-harness",
+      "name": "E2E Test Harness Automation",
+      "type": "integration",
+      "description": "Automate manual E2E testing workflow from bug hunt section 5",
+      "depends_on": ["phase-1-wool-tests", "phase-2-weaver-spinner-fixes", "phase-3-theloom-gpu-separation"],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Create E2E test directory and delegation tests",
+          "service": "E2E",
+          "files_to_modify": [],
+          "files_to_create": ["tests/e2e/test_delegation.go"],
+          "patterns_from": ["Yarn/session_test.go", "bughunt_main_261225.md"],
+          "verification": {
+            "type": "command",
+            "command": "cd tests/e2e && go test -v -run TestDelegation",
+            "expected": "PASS"
+          },
+          "status": "pending",
+          "notes": "Automate Senior/Junior delegation workflow from bughunt lines 143-291. Test: 1) Start TheLoom server, 2) Start Weaver, 3) Send @junior message, 4) Verify response with hidden states."
+        },
+        {
+          "id": "subtask-4-2",
+          "description": "Create E2E measurement workflow tests",
+          "service": "E2E",
+          "files_to_modify": [],
+          "files_to_create": ["tests/e2e/test_measurement.go"],
+          "patterns_from": ["Yarn/measurement_test.go", "bughunt_main_261225.md"],
+          "verification": {
+            "type": "command",
+            "command": "cd tests/e2e && go test -v -run TestMeasurement",
+            "expected": "PASS"
+          },
+          "status": "pending",
+          "notes": "Test hidden state extraction and conveyance measurement calculations. Validate D_eff and β values in exported session data."
+        },
+        {
+          "id": "subtask-4-3",
+          "description": "Run full E2E test suite without manual intervention",
+          "service": "E2E",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "e2e",
+            "steps": [
+              "Start TheLoom server as subprocess",
+              "Verify health endpoint responds",
+              "Execute all E2E tests",
+              "Clean up processes in teardown"
+            ]
+          },
+          "status": "pending",
+          "notes": "Full automation - no manual steps required. Tests verify actual backend integration (not mocks)."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 4,
+    "total_subtasks": 14,
+    "services_involved": ["Wool", "Weaver", "TheLoom", "E2E"],
+    "parallelism": {
+      "max_parallel_phases": 3,
+      "parallel_groups": [
+        {
+          "phases": ["phase-1-wool-tests", "phase-2-weaver-spinner-fixes", "phase-3-theloom-gpu-separation"],
+          "reason": "No dependencies between test creation tasks - can run independently"
+        }
+      ],
+      "recommended_workers": 3,
+      "speedup_estimate": "3x faster than sequential (phases 1-3 parallel, phase 4 sequential)"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 025 --parallel 3"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "inline",
+    "test_types_required": ["unit"],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "Wool test coverage >80%",
+      "All Weaver spinner tests passing (0 failures)",
+      "TheLoom non-GPU tests pass (pytest -m 'not gpu')",
+      "E2E tests run without manual intervention",
+      "No regressions in Yarn (321/321 still passing)"
+    ],
+    "verification_steps": [
+      {
+        "name": "Wool Test Coverage",
+        "command": "cd Wool && go test -cover ./...",
+        "expected_outcome": "coverage >80%",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Weaver Spinner Tests",
+        "command": "cd Weaver && go test -v ./pkg/spinner",
+        "expected_outcome": "PASS (all tests)",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "TheLoom Non-GPU Tests",
+        "command": "cd TheLoom/the-loom && poetry run pytest -v -m 'not gpu'",
+        "expected_outcome": "PASS (137+ tests, 0 failures)",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "E2E Test Suite",
+        "command": "cd tests/e2e && go test -v ./...",
+        "expected_outcome": "PASS (automated execution)",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Yarn Regression Check",
+        "command": "cd Yarn && go test ./...",
+        "expected_outcome": "PASS (321/321 tests)",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Multiple packages affected with test infrastructure changes. Medium risk requires unit test verification to ensure tests themselves work correctly. No security or deployment concerns for test code."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cd Wool && go test -v -race -cover ./...",
+        "cd Weaver && go test -v ./pkg/spinner",
+        "cd TheLoom/the-loom && poetry run pytest -v -m 'not gpu'",
+        "cd Yarn && go test ./..."
+      ],
+      "minimum_coverage": 80
+    },
+    "integration_tests": {
+      "required": true,
+      "commands": [
+        "cd tests/e2e && go test -v ./..."
+      ],
+      "services_to_test": ["TheLoom", "Weaver", "E2E"]
+    },
+    "e2e_tests": {
+      "required": true,
+      "commands": [
+        "cd tests/e2e && go test -v ./..."
+      ],
+      "flows": [
+        "Senior/Junior delegation",
+        "Hidden state extraction",
+        "Conveyance measurement",
+        "Session export"
+      ]
+    },
+    "browser_verification": {
+      "required": false
+    },
+    "database_verification": {
+      "required": false
+    }
+  },
+  "qa_signoff": null
+}

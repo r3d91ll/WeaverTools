@@ -1,0 +1,66 @@
+{
+  "project_root": "/home/todd/olympus/git-repos/WeaverTools",
+  "project_type": "monorepo",
+  "services": {
+    "Yarn": {
+      "name": "Yarn",
+      "path": "./Yarn",
+      "tech_stack": ["go"],
+      "port": null,
+      "dev_command": null,
+      "test_command": "go test -v -race -cover ./..."
+    },
+    "Wool": {
+      "name": "Wool",
+      "path": "./Wool",
+      "tech_stack": ["go"],
+      "port": null,
+      "dev_command": null,
+      "test_command": "go test -v -race -cover ./..."
+    },
+    "Weaver": {
+      "name": "Weaver",
+      "path": "./Weaver",
+      "tech_stack": ["go"],
+      "port": null,
+      "dev_command": "./weaver",
+      "test_command": "go test -v -race ./..."
+    },
+    "TheLoom": {
+      "name": "TheLoom",
+      "path": "./TheLoom/the-loom",
+      "tech_stack": ["python", "fastapi", "pytorch"],
+      "port": 8080,
+      "dev_command": "poetry run loom --port 8080",
+      "test_command": "poetry run pytest -v",
+      "test_command_no_gpu": "poetry run pytest -v -m \"not gpu\""
+    },
+    "E2E": {
+      "name": "E2E",
+      "path": "./tests/e2e",
+      "tech_stack": ["go"],
+      "port": null,
+      "dev_command": null,
+      "test_command": "go test -v ./..."
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": false,
+    "gpu_required": "optional"
+  },
+  "conventions": {
+    "go": {
+      "linter": "golangci-lint",
+      "formatter": "gofmt",
+      "testing": "go test",
+      "test_pattern": "table-driven with subtests"
+    },
+    "python": {
+      "linter": "ruff",
+      "formatter": "ruff",
+      "testing": "pytest",
+      "package_manager": "poetry"
+    }
+  }
+}

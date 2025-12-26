@@ -37,3 +37,15 @@ func (r *SessionRegistry) Get(name string) (*Session, bool) {
 	session, ok := r.sessions[name]
 	return session, ok
 }
+
+// List returns all registered session names.
+func (r *SessionRegistry) List() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]string, 0, len(r.sessions))
+	for name := range r.sessions {
+		result = append(result, name)
+	}
+	return result
+}

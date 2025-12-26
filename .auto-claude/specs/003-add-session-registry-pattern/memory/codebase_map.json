@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:42.351747+00:00"
     },
     "Yarn/registry.go": {
-      "description": "SessionRegistry struct mirrors Backend Registry pattern: map[string]*Session with sync.RWMutex for thread-safe session management. NewSessionRegistry() initializes empty map.",
+      "description": "SessionRegistry.Get method implemented with read lock protection (RLock/RUnlock), returning (*Session, bool) following Backend Registry pattern",
       "category": "pattern",
-      "discovered_at": "2025-12-26T04:26:22.645805+00:00"
+      "discovered_at": "2025-12-26T04:29:00.373113+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:26:22.645814+00:00"
+  "last_updated": "2025-12-26T04:29:00.373123+00:00"
 }

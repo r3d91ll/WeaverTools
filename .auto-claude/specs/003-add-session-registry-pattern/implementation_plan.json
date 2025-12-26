@@ -37,7 +37,7 @@
           "id": "1.2",
           "title": "Implement Register method",
           "description": "Add Register(name string, session *Session) method with duplicate name detection. Uses write lock and returns error if name already exists.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -46,13 +46,15 @@
             "Register adds session to map with write lock protection",
             "Returns error if session name already registered",
             "Returns nil on successful registration"
-          ]
+          ],
+          "notes": "Implemented Register(name string, session *Session) method following Backend Registry pattern exactly. Uses write lock (mu.Lock/defer Unlock), returns error if session name already registered, returns nil on success. Added fmt import for error formatting. Committed as 543f362.",
+          "updated_at": "2025-12-26T04:27:34.252632+00:00"
         },
         {
           "id": "1.3",
           "title": "Implement Get method",
           "description": "Add Get(name string) (*Session, bool) method to retrieve sessions by name with read lock protection.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -61,7 +63,9 @@
             "Get returns session and true if found",
             "Get returns nil and false if not found",
             "Uses read lock for concurrent access"
-          ]
+          ],
+          "notes": "Implemented Get(name string) (*Session, bool) method following Backend Registry pattern exactly. Uses read lock (RLock/defer RUnlock) for concurrent access. Returns session and true if found, nil and false if not found. Committed as 5dfd59a.",
+          "updated_at": "2025-12-26T04:28:55.375235+00:00"
         },
         {
           "id": "1.4",
@@ -334,5 +338,5 @@
     "target_package": "github.com/r3d91ll/yarn",
     "pattern_reference": "Weaver/pkg/backend/registry.go"
   },
-  "last_updated": "2025-12-26T04:26:17.451443+00:00"
+  "last_updated": "2025-12-26T04:28:55.375239+00:00"
 }

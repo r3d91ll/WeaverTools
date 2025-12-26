@@ -123,6 +123,44 @@ type sseEvent struct {
 	Data  string // JSON data payload
 }
 
+// loomSSEEvent represents the common structure of SSE event data from The Loom.
+// This is used to parse the "type" field before further parsing.
+type loomSSEEvent struct {
+	Type string `json:"type"`
+}
+
+// loomContentDelta represents a content_block_delta event payload.
+// These events contain individual tokens during streaming.
+type loomContentDelta struct {
+	Type  string `json:"type"`
+	Delta struct {
+		Type string `json:"type"` // "text_delta"
+		Text string `json:"text"`
+	} `json:"delta"`
+}
+
+// loomMessageDelta represents a message_delta event payload.
+// This is the final event in a stream, containing completion info.
+type loomMessageDelta struct {
+	Type  string `json:"type"`
+	Delta struct {
+		StopReason string `json:"stop_reason"` // "end_turn", "max_tokens", etc.
+	} `json:"delta"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// loomErrorEvent represents an error event payload.
+type loomErrorEvent struct {
+	Type  string `json:"type"`
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 // parseSSE parses Server-Sent Events from a response body using bufio.Scanner.
 // It follows the SSE spec: event: and data: lines, empty lines separate events,
 // lines starting with : are comments.
@@ -330,14 +368,93 @@ func (l *Loom) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamCh
 		defer close(chunks)
 		defer close(errs)
 
-		// For now, use non-streaming and send as single chunk
-		resp, err := l.Chat(ctx, req)
+		// Build streaming request with stream=true and Accept: text/event-stream
+		httpReq, err := l.buildStreamingRequest(ctx, req)
 		if err != nil {
-			errs <- err
+			errs <- fmt.Errorf("failed to build streaming request: %w", err)
 			return
 		}
 
-		chunks <- StreamChunk{Content: resp.Content, Done: true, FinishReason: "stop"}
+		// Make the HTTP request
+		resp, err := l.httpClient.Do(httpReq)
+		if err != nil {
+			errs <- fmt.Errorf("streaming request failed: %w", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Check for HTTP errors
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			errs <- fmt.Errorf("loom streaming returned status %d: %s", resp.StatusCode, string(body))
+			return
+		}
+
+		// Parse SSE events from response body
+		events := parseSSE(ctx, resp.Body)
+
+		// Process events and convert to StreamChunks
+		for event := range events {
+			// Check for context cancellation
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// Skip events without data
+			if event.Data == "" {
+				continue
+			}
+
+			// First, determine event type from the event name or parse JSON
+			eventType := event.Event
+			if eventType == "" {
+				// Try to get type from JSON data
+				var baseEvent loomSSEEvent
+				if err := json.Unmarshal([]byte(event.Data), &baseEvent); err == nil {
+					eventType = baseEvent.Type
+				}
+			}
+
+			switch eventType {
+			case "content_block_delta":
+				// Parse content delta event
+				var delta loomContentDelta
+				if err := json.Unmarshal([]byte(event.Data), &delta); err != nil {
+					// Skip malformed events rather than failing
+					continue
+				}
+				if delta.Delta.Text != "" {
+					chunks <- StreamChunk{Content: delta.Delta.Text}
+				}
+
+			case "message_delta":
+				// Parse message delta (completion) event
+				var msgDelta loomMessageDelta
+				if err := json.Unmarshal([]byte(event.Data), &msgDelta); err != nil {
+					// Still mark as done even if we can't parse details
+					chunks <- StreamChunk{Done: true, FinishReason: "stop"}
+					continue
+				}
+				// Map stop_reason to finish_reason
+				finishReason := msgDelta.Delta.StopReason
+				if finishReason == "end_turn" {
+					finishReason = "stop"
+				}
+				chunks <- StreamChunk{Done: true, FinishReason: finishReason}
+
+			case "error":
+				// Parse error event
+				var errEvent loomErrorEvent
+				if err := json.Unmarshal([]byte(event.Data), &errEvent); err != nil {
+					errs <- fmt.Errorf("loom streaming error: %s", event.Data)
+				} else {
+					errs <- fmt.Errorf("loom streaming error: %s", errEvent.Error.Message)
+				}
+				return
+			}
+		}
 	}()
 
 	return chunks, errs

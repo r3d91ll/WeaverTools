@@ -489,13 +489,13 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 	if len(args) > 1 {
 		n, err := strconv.Atoi(args[1])
 		if err != nil {
-			return fmt.Errorf("invalid iterations: %s", args[1])
+			return createInvalidIterationsError(args[1], concept)
 		}
 		if n <= 0 {
-			return fmt.Errorf("iterations must be positive")
+			return createIterationsOutOfRangeError(args[1], concept, "must be positive (1-20)")
 		}
 		if n > 20 {
-			return fmt.Errorf("iterations exceeds maximum (20)")
+			return createIterationsOutOfRangeError(args[1], concept, "exceeds maximum of 20")
 		}
 		iterations = n
 	}
@@ -503,7 +503,7 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 	// Find an agent with hidden state support
 	extractAgent, err := s.findHiddenStateAgent(ctx)
 	if err != nil {
-		return err
+		return createNoHiddenStateAgentError(s.agents.List())
 	}
 
 	fmt.Printf("\033[33mValidating '%s' with %d iterations...\033[0m\n\n", concept, iterations)
@@ -545,7 +545,7 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 	}
 
 	if len(results) < 2 {
-		return fmt.Errorf("need at least 2 successful iterations for validation")
+		return createInsufficientIterationsError(concept, len(results), iterations)
 	}
 
 	// Calculate consistency metrics
@@ -609,17 +609,17 @@ func (s *Shell) handleMetrics(ctx context.Context, args []string) error {
 	conceptName := args[0]
 	concept, ok := s.conceptStore.Get(conceptName)
 	if !ok {
-		return fmt.Errorf("concept %q not found", conceptName)
+		return createConceptNotFoundError(conceptName, "/metrics", s.conceptStore.List())
 	}
 
 	vectors := concept.VectorsAsFloat64()
 	if len(vectors) < 3 {
-		return fmt.Errorf("need at least 3 samples, have %d", len(vectors))
+		return createInsufficientSamplesError(conceptName, "/metrics", len(vectors), 3)
 	}
 
 	result, err := s.analysisClient.AnalyzeGeometry(ctx, vectors)
 	if err != nil {
-		return err
+		return createMetricsAnalysisError(conceptName, len(vectors), err)
 	}
 
 	// Raw JSON-like output
@@ -1069,6 +1069,116 @@ func createComparisonError(concept1, concept2 string, count1, count2 int, cause 
 			WithSuggestion("Check the analysis server connection and logs").
 			WithSuggestion("Verify both concepts have vectors of the same dimension").
 			WithSuggestion("Try again with /compare " + concept1 + " " + concept2)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// /validate Command Error Helpers
+// -----------------------------------------------------------------------------
+
+// createInvalidIterationsError creates a structured error when the iterations argument is not a valid number.
+func createInvalidIterationsError(invalidValue, concept string) *werrors.WeaverError {
+	return werrors.Command(werrors.ErrCommandInvalidArg, "invalid iterations value: not a number").
+		WithContext("command", "/validate").
+		WithContext("argument", "iterations").
+		WithContext("invalid_value", invalidValue).
+		WithContext("concept", concept).
+		WithContext("valid_range", "1-20").
+		WithSuggestion("Iterations must be a positive integer between 1 and 20").
+		WithSuggestion("Example: /validate " + concept + " 5").
+		WithSuggestion("Default iterations is 3 if not specified: /validate " + concept)
+}
+
+// createIterationsOutOfRangeError creates a structured error when iterations is out of valid range.
+func createIterationsOutOfRangeError(value, concept, reason string) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrValidationOutOfRange, "iterations "+reason).
+		WithContext("command", "/validate").
+		WithContext("argument", "iterations").
+		WithContext("value", value).
+		WithContext("concept", concept).
+		WithContext("valid_range", "1-20").
+		WithSuggestion("Iterations must be between 1 and 20").
+		WithSuggestion("Example: /validate " + concept + " 5").
+		WithSuggestion("Recommended: 3-5 iterations for quick validation, 10-20 for comprehensive testing")
+}
+
+// createInsufficientIterationsError creates a structured error when fewer than 2 iterations succeeded.
+func createInsufficientIterationsError(concept string, successfulIterations, requestedIterations int) *werrors.WeaverError {
+	return werrors.Command(werrors.ErrConceptsInsufficientSamples,
+		fmt.Sprintf("validation requires at least 2 successful iterations, got %d", successfulIterations)).
+		WithContext("command", "/validate").
+		WithContext("concept", concept).
+		WithContext("successful_iterations", fmt.Sprintf("%d", successfulIterations)).
+		WithContext("requested_iterations", fmt.Sprintf("%d", requestedIterations)).
+		WithContext("required_iterations", "2").
+		WithSuggestion("Need at least 2 successful iterations to calculate consistency metrics").
+		WithSuggestion("Check the iteration failure messages above for error details").
+		WithSuggestion("Verify the backend is running and stable").
+		WithSuggestion("Try running validation again: /validate " + concept)
+}
+
+// -----------------------------------------------------------------------------
+// /metrics Command Error Helpers
+// -----------------------------------------------------------------------------
+
+// createMetricsAnalysisError creates a structured error when the metrics analysis fails.
+func createMetricsAnalysisError(conceptName string, vectorCount int, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	// Detect specific error types and provide targeted suggestions
+	switch {
+	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "connect:"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisServerUnavailable, "metrics analysis failed: server connection error").
+			WithContext("command", "/metrics").
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("Check if TheLoom analysis server is running").
+			WithSuggestion("Verify the server URL in your configuration").
+			WithSuggestion("Default: http://localhost:8080 - ensure the server is started")
+
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "metrics analysis timed out").
+			WithContext("command", "/metrics").
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("The analysis is taking too long - try with fewer samples").
+			WithSuggestion("Check if the analysis server is overloaded").
+			WithSuggestion("Try using /analyze for a more verbose analysis with status updates")
+
+	case strings.Contains(errStr, "EOF") || strings.Contains(errStr, "unexpected end"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisInvalidResponse, "metrics analysis returned incomplete response").
+			WithContext("command", "/metrics").
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("The analysis server may have crashed or restarted").
+			WithSuggestion("Check the analysis server logs for errors").
+			WithSuggestion("Try the request again")
+
+	case strings.Contains(errStr, "invalid") || strings.Contains(errStr, "parse") || strings.Contains(errStr, "unmarshal"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisInvalidResponse, "metrics analysis returned invalid data").
+			WithContext("command", "/metrics").
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("The server response could not be parsed").
+			WithSuggestion("Check for version mismatch between Weaver and TheLoom").
+			WithSuggestion("Verify the analysis server is running the correct version")
+
+	case strings.Contains(errStr, "context canceled"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "metrics analysis was interrupted").
+			WithContext("command", "/metrics").
+			WithContext("concept", conceptName).
+			WithSuggestion("The request was canceled before completion").
+			WithSuggestion("Try running /metrics " + conceptName + " again")
+
+	default:
+		// Generic metrics failure
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "metrics analysis failed").
+			WithContext("command", "/metrics").
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("Check the analysis server connection and logs").
+			WithSuggestion("Verify your vectors have the expected dimension").
+			WithSuggestion("Try again with /metrics " + conceptName)
 	}
 }
 

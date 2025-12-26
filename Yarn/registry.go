@@ -53,10 +53,34 @@ func (r *SessionRegistry) List() []string {
 
 // SessionStatus represents session status.
 type SessionStatus struct {
-	Name      string        `json:"name"`
-	ID        string        `json:"id"`
-	IsActive  bool          `json:"is_active"`
-	StartedAt time.Time     `json:"started_at"`
-	EndedAt   *time.Time    `json:"ended_at,omitempty"`
-	Stats     SessionStats  `json:"stats"`
+	Name      string       `json:"name"`
+	ID        string       `json:"id"`
+	IsActive  bool         `json:"is_active"`
+	StartedAt time.Time    `json:"started_at"`
+	EndedAt   *time.Time   `json:"ended_at,omitempty"`
+	Stats     SessionStats `json:"stats"`
+}
+
+// Status returns status for all registered sessions.
+func (r *SessionRegistry) Status() map[string]SessionStatus {
+	// Copy sessions to avoid holding lock during stats computation
+	r.mu.RLock()
+	sessions := make(map[string]*Session, len(r.sessions))
+	for name, s := range r.sessions {
+		sessions[name] = s
+	}
+	r.mu.RUnlock()
+
+	result := make(map[string]SessionStatus)
+	for name, session := range sessions {
+		result[name] = SessionStatus{
+			Name:      session.Name,
+			ID:        session.ID,
+			IsActive:  session.EndedAt == nil,
+			StartedAt: session.StartedAt,
+			EndedAt:   session.EndedAt,
+			Stats:     session.Stats(),
+		}
+	}
+	return result
 }

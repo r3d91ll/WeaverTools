@@ -465,13 +465,18 @@ func (s *Shell) handleCompare(ctx context.Context, args []string) error {
 		return fmt.Errorf("%q needs at least 3 samples, has %d", name2, len(vectors2))
 	}
 
-	fmt.Printf("\033[33mComparing '%s' (%d) vs '%s' (%d)...\033[0m\n",
-		name1, len(vectors1), name2, len(vectors2))
+	// Start comparison spinner
+	spin := spinner.New(fmt.Sprintf("Comparing '%s' (%d) vs '%s' (%d)...",
+		name1, len(vectors1), name2, len(vectors2)))
+	spin.Start()
 
 	result, err := s.analysisClient.CompareBilateral(ctx, vectors1, vectors2)
 	if err != nil {
+		spin.Fail(fmt.Sprintf("Comparison failed for '%s' vs '%s'", name1, name2))
 		return err
 	}
+
+	spin.Success(fmt.Sprintf("Compared '%s' vs '%s'", name1, name2))
 
 	// Display results
 	fmt.Printf("\n\033[36m=== Bilateral Comparison: %s ↔ %s ===\033[0m\n", name1, name2)

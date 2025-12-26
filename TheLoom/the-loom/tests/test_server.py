@@ -7,8 +7,19 @@ import torch
 from fastapi.testclient import TestClient
 
 from src.config import Config
-from src.loaders.base import EmbeddingOutput, GenerationOutput, LoadedModel
-from src.transport.http import create_http_app
+from src.loaders.base import (
+    EmbeddingOutput,
+    GenerationOutput,
+    LoadedModel,
+    StreamingOutput,
+    StreamingToken,
+)
+from src.transport.http import (
+    create_http_app,
+    ChatCompletionRequest,
+    StreamingChatCompletionRequest,
+    ChatMessage,
+)
 
 
 @pytest.fixture
@@ -458,9 +469,30 @@ class TestChatCompletionsEndpoint:
                 assert "User: Hello" in prompt
                 assert "Assistant:" in prompt
 
-    def test_chat_completion_streaming_not_implemented(self, mock_config):
-        """Test streaming returns 501 Not Implemented."""
-        with patch("src.transport.http.GPUManager"):
+    def test_chat_completion_streaming(self, mock_config, mock_loaded_model):
+        """Test streaming chat completions via SSE."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            # Setup mock model manager and registry
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            # Mock generate_stream to yield streaming events
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hello", token_id=1, is_finished=False)
+                yield StreamingToken(token=" world", token_id=2, is_finished=False)
+                yield StreamingToken(token="!", token_id=3, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hello world!",
+                    token_ids=[1, 2, 3],
+                    token_count=3,
+                    hidden_states={-1: torch.randn(1, 768)},
+                    metadata={"input_tokens": 10},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
             app = create_http_app(mock_config)
             client = TestClient(app)
 
@@ -470,11 +502,22 @@ class TestChatCompletionsEndpoint:
                     "model": "test-model",
                     "messages": [{"role": "user", "content": "Hello"}],
                     "stream": True,
+                    "return_hidden_states": True,
                 },
             )
 
-            assert response.status_code == 501
-            assert "not yet implemented" in response.json()["detail"].lower()
+            # Should return 200 with SSE content
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("text/event-stream")
+
+            # Parse SSE events
+            content = response.text
+            assert "event: content_block_delta" in content
+            assert "event: message_delta" in content
+            assert '"text": "Hello"' in content
+            assert '"text": " world"' in content
+            assert '"stop_reason": "end_turn"' in content
+            assert '"hidden_state"' in content
 
     def test_chat_completion_missing_messages(self, mock_config):
         """Test validation error when messages missing."""
@@ -723,3 +766,562 @@ class TestGeometryAnalysisEndpoints:
             assert response.status_code == 200
             data = response.json()
             assert 0 <= data["overall_alignment"] <= 1
+
+
+class TestStreamingChatCompletions:
+    """Comprehensive tests for streaming chat completions via SSE."""
+
+    def test_streaming_sse_format_content_block_delta(self, mock_config, mock_loaded_model):
+        """Test that content_block_delta events have correct SSE format."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hi", token_id=1, is_finished=False)
+                yield StreamingOutput(
+                    text="Hi",
+                    token_ids=[1],
+                    token_count=1,
+                    hidden_states=None,
+                    metadata={"input_tokens": 5},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                },
+            )
+
+            assert response.status_code == 200
+            content = response.text
+
+            # Verify SSE format: each event has "event:" and "data:" lines
+            lines = content.strip().split("\n")
+            event_lines = [l for l in lines if l.startswith("event:")]
+            data_lines = [l for l in lines if l.startswith("data:")]
+
+            assert len(event_lines) >= 1, "Should have at least one event line"
+            assert len(data_lines) >= 1, "Should have at least one data line"
+
+            # Verify content_block_delta event structure
+            assert "event: content_block_delta" in content
+            # Parse the content_block_delta data
+            import json
+
+            for i, line in enumerate(lines):
+                if line == "event: content_block_delta":
+                    data_line = lines[i + 1]
+                    assert data_line.startswith("data: ")
+                    data = json.loads(data_line[6:])  # Remove "data: " prefix
+                    assert data["type"] == "content_block_delta"
+                    assert "delta" in data
+                    assert data["delta"]["type"] == "text_delta"
+                    assert "text" in data["delta"]
+                    break
+
+    def test_streaming_sse_format_message_delta(self, mock_config, mock_loaded_model):
+        """Test that message_delta events have correct SSE format and content."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hello", token_id=1, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hello",
+                    token_ids=[1],
+                    token_count=1,
+                    hidden_states=None,
+                    metadata={"input_tokens": 10},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                    "return_hidden_states": False,
+                },
+            )
+
+            assert response.status_code == 200
+            content = response.text
+            import json
+
+            # Find and parse message_delta event
+            lines = content.strip().split("\n")
+            for i, line in enumerate(lines):
+                if line == "event: message_delta":
+                    data_line = lines[i + 1]
+                    assert data_line.startswith("data: ")
+                    data = json.loads(data_line[6:])
+
+                    # Verify message_delta structure
+                    assert data["type"] == "message_delta"
+                    assert data["delta"]["stop_reason"] == "end_turn"
+
+                    # Verify usage stats
+                    assert "usage" in data
+                    assert data["usage"]["prompt_tokens"] == 10
+                    assert data["usage"]["completion_tokens"] == 1
+                    assert data["usage"]["total_tokens"] == 11
+
+                    # Verify metadata
+                    assert "metadata" in data
+                    assert "model" in data["metadata"]
+                    assert "latency_ms" in data["metadata"]
+                    assert "tokens_per_second" in data["metadata"]
+                    break
+            else:
+                pytest.fail("message_delta event not found in SSE stream")
+
+    def test_streaming_multiple_tokens(self, mock_config, mock_loaded_model):
+        """Test streaming with multiple tokens yields multiple content_block_delta events."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            tokens = ["Hello", ", ", "how", " ", "are", " ", "you", "?"]
+            full_text = "".join(tokens)
+
+            def mock_generate_stream(**kwargs):
+                for i, token in enumerate(tokens):
+                    is_last = i == len(tokens) - 1
+                    yield StreamingToken(
+                        token=token,
+                        token_id=i + 1,
+                        is_finished=is_last,
+                        finish_reason="stop" if is_last else None,
+                    )
+                yield StreamingOutput(
+                    text=full_text,
+                    token_ids=list(range(1, len(tokens) + 1)),
+                    token_count=len(tokens),
+                    hidden_states=None,
+                    metadata={"input_tokens": 5},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+            )
+
+            assert response.status_code == 200
+            content = response.text
+
+            # Count content_block_delta events
+            delta_count = content.count("event: content_block_delta")
+            assert delta_count == len(tokens), f"Expected {len(tokens)} content_block_delta events, got {delta_count}"
+
+            # Verify all tokens are present
+            for token in tokens:
+                assert f'"text": "{token}"' in content or f'"text":"{token}"' in content
+
+    def test_streaming_with_hidden_states(self, mock_config, mock_loaded_model):
+        """Test streaming includes hidden state in final message_delta event."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hi", token_id=1, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hi",
+                    token_ids=[1],
+                    token_count=1,
+                    hidden_states={-1: torch.randn(1, 768)},
+                    metadata={"input_tokens": 5},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                    "return_hidden_states": True,
+                },
+            )
+
+            assert response.status_code == 200
+            content = response.text
+            import json
+
+            # Find and parse message_delta event
+            lines = content.strip().split("\n")
+            for i, line in enumerate(lines):
+                if line == "event: message_delta":
+                    data_line = lines[i + 1]
+                    data = json.loads(data_line[6:])
+
+                    # Verify hidden_state is included
+                    assert "hidden_state" in data, "hidden_state should be in message_delta"
+                    hidden_state = data["hidden_state"]
+                    assert "final" in hidden_state
+                    assert "shape" in hidden_state
+                    assert "layer" in hidden_state
+                    assert hidden_state["layer"] == -1
+                    assert "dtype" in hidden_state
+
+                    # Verify final is a list of floats
+                    assert isinstance(hidden_state["final"], list)
+                    assert len(hidden_state["final"]) > 0
+                    break
+            else:
+                pytest.fail("message_delta event not found")
+
+    def test_streaming_without_hidden_states(self, mock_config, mock_loaded_model):
+        """Test streaming without hidden states does not include hidden_state in message_delta."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hi", token_id=1, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hi",
+                    token_ids=[1],
+                    token_count=1,
+                    hidden_states=None,
+                    metadata={"input_tokens": 5},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                    "return_hidden_states": False,
+                },
+            )
+
+            assert response.status_code == 200
+            content = response.text
+            import json
+
+            # Find and parse message_delta event
+            lines = content.strip().split("\n")
+            for i, line in enumerate(lines):
+                if line == "event: message_delta":
+                    data_line = lines[i + 1]
+                    data = json.loads(data_line[6:])
+
+                    # Verify hidden_state is NOT included
+                    assert "hidden_state" not in data, "hidden_state should not be in message_delta when return_hidden_states=False"
+                    break
+
+    def test_streaming_error_event(self, mock_config, mock_loaded_model):
+        """Test that errors during streaming emit error event."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Start", token_id=1, is_finished=False)
+                raise RuntimeError("Simulated streaming error")
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+            )
+
+            # Streaming should still return 200 (error is in the event stream)
+            assert response.status_code == 200
+            content = response.text
+
+            # Verify error event is present
+            assert "event: error" in content
+            import json
+
+            lines = content.strip().split("\n")
+            for i, line in enumerate(lines):
+                if line == "event: error":
+                    data_line = lines[i + 1]
+                    data = json.loads(data_line[6:])
+                    assert data["type"] == "error"
+                    assert "error" in data
+                    assert "message" in data["error"]
+                    assert "Simulated streaming error" in data["error"]["message"]
+                    break
+            else:
+                pytest.fail("error event not found in stream")
+
+    def test_streaming_content_type_header(self, mock_config, mock_loaded_model):
+        """Test that streaming response has correct content-type header."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hi", token_id=1, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hi",
+                    token_ids=[1],
+                    token_count=1,
+                    hidden_states=None,
+                    metadata={"input_tokens": 5},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                },
+            )
+
+            assert response.status_code == 200
+            # Content-Type should be text/event-stream
+            content_type = response.headers.get("content-type", "")
+            assert content_type.startswith("text/event-stream"), f"Expected text/event-stream, got {content_type}"
+
+    def test_streaming_generation_parameters(self, mock_config, mock_loaded_model):
+        """Test that streaming passes generation parameters correctly."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            captured_kwargs = {}
+
+            def mock_generate_stream(**kwargs):
+                captured_kwargs.update(kwargs)
+                yield StreamingToken(token="Hi", token_id=1, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hi",
+                    token_ids=[1],
+                    token_count=1,
+                    hidden_states=None,
+                    metadata={"input_tokens": 5},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                    "max_tokens": 100,
+                    "temperature": 0.5,
+                    "top_p": 0.8,
+                },
+            )
+
+            assert response.status_code == 200
+
+            # Verify parameters were passed correctly
+            assert captured_kwargs["max_tokens"] == 100
+            assert captured_kwargs["temperature"] == 0.5
+            assert captured_kwargs["top_p"] == 0.8
+
+    def test_streaming_vs_non_streaming_response_type(self, mock_config, mock_loaded_model, mock_generation_output):
+        """Test that stream=true returns SSE, stream=false returns JSON."""
+        mock_generation_output.metadata["input_tokens"] = 10
+
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            mock_registry.return_value.load.return_value = mock_loaded_model
+            mock_registry.return_value.generate.return_value = mock_generation_output
+
+            mock_loaded_model.tokenizer.apply_chat_template = MagicMock(
+                return_value="Hello"
+            )
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            # Non-streaming request
+            non_streaming_response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
+            )
+
+            assert non_streaming_response.status_code == 200
+            # Should return JSON
+            content_type = non_streaming_response.headers.get("content-type", "")
+            assert "application/json" in content_type
+
+            # Verify JSON structure
+            data = non_streaming_response.json()
+            assert "text" in data
+            assert "usage" in data
+
+
+class TestStreamingChatCompletionRequest:
+    """Tests for StreamingChatCompletionRequest model validation."""
+
+    def test_streaming_request_default_stream_is_true(self):
+        """Test that StreamingChatCompletionRequest defaults to stream=True."""
+        request = StreamingChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+        )
+        assert request.stream is True
+
+    def test_streaming_request_validation_fields(self):
+        """Test that StreamingChatCompletionRequest validates all required fields."""
+        # Valid minimal request
+        request = StreamingChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+        )
+        assert request.model == "test-model"
+        assert len(request.messages) == 1
+        assert request.max_tokens == 256  # default
+        assert request.temperature == 0.7  # default
+        assert request.top_p == 0.9  # default
+        assert request.return_hidden_states is True  # default
+
+    def test_streaming_request_temperature_validation(self):
+        """Test that StreamingChatCompletionRequest validates temperature range."""
+        # Valid temperature
+        request = StreamingChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+            temperature=1.5,
+        )
+        assert request.temperature == 1.5
+
+        # Invalid temperature (too high) - should raise ValidationError
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            StreamingChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")],
+                temperature=3.0,  # Out of range (max 2.0)
+            )
+
+    def test_streaming_request_from_chat_request(self):
+        """Test conversion from ChatCompletionRequest to StreamingChatCompletionRequest."""
+        chat_request = ChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+            max_tokens=100,
+            temperature=0.5,
+            top_p=0.8,
+            return_hidden_states=False,
+            stream=False,  # Original is not streaming
+            loader="transformers",
+            device="cuda:0",
+        )
+
+        streaming_request = StreamingChatCompletionRequest.from_chat_request(chat_request)
+
+        # All fields should be copied
+        assert streaming_request.model == "test-model"
+        assert len(streaming_request.messages) == 1
+        assert streaming_request.max_tokens == 100
+        assert streaming_request.temperature == 0.5
+        assert streaming_request.top_p == 0.8
+        assert streaming_request.return_hidden_states is False
+        assert streaming_request.loader == "transformers"
+        assert streaming_request.device == "cuda:0"
+        # stream should be True regardless of original
+        assert streaming_request.stream is True
+
+    def test_streaming_request_empty_messages_invalid(self):
+        """Test that empty messages list is invalid."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            StreamingChatCompletionRequest(
+                model="test-model",
+                messages=[],
+            )
+
+    def test_streaming_request_invalid_max_tokens(self):
+        """Test that max_tokens outside valid range is rejected."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            StreamingChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")],
+                max_tokens=10000,  # Out of range (max 8192)
+            )
+
+    def test_chat_completion_request_stream_field(self):
+        """Test that ChatCompletionRequest stream field defaults correctly."""
+        request = ChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+        )
+        assert request.stream is False  # default
+
+        streaming = ChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+            stream=True,
+        )
+        assert streaming.stream is True

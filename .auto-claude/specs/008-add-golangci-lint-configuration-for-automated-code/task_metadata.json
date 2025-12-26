@@ -1,0 +1,9 @@
+{
+  "sourceType": "ideation",
+  "ideationType": "code_quality",
+  "ideaId": "cq-002",
+  "rationale": "Linting catches bugs early, enforces consistent code style across developers, and prevents common Go pitfalls. Without linting, code reviews must manually catch issues that could be automated, and inconsistent patterns may emerge across the codebase.",
+  "category": "refactoring",
+  "codeQualitySeverity": "major",
+  "priority": "high"
+}

@@ -18,6 +18,16 @@ const (
 	RoleTool      MessageRole = "tool"
 )
 
+// IsValid returns true if this is a valid message role.
+func (r MessageRole) IsValid() bool {
+	switch r {
+	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
+		return true
+	default:
+		return false
+	}
+}
+
 // Message is the atomic unit of communication between agents.
 type Message struct {
 	ID          string         `json:"id"`
@@ -82,6 +92,34 @@ func (m *Message) WithMetadata(key string, value any) *Message {
 // HasHiddenState returns true if this message has hidden state data.
 func (m *Message) HasHiddenState() bool {
 	return m.HiddenState != nil && len(m.HiddenState.Vector) > 0
+}
+
+// Validate checks if the message is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (m *Message) Validate() *ValidationError {
+	if m.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if !m.Role.IsValid() {
+		return &ValidationError{Field: "role", Message: "invalid role"}
+	}
+	if m.Timestamp.IsZero() {
+		return &ValidationError{Field: "timestamp", Message: "timestamp is required"}
+	}
+
+	// Tool messages require ToolCallID
+	if m.Role == RoleTool {
+		if m.ToolCallID == "" {
+			return &ValidationError{Field: "tool_call_id", Message: "tool_call_id is required for tool messages"}
+		}
+	} else {
+		// Non-tool messages require content
+		if m.Content == "" {
+			return &ValidationError{Field: "content", Message: "content is required for non-tool messages"}
+		}
+	}
+
+	return nil
 }
 
 // Dimension returns the hidden dimension size.

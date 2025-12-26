@@ -43,21 +43,54 @@ WeaverTools/
 
 ## Development Commands
 
-### Weaver (Go CLI)
+### Makefile (Recommended)
+
+The repository includes a Makefile for standardized development workflows across all Go modules (Weaver, Wool, Yarn). **Use these commands instead of manual go commands.**
 
 ```bash
-cd Weaver
+# From repository root
 
-go build -o weaver ./cmd/weaver   # Build
-go test -v ./...                   # Run tests
-go vet ./...                       # Static analysis
+make build          # Build all modules (compile check)
+make build-weaver   # Build the weaver binary (output: Weaver/weaver)
 
-./weaver                           # Run interactive mode
-./weaver -m "message"              # Single query
-./weaver --trace proj              # With Phoenix tracing
+make test           # Run tests for all modules
+make test-verbose   # Run tests with verbose output
+make test-coverage  # Run tests with coverage report
+
+make lint           # Run golangci-lint on all modules
+make lint-fix       # Run golangci-lint with auto-fix
+
+make vet            # Run go vet on all modules
+make fmt            # Format all code with gofmt
+make fmt-check      # Check if code is formatted (CI-friendly)
+
+make check          # Run ALL quality checks (fmt-check, vet, lint, test)
+
+make clean          # Remove build artifacts
+make deps           # Download and verify dependencies
+make deps-tidy      # Tidy dependencies (go mod tidy)
+
+make help           # Show all available targets
 ```
 
-### Go Libraries (Wool, Yarn)
+**Note:** `golangci-lint` must be installed for lint commands:
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+
+### Weaver (Go CLI) - Direct Commands
+
+For running the Weaver CLI (after building):
+
+```bash
+./Weaver/weaver                      # Run interactive mode
+./Weaver/weaver -m "message"         # Single query
+./Weaver/weaver --trace proj         # With Phoenix tracing
+```
+
+### Go Libraries (Wool, Yarn) - Direct Commands
+
+While `make` targets are preferred, you can still run commands directly:
 
 ```bash
 # Wool - Common types
@@ -210,6 +243,14 @@ Weaver auto-detects running local model services:
 
 ### Go Components
 
+**Using Makefile (recommended):**
+```bash
+make test           # Run all tests across all modules
+make test-verbose   # Run tests with verbose output
+make test-coverage  # Run tests with coverage report
+```
+
+**Direct commands (for specific packages/tests):**
 ```bash
 # Weaver
 cd Weaver

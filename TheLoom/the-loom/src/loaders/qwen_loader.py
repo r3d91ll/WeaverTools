@@ -398,18 +398,48 @@ class QwenLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract hidden states from generation output."""
+        """
+        Extract the last-token hidden-state vectors for specified layers from generation output.
+
+        Qwen multimodal models follow the standard HuggingFace hidden_states format,
+        identical to TransformersLoader. The hidden_states tuple structure is:
+        - Outer tuple: one entry per generation step (each new token)
+        - Inner tuple: (num_layers + 1) tensors - embedding layer at index 0,
+          then transformer layers 1 through num_layers
+        - Each tensor: shape [batch, seq_len, hidden_size]
+
+        Parameters:
+            hidden_states: Generation output hidden states: tuple[step][layer]
+            layers: List of layer indices to extract (negative indices supported)
+            num_layers: Number of model layers (for negative index resolution)
+
+        Returns:
+            dict mapping layer index to tensor of shape [batch, hidden_size]
+        """
         result: dict[int, torch.Tensor] = {}
 
         if not hidden_states:
             return result
 
+        # Get the final generation step's hidden states.
+        # The last step (-1) contains hidden states after generating the final token.
         final_step = hidden_states[-1]
 
         for layer_idx in layers:
+            # Convert negative indices: use num_layers + 1 (not num_layers) because
+            # the tuple includes the embedding layer at index 0. So for a 32-layer model:
+            #   - Index 0 = embedding output
+            #   - Index 1-32 = transformer layer outputs
+            #   - Index -1 resolves to 32 (last transformer layer)
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + 1 + layer_idx
 
             if 0 <= actual_idx < len(final_step):
+                # Extract last token's hidden state from this layer.
+                # Tensor shape: [batch, seq_len, hidden_size]
+                # Slice [:, -1, :] selects all batches, last sequence position (the
+                # newly generated token), and all hidden dimensions.
+                # Result shape: [batch, hidden_size]
+                # .cpu() transfers tensor from GPU to CPU for serialization/storage.
                 layer_hidden = final_step[actual_idx][:, -1, :].cpu()
                 result[layer_idx] = layer_hidden
 
@@ -421,25 +451,54 @@ class QwenLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract attention weights from generation output.
+        """
+        Extract the attention weights for the requested layers from generation output.
 
-        Note: Unlike hidden_states which includes the embedding layer at index 0,
-        attention weights only have num_layers elements (one per transformer layer).
-        Therefore negative index calculation differs: num_layers + layer_idx
-        vs num_layers + 1 + layer_idx for hidden states.
+        CRITICAL INDEXING DIFFERENCE from _extract_hidden_states():
+        - hidden_states tuple has (num_layers + 1) entries: embedding layer at index 0,
+          then transformer layers 1 through num_layers
+        - attention tuple has only num_layers entries: NO embedding layer, just
+          transformer layers 0 through (num_layers - 1)
+
+        Therefore negative index resolution differs:
+        - hidden_states: actual_idx = num_layers + 1 + layer_idx  (e.g., -1 -> 32 for 32-layer model)
+        - attention:     actual_idx = num_layers + layer_idx      (e.g., -1 -> 31 for 32-layer model)
+
+        The attentions tuple structure is:
+        - Outer tuple: one entry per generation step (each new token)
+        - Inner tuple: num_layers tensors (NO embedding layer, unlike hidden_states)
+        - Each tensor: shape [batch, num_heads, query_seq_len, key_seq_len]
+
+        Parameters:
+            attentions: Generation output attention weights: tuple[step][layer]
+            layers: List of layer indices to extract (negative indices supported)
+            num_layers: Number of model layers (for negative index resolution)
+
+        Returns:
+            dict mapping layer index to tensor of shape [batch, num_heads, key_seq_len]
         """
         result: dict[int, torch.Tensor] = {}
 
         if not attentions:
             return result
 
+        # Get the final generation step's attention weights
         final_step = attentions[-1]
 
         for layer_idx in layers:
-            # Attention tuple has num_layers elements (no embedding layer)
+            # Convert negative indices: use num_layers (NOT num_layers + 1) because
+            # attention tuple has no embedding layer entry. For a 32-layer model:
+            #   - Index 0-31 = attention weights for transformer layers 1-32
+            #   - Index -1 resolves to 31 (last transformer layer's attention)
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + layer_idx
 
             if 0 <= actual_idx < len(final_step):
+                # Attention tensor shape: [batch, num_heads, query_seq_len, key_seq_len]
+                # Slice [:, :, -1, :] selects all batches, all heads, last query position
+                # (the newly generated token attending to all previous positions),
+                # and all key positions.
+                # Result shape: [batch, num_heads, key_seq_len]
+                # .cpu() transfers tensor from GPU to CPU for serialization/storage.
                 layer_attn = final_step[actual_idx][:, :, -1, :].cpu()
                 result[layer_idx] = layer_attn
 
@@ -451,22 +510,61 @@ class QwenLoader(ModelLoader):
         layers: list[int],
         num_layers: int,
     ) -> dict[int, torch.Tensor]:
-        """Extract hidden states for all generated tokens (manifold)."""
+        """Extract hidden states for ALL generated tokens (manifold construction).
+
+        This creates the full geometric representation of the generation -
+        each token's position in the model's semantic space, forming the
+        "boundary object" manifold. This is valuable for analyzing the
+        trajectory of meaning as generation unfolds.
+
+        The hidden_states tuple from generate() is structured as:
+        - Tuple of generation steps (one per token generated)
+        - Each step has tuple of (num_layers + 1) tensors
+        - Each tensor is [batch, seq_len, hidden_size]
+
+        We extract the last token position from each step, giving us
+        the newly generated token's representation at each step.
+
+        Parameters:
+            hidden_states: Generation output hidden states: tuple[step][layer]
+            layers: List of layer indices to extract (negative indices supported)
+            num_layers: Number of model layers (for negative index resolution)
+
+        Returns:
+            dict mapping layer_idx to tensor of shape [num_tokens, hidden_size]
+        """
         result: dict[int, torch.Tensor] = {}
 
         if not hidden_states:
             return result
 
         for layer_idx in layers:
+            # Convert negative indices using num_layers + 1 (same as _extract_hidden_states)
+            # because hidden_states tuple includes embedding layer at index 0.
             actual_idx = layer_idx if layer_idx >= 0 else num_layers + 1 + layer_idx
 
+            # Build manifold: collect one hidden vector per generation step.
+            # Each step represents one newly generated token's position in
+            # the model's semantic space. Together they trace out the
+            # "boundary object" geometry of the full generation.
             step_vectors = []
             for step in hidden_states:
                 if 0 <= actual_idx < len(step):
+                    # Extract the newly generated token's hidden state from this step.
+                    # Slice [0, -1, :] selects:
+                    #   - 0: first batch (single input assumption)
+                    #   - -1: last sequence position (the token just generated)
+                    #   - :: all hidden dimensions
+                    # Result shape: [hidden_size] (1D vector for this token)
+                    # .cpu() transfers to CPU for collection/serialization.
                     token_hidden = step[actual_idx][0, -1, :].cpu()
                     step_vectors.append(token_hidden)
 
             if step_vectors:
+                # Stack all token vectors into a single matrix.
+                # Final shape: [num_tokens, hidden_size] where num_tokens = number
+                # of generation steps = number of tokens generated.
+                # This matrix represents the manifold/trajectory through semantic space.
                 sequence_tensor = torch.stack(step_vectors, dim=0)
                 result[layer_idx] = sequence_tensor
 
@@ -479,15 +577,28 @@ class QwenLoader(ModelLoader):
         pooling: str = "last_token",
         **kwargs: Any,
     ) -> EmbeddingOutput:
-        """Extract embedding from text.
+        """
+        Compute an embedding for the given text using the provided loaded model and pooling strategy.
 
-        Args:
-            loaded_model: Previously loaded model
-            text: Text to embed
-            pooling: Pooling strategy (last_token, mean, first_token)
+        The default "last_token" pooling is recommended for decoder-only models because the final
+        token's hidden state accumulates context from all previous tokens via causal attention.
+
+        Parameters:
+            loaded_model (LoadedModel): Loaded model container with `.model`, `.tokenizer`, `.device`.
+            text (str): Input text to embed.
+            pooling (str): Pooling strategy to reduce token-level hidden states to a single vector:
+                - "last_token": Use the last non-padding token's hidden state (recommended).
+                - "mean": Mean-pool hidden states across non-padding tokens.
+                - "first_token": Use the first token's hidden state.
 
         Returns:
-            EmbeddingOutput with embedding tensor
+            EmbeddingOutput: Contains:
+                - embedding: CPU tensor of the resulting embedding (batch dimension removed).
+                - shape: Shape of the embedding tensor.
+                - metadata: Dict with keys including "pooling", "inference_time_ms", etc.
+
+        Raises:
+            ValueError: If an unknown pooling strategy is provided.
         """
         model = loaded_model.model
         tokenizer = loaded_model.tokenizer
@@ -508,27 +619,43 @@ class QwenLoader(ModelLoader):
 
         inference_time = time.time() - start_time
 
-        # Get last layer hidden states
+        # Get last layer hidden states: [batch, seq_len, hidden_size]
+        # Index -1 retrieves the final transformer layer's output (best for embeddings).
         last_hidden = outputs.hidden_states[-1]
 
-        # Apply pooling
+        # Apply pooling strategy to reduce token-level representations to a single vector.
+        # For decoder-only models, last_token is preferred because the final position
+        # has "seen" all previous tokens via causal attention, accumulating full context.
         attention_mask = inputs.attention_mask
         if pooling == "last_token":
+            # Use attention_mask to find the actual last token (not padding).
+            # attention_mask is 1 for real tokens, 0 for padding.
+            # sum(dim=1) gives sequence lengths; subtract 1 to get 0-indexed position.
             seq_lengths = attention_mask.sum(dim=1) - 1
             batch_size = last_hidden.shape[0]
+            # Advanced indexing: select [batch_i, seq_lengths[batch_i], :] for each batch.
+            # This correctly handles variable-length sequences in the same batch.
             embedding = last_hidden[torch.arange(batch_size, device=device), seq_lengths]
         elif pooling == "mean":
+            # Mean pooling: average all non-padding token representations.
+            # Expand mask to [batch, seq, 1] for broadcasting with hidden states.
             mask = attention_mask.unsqueeze(-1)
-            mask_sum = mask.sum(dim=1).clamp(min=1)  # Avoid division by zero
+            # Sum hidden states weighted by mask, divide by number of real tokens.
+            # clamp(min=1) prevents division by zero for edge cases.
+            mask_sum = mask.sum(dim=1).clamp(min=1)
             embedding = (last_hidden * mask).sum(dim=1) / mask_sum
         elif pooling == "first_token":
+            # First token (often [CLS] or BOS) - mainly for encoder-style models.
             embedding = last_hidden[:, 0, :]
         else:
-            raise ValueError(f"Unknown pooling: {pooling}")
+            raise ValueError(f"Unknown pooling: {pooling}. Use: last_token, mean, first_token")
 
+        # Transfer embedding to CPU for storage/serialization.
         embedding = embedding.cpu()
 
         return EmbeddingOutput(
+            # squeeze(0) removes the batch dimension [1, hidden_size] -> [hidden_size]
+            # for single-input API consistency. The caller expects a 1D embedding vector.
             embedding=embedding.squeeze(0),
             shape=tuple(embedding.shape),
             metadata={

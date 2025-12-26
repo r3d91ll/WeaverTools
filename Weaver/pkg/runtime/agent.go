@@ -84,15 +84,8 @@ func (a *Agent) Chat(ctx context.Context, messages []*yarn.Message) (*yarn.Messa
 		def.Name,
 	)
 
-	// Attach hidden state if available
-	if resp.HiddenState != nil {
-		result.HiddenState = &yarn.HiddenState{
-			Vector: resp.HiddenState.Vector,
-			Shape:  resp.HiddenState.Shape,
-			Layer:  resp.HiddenState.Layer,
-			DType:  resp.HiddenState.DType,
-		}
-	}
+	// Attach hidden state if available (types now match, no conversion needed)
+	result.HiddenState = resp.HiddenState
 
 	// Add metadata
 	result.WithMetadata("model", resp.Model)

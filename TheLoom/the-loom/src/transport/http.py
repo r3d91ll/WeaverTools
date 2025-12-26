@@ -469,6 +469,10 @@ class ChatCompletionRequest(BaseModel):
     This endpoint is designed for WeaverCode integration, providing the
     messages-based API that WeaverCode expects while exposing hidden states
     for conveyance measurement.
+
+    Supports both streaming and non-streaming responses:
+    - stream=false (default): Returns ChatCompletionResponse
+    - stream=true: Returns SSE stream with content_block_delta and message_delta events
     """
 
     model: str = Field(..., description="Model ID (HuggingFace or local path)")
@@ -487,12 +491,82 @@ class ChatCompletionRequest(BaseModel):
     return_hidden_states: bool = Field(
         default=True, description="Return hidden states for conveyance measurement"
     )
-    stream: bool = Field(default=False, description="Stream responses (not yet implemented)")
+    stream: bool = Field(
+        default=False,
+        description="Enable streaming responses via Server-Sent Events (SSE). "
+        "When true, returns content_block_delta events for each token and "
+        "message_delta event at completion.",
+    )
     loader: str | None = Field(default=None, description="Force specific loader")
     device: str | None = Field(
         default=None,
         description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
     )
+
+
+class StreamingChatCompletionRequest(BaseModel):
+    """Request model for streaming chat completions via SSE.
+
+    This is a convenience model that explicitly requires streaming.
+    It contains the same fields as ChatCompletionRequest but with
+    stream always set to True.
+
+    Use this model when you want to explicitly type a streaming request,
+    or use ChatCompletionRequest with stream=true for flexibility.
+
+    SSE Event Types:
+    - content_block_delta: Emitted for each generated token
+      {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
+    - message_delta: Emitted at completion with usage stats
+      {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {...}}
+    - error: Emitted if an error occurs during streaming
+      {"type": "error", "error": {"message": "..."}}
+    """
+
+    model: str = Field(..., description="Model ID (HuggingFace or local path)")
+    messages: list[ChatMessage] = Field(
+        ..., description="List of chat messages", min_length=1
+    )
+    max_tokens: int = Field(
+        default=256, ge=1, le=8192, description="Max tokens to generate"
+    )
+    temperature: float = Field(
+        default=0.7, ge=0.0, le=2.0, description="Sampling temperature"
+    )
+    top_p: float = Field(
+        default=0.9, ge=0.0, le=1.0, description="Nucleus sampling probability"
+    )
+    return_hidden_states: bool = Field(
+        default=True,
+        description="Return hidden states in final message_delta event",
+    )
+    stream: bool = Field(
+        default=True,
+        description="Always True for streaming requests",
+    )
+    loader: str | None = Field(default=None, description="Force specific loader")
+    device: str | None = Field(
+        default=None,
+        description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
+    )
+
+    @classmethod
+    def from_chat_request(cls, request: ChatCompletionRequest) -> "StreamingChatCompletionRequest":
+        """Convert a ChatCompletionRequest to StreamingChatCompletionRequest.
+
+        Useful when you need to ensure streaming is enabled.
+        """
+        return cls(
+            model=request.model,
+            messages=request.messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            return_hidden_states=request.return_hidden_states,
+            stream=True,
+            loader=request.loader,
+            device=request.device,
+        )
 
 
 class ChatCompletionUsage(BaseModel):
@@ -937,6 +1011,132 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     app.state.registry = registry
 
     # ========================================================================
+    # Streaming Chat Completions Helper
+    # ========================================================================
+
+    async def _stream_chat_completions(
+        request: ChatCompletionRequest,
+        manager: ModelManager,
+        reg: LoaderRegistry,
+    ) -> StreamingResponse:
+        """Stream chat completions as Server-Sent Events.
+
+        Follows the pattern established by /generate/stream but uses event
+        names matching Claude/Anthropic API conventions:
+        - content_block_delta: Contains text delta for each token
+        - message_delta: Final event with usage stats and completion info
+        - error: If an error occurs during streaming
+        """
+
+        async def event_generator() -> AsyncIterator[str]:
+            """Generate SSE events for streaming chat completion."""
+            start_time = time.perf_counter()
+            completion_tokens = 0
+            full_text = ""
+
+            try:
+                # Get or load model (with optional device override)
+                loaded = manager.get_or_load(
+                    request.model,
+                    device=request.device,
+                    loader_name=request.loader,
+                )
+
+                # Apply chat template to convert messages to prompt
+                prompt = _apply_chat_template(
+                    request.messages,  # type: ignore[arg-type]
+                    loaded.tokenizer,
+                    loaded.model_id,
+                )
+
+                # Stream tokens using registry
+                for item in reg.generate_stream(
+                    loaded_model=loaded,
+                    prompt=prompt,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    return_hidden_states=request.return_hidden_states,
+                    hidden_state_layers=[-1],  # WeaverCode only needs final layer
+                ):
+                    if isinstance(item, StreamingToken):
+                        # Emit content_block_delta event for each token
+                        completion_tokens += 1
+                        full_text += item.token
+                        data = {
+                            "type": "content_block_delta",
+                            "delta": {
+                                "type": "text_delta",
+                                "text": item.token,
+                            },
+                        }
+                        yield f"event: content_block_delta\ndata: {json.dumps(data)}\n\n"
+
+                    elif isinstance(item, StreamingOutput):
+                        # Final output - emit message_delta event
+                        gen_latency = time.perf_counter() - start_time
+                        prompt_tokens = item.metadata.get("input_tokens", 0)
+
+                        # Record metrics
+                        record_generation(
+                            model=request.model,
+                            tokens=item.token_count,
+                            latency=gen_latency,
+                        )
+
+                        # Build message_delta with usage stats
+                        message_data: dict[str, Any] = {
+                            "type": "message_delta",
+                            "delta": {
+                                "stop_reason": "end_turn",
+                            },
+                            "usage": {
+                                "prompt_tokens": prompt_tokens,
+                                "completion_tokens": item.token_count,
+                                "total_tokens": prompt_tokens + item.token_count,
+                            },
+                            "metadata": {
+                                "model": loaded.model_id,
+                                "latency_ms": gen_latency * 1000,
+                                "tokens_per_second": item.token_count / gen_latency
+                                if gen_latency > 0
+                                else 0,
+                            },
+                        }
+
+                        # Include hidden state in final event if requested
+                        if request.return_hidden_states and item.hidden_states:
+                            final_layer_data = item.hidden_states.get(-1)
+                            if final_layer_data is not None:
+                                hidden_vector = tensor_to_list(final_layer_data)
+                                hidden_shape = list(final_layer_data.shape)
+                                dtype_str = str(final_layer_data.dtype).replace("torch.", "")
+
+                                message_data["hidden_state"] = {
+                                    "final": hidden_vector,
+                                    "shape": hidden_shape,
+                                    "layer": -1,
+                                    "dtype": dtype_str,
+                                }
+
+                        yield f"event: message_delta\ndata: {json.dumps(message_data)}\n\n"
+
+            except Exception as e:
+                logger.exception(f"Streaming chat completion failed: {e}")
+                error_data = {"type": "error", "error": {"message": str(e)}}
+                yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            },
+        )
+
+    # ========================================================================
     # Endpoints
     # ========================================================================
 
@@ -1188,10 +1388,10 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     # OpenAI-Compatible Chat Completions (WeaverCode Integration)
     # ========================================================================
 
-    @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
+    @app.post("/v1/chat/completions")
     async def chat_completions(
         request: ChatCompletionRequest,
-    ) -> ChatCompletionResponse:
+    ) -> ChatCompletionResponse | StreamingResponse:
         """OpenAI-compatible chat completion with hidden state extraction.
 
         This endpoint is designed for WeaverCode integration, providing:
@@ -1199,10 +1399,16 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         - Chat template application (model-specific formatting)
         - Hidden state extraction in WeaverCode-expected format
         - Token usage breakdown (prompt/completion/total)
+        - Streaming support via Server-Sent Events (SSE)
 
         The hidden state returned is the "boundary object" - the geometric
         representation of meaning before lm_head projection. This enables
         conveyance measurement between AI agents.
+
+        When stream=true, returns SSE events:
+        - content_block_delta: Contains text delta for each token
+        - message_delta: Final event with completion info
+        - error: If an error occurs during streaming
 
         Example request:
             {
@@ -1214,7 +1420,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 "return_hidden_states": true
             }
 
-        Example response:
+        Example response (non-streaming):
             {
                 "text": "Hello! How can I help you today?",
                 "usage": {
@@ -1232,10 +1438,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
             }
         """
         if request.stream:
-            raise HTTPException(
-                status_code=501,
-                detail="Streaming not yet implemented for chat completions. Use stream=false.",
-            )
+            return await _stream_chat_completions(request, model_manager, registry)
 
         start_time = time.perf_counter()
         try:

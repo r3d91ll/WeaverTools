@@ -1,7 +1,9 @@
 package yarn
 
 import (
+	"fmt"
 	"sort"
+	"sync"
 	"testing"
 )
 
@@ -863,6 +865,494 @@ func TestGetOrCreate(t *testing.T) {
 		}
 		if active[0] != session {
 			t.Error("created session not found in active list")
+		}
+	})
+}
+
+// ============================================================================
+// Concurrency Tests
+// ============================================================================
+
+// TestConcurrentRegister verifies thread-safety of Register operations.
+func TestConcurrentRegister(t *testing.T) {
+	t.Run("concurrent register different names", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numGoroutines = 100
+
+		var wg sync.WaitGroup
+		errors := make(chan error, numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx)
+				session := NewSession(name, "description")
+				if err := registry.Register(name, session); err != nil {
+					errors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// Check for errors
+		for err := range errors {
+			t.Errorf("unexpected error during concurrent register: %v", err)
+		}
+
+		// Verify all sessions were registered
+		if registry.Count() != numGoroutines {
+			t.Errorf("expected %d sessions, got %d", numGoroutines, registry.Count())
+		}
+	})
+
+	t.Run("concurrent register same name", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numGoroutines = 50
+
+		var wg sync.WaitGroup
+		successCount := make(chan struct{}, numGoroutines)
+		errorCount := make(chan struct{}, numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				session := NewSession(fmt.Sprintf("session-%d", idx), "description")
+				if err := registry.Register("same-name", session); err != nil {
+					errorCount <- struct{}{}
+				} else {
+					successCount <- struct{}{}
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(successCount)
+		close(errorCount)
+
+		// Count successes and errors
+		successes := 0
+		for range successCount {
+			successes++
+		}
+		errors := 0
+		for range errorCount {
+			errors++
+		}
+
+		// Exactly one should succeed
+		if successes != 1 {
+			t.Errorf("expected exactly 1 success, got %d", successes)
+		}
+		if errors != numGoroutines-1 {
+			t.Errorf("expected %d errors, got %d", numGoroutines-1, errors)
+		}
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 session, got %d", registry.Count())
+		}
+	})
+}
+
+// TestConcurrentGet verifies thread-safety of Get operations.
+func TestConcurrentGet(t *testing.T) {
+	t.Run("concurrent get same session", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		session := NewSession("test-session", "description")
+		_ = registry.Register("test", session)
+
+		const numGoroutines = 100
+		var wg sync.WaitGroup
+		results := make(chan *Session, numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				got, ok := registry.Get("test")
+				if !ok {
+					t.Error("expected to find session")
+				}
+				results <- got
+			}()
+		}
+
+		wg.Wait()
+		close(results)
+
+		// All should return the same session
+		for got := range results {
+			if got != session {
+				t.Error("concurrent Get returned different session")
+			}
+		}
+	})
+
+	t.Run("concurrent get different sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numSessions = 10
+
+		// Register sessions
+		sessions := make(map[string]*Session)
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			s := NewSession(name, "description")
+			sessions[name] = s
+			_ = registry.Register(name, s)
+		}
+
+		const numGoroutines = 100
+		var wg sync.WaitGroup
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx%numSessions)
+				got, ok := registry.Get(name)
+				if !ok {
+					t.Errorf("expected to find session %s", name)
+				}
+				if got != sessions[name] {
+					t.Errorf("wrong session returned for %s", name)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+	})
+}
+
+// TestConcurrentList verifies thread-safety of List operations.
+func TestConcurrentList(t *testing.T) {
+	t.Run("concurrent list operations", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numSessions = 10
+
+		// Register sessions
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			_ = registry.Register(name, NewSession(name, "description"))
+		}
+
+		const numGoroutines = 50
+		var wg sync.WaitGroup
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				names := registry.List()
+				if len(names) != numSessions {
+					t.Errorf("expected %d names, got %d", numSessions, len(names))
+				}
+			}()
+		}
+
+		wg.Wait()
+	})
+}
+
+// TestConcurrentMixedOperations verifies thread-safety with mixed read/write operations.
+func TestConcurrentMixedOperations(t *testing.T) {
+	t.Run("concurrent register and get", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numGoroutines = 50
+
+		var wg sync.WaitGroup
+
+		// Half register, half get
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			if i%2 == 0 {
+				// Register
+				go func(idx int) {
+					defer wg.Done()
+					name := fmt.Sprintf("session-%d", idx)
+					session := NewSession(name, "description")
+					_ = registry.Register(name, session)
+				}(i)
+			} else {
+				// Get (may or may not exist yet)
+				go func(idx int) {
+					defer wg.Done()
+					name := fmt.Sprintf("session-%d", idx-1)
+					_, _ = registry.Get(name) // Result doesn't matter, testing for race
+				}(i)
+			}
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("concurrent register and list", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numRegisters = 50
+		const numLists = 50
+
+		var wg sync.WaitGroup
+
+		// Register goroutines
+		for i := 0; i < numRegisters; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx)
+				session := NewSession(name, "description")
+				_ = registry.Register(name, session)
+			}(i)
+		}
+
+		// List goroutines
+		for i := 0; i < numLists; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = registry.List()
+			}()
+		}
+
+		wg.Wait()
+
+		// All registers should have completed
+		if registry.Count() != numRegisters {
+			t.Errorf("expected %d sessions, got %d", numRegisters, registry.Count())
+		}
+	})
+
+	t.Run("concurrent register and unregister", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		var wg sync.WaitGroup
+
+		// Pre-register some sessions
+		for i := 0; i < 25; i++ {
+			name := fmt.Sprintf("pre-session-%d", i)
+			_ = registry.Register(name, NewSession(name, "description"))
+		}
+
+		// Concurrently register new and unregister existing
+		for i := 0; i < 25; i++ {
+			wg.Add(2)
+
+			// Register new
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("new-session-%d", idx)
+				session := NewSession(name, "description")
+				_ = registry.Register(name, session)
+			}(i)
+
+			// Unregister existing
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("pre-session-%d", idx)
+				_ = registry.Unregister(name)
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Should have 25 new sessions (pre-sessions removed, new ones added)
+		if registry.Count() != 25 {
+			t.Errorf("expected 25 sessions, got %d", registry.Count())
+		}
+	})
+
+	t.Run("concurrent create and get", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numGoroutines = 50
+
+		var wg sync.WaitGroup
+
+		// Create goroutines
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx)
+				_, _ = registry.Create(name, "description")
+			}(i)
+		}
+
+		// Get goroutines (running concurrently with creates)
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx)
+				_, _ = registry.Get(name)
+			}(i)
+		}
+
+		wg.Wait()
+
+		// All creates should have completed
+		if registry.Count() != numGoroutines {
+			t.Errorf("expected %d sessions, got %d", numGoroutines, registry.Count())
+		}
+	})
+
+	t.Run("concurrent GetOrCreate same name", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numGoroutines = 100
+
+		var wg sync.WaitGroup
+		sessions := make(chan *Session, numGoroutines)
+		createdCount := make(chan bool, numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				session, created := registry.GetOrCreate("same-name", "description")
+				sessions <- session
+				createdCount <- created
+			}()
+		}
+
+		wg.Wait()
+		close(sessions)
+		close(createdCount)
+
+		// Count creations (should be exactly 1)
+		creates := 0
+		for created := range createdCount {
+			if created {
+				creates++
+			}
+		}
+		if creates != 1 {
+			t.Errorf("expected exactly 1 creation, got %d", creates)
+		}
+
+		// All should return the same session
+		var firstSession *Session
+		for s := range sessions {
+			if firstSession == nil {
+				firstSession = s
+			} else if s != firstSession {
+				t.Error("GetOrCreate returned different sessions for same name")
+			}
+		}
+
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 session, got %d", registry.Count())
+		}
+	})
+
+	t.Run("concurrent status and active", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		// Register mix of active and ended sessions
+		for i := 0; i < 10; i++ {
+			session := NewSession(fmt.Sprintf("session-%d", i), "description")
+			if i%2 == 0 {
+				session.End()
+			}
+			_ = registry.Register(fmt.Sprintf("session-%d", i), session)
+		}
+
+		const numGoroutines = 50
+		var wg sync.WaitGroup
+
+		// Status goroutines
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				status := registry.Status()
+				if len(status) != 10 {
+					t.Errorf("expected 10 statuses, got %d", len(status))
+				}
+			}()
+		}
+
+		// Active goroutines
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				active := registry.Active()
+				if len(active) != 5 {
+					t.Errorf("expected 5 active sessions, got %d", len(active))
+				}
+			}()
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("concurrent count operations", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		// Register some sessions
+		for i := 0; i < 10; i++ {
+			_ = registry.Register(fmt.Sprintf("session-%d", i), NewSession(fmt.Sprintf("session-%d", i), "d"))
+		}
+
+		const numGoroutines = 100
+		var wg sync.WaitGroup
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				count := registry.Count()
+				if count != 10 {
+					t.Errorf("expected count of 10, got %d", count)
+				}
+			}()
+		}
+
+		wg.Wait()
+	})
+}
+
+// TestConcurrentStress performs stress testing with high concurrency.
+func TestConcurrentStress(t *testing.T) {
+	t.Run("stress test all operations", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numGoroutines = 200
+
+		var wg sync.WaitGroup
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+
+				// Perform various operations
+				name := fmt.Sprintf("session-%d", idx%50) // Some name collisions
+
+				switch idx % 7 {
+				case 0:
+					_, _ = registry.Create(name, "description")
+				case 1:
+					_, _ = registry.Get(name)
+				case 2:
+					_ = registry.List()
+				case 3:
+					_ = registry.Register(name, NewSession(name, "d"))
+				case 4:
+					_ = registry.Status()
+				case 5:
+					_ = registry.Active()
+				case 6:
+					_ = registry.Count()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Just verify registry is in consistent state
+		count := registry.Count()
+		list := registry.List()
+		if len(list) != count {
+			t.Errorf("count (%d) and list length (%d) mismatch", count, len(list))
 		}
 	})
 }

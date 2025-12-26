@@ -29,3 +29,11 @@ func (r *SessionRegistry) Register(name string, session *Session) error {
 	r.sessions[name] = session
 	return nil
 }
+
+// Get retrieves a session by name.
+func (r *SessionRegistry) Get(name string) (*Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.sessions[name]
+	return session, ok
+}

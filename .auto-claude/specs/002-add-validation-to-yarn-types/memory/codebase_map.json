@@ -1,0 +1,25 @@
+{
+  "discovered_files": {
+    "Wool/agent.go": {
+      "description": "ValidationError pattern: struct with Field and Message strings, Error() returns \"field: message\", Validate() method returns *ValidationError or nil",
+      "category": "patterns",
+      "discovered_at": "2025-12-26T04:24:32.094468+00:00"
+    },
+    "Yarn/validation.go": {
+      "description": "ValidationError type created for Yarn package - struct with Field and Message strings, Error() method returns \"field: message\" format. Independent from but mirrors Wool/agent.go pattern.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:25:59.626000+00:00"
+    },
+    "Yarn/message.go": {
+      "description": "HiddenState.Validate() validates Vector non-empty, Layer >= 0, Shape consistency with Vector length, and DType in ValidDTypes (float32/float16). Nil HiddenState returns nil (valid). ValidDTypes is exported slice for dtype validation.",
+      "category": "validation",
+      "discovered_at": "2025-12-26T04:30:44.546074+00:00"
+    },
+    "Yarn/message_test.go": {
+      "description": "Test file for Message and HiddenState validation. Uses Go table-driven tests pattern with t.Run() for subtests. Tests are comprehensive covering all validation rules for Message.Validate() and HiddenState.Validate(). Note: go test command not available in sandboxed environment - manual verification required.",
+      "category": "testing",
+      "discovered_at": "2025-12-26T04:33:41.795390+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:33:41.795394+00:00"
+}

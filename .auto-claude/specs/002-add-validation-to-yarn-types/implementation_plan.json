@@ -1,0 +1,312 @@
+{
+  "feature": "Add Validation to Yarn Types",
+  "description": "Extend the Wool validation pattern (Validate() method returning ValidationError) to Yarn types: Message, Conversation, Session, Measurement. This ensures data integrity before storage or transmission.",
+  "created_at": "2025-12-26T04:17:39.192Z",
+  "updated_at": "2025-12-26T04:22:00.000Z",
+  "status": "in_progress",
+  "planStatus": "approved",
+  "workflow_type": "development",
+  "services_involved": [
+    "Yarn"
+  ],
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Foundation - ValidationError for Yarn",
+      "description": "Create a Yarn-specific ValidationError type following the Wool pattern, enabling consistent error handling across the package.",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create validation.go with ValidationError type",
+          "description": "Create Yarn/validation.go with ValidationError struct containing Field and Message strings, plus Error() method. This mirrors Wool/agent.go's ValidationError but keeps packages independent.",
+          "status": "completed",
+          "files": [
+            "Yarn/validation.go"
+          ],
+          "acceptance_criteria": [
+            "ValidationError struct with Field and Message fields",
+            "Error() method returns 'field: message' format",
+            "Package compiles successfully"
+          ],
+          "notes": "Created Yarn/validation.go with ValidationError struct containing Field and Message strings, plus Error() method returning \"field: message\" format. Follows Wool/agent.go pattern exactly.",
+          "updated_at": "2025-12-26T04:25:53.998792+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Message Validation",
+      "description": "Add Validate() method to Message type with comprehensive field validation.",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Implement Message.Validate() method",
+          "description": "Add Validate() method to Message struct that validates: ID is not empty, Role is valid (system/user/assistant/tool), Content is not empty for non-tool messages, Timestamp is not zero, ToolCallID and ToolName are consistent (both present for tool role). Add MessageRole.IsValid() helper method.",
+          "status": "completed",
+          "files": [
+            "Yarn/message.go"
+          ],
+          "acceptance_criteria": [
+            "Message.Validate() returns *ValidationError on failure, nil on success",
+            "Validates ID is required",
+            "Validates Role is one of: system, user, assistant, tool",
+            "Validates Content is required (unless tool role with tool fields)",
+            "Validates Timestamp is not zero",
+            "Validates tool message consistency (role=tool requires ToolCallID)"
+          ],
+          "notes": "Implemented MessageRole.IsValid() and Message.Validate() methods following Wool pattern. Validates: ID required, Role valid, Timestamp not zero, Content required for non-tool messages, ToolCallID required for tool messages.",
+          "updated_at": "2025-12-26T04:27:40.950387+00:00"
+        },
+        {
+          "id": "2.2",
+          "title": "Implement HiddenState.Validate() method",
+          "description": "Add Validate() method to HiddenState struct that validates: Vector is not empty, Shape is consistent with Vector length, Layer is non-negative, DType is valid (float32/float16).",
+          "status": "completed",
+          "files": [
+            "Yarn/message.go"
+          ],
+          "acceptance_criteria": [
+            "HiddenState.Validate() returns *ValidationError on failure, nil on success",
+            "Validates Vector is not empty",
+            "Validates Layer >= 0",
+            "Validates DType is valid if specified"
+          ],
+          "notes": "Implemented HiddenState.Validate() method that validates: Vector is not empty, Layer >= 0, Shape dimensions are positive and product matches Vector length, DType is float32/float16 if specified. Added ValidDTypes slice for allowed dtype values. Follows existing Yarn validation pattern.",
+          "updated_at": "2025-12-26T04:30:44.538554+00:00"
+        },
+        {
+          "id": "2.3",
+          "title": "Add Message validation tests",
+          "description": "Create comprehensive tests for Message.Validate() covering valid messages, missing ID, invalid role, empty content, zero timestamp, tool message consistency, and HiddenState validation.",
+          "status": "completed",
+          "files": [
+            "Yarn/message_test.go"
+          ],
+          "acceptance_criteria": [
+            "Tests for valid message passes validation",
+            "Tests for each validation rule failure",
+            "Tests for HiddenState validation",
+            "All tests pass"
+          ],
+          "notes": "Created Yarn/message_test.go with comprehensive tests for: MessageRole.IsValid(), Message.Validate(), HiddenState.Validate(), and ValidationError.Error(). Tests cover all validation rules including valid messages, missing ID, invalid role, empty content, zero timestamp, tool message consistency, hidden state validation (empty vector, negative layer, shape consistency, dtype validation), and factory function validation (NewMessage, NewAgentMessage). Total 528 lines of test code following Go table-driven test patterns.",
+          "updated_at": "2025-12-26T04:33:41.787701+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Conversation Validation",
+      "description": "Add Validate() method to Conversation type with validation of structure and contained messages.",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Implement Conversation.Validate() method",
+          "description": "Add Validate() method to Conversation struct that validates: ID is not empty, Name is not empty, CreatedAt is not zero, UpdatedAt is not before CreatedAt, all Messages are valid (cascade validation).",
+          "status": "pending",
+          "files": [
+            "Yarn/conversation.go"
+          ],
+          "acceptance_criteria": [
+            "Conversation.Validate() returns *ValidationError on failure, nil on success",
+            "Validates ID is required",
+            "Validates Name is required",
+            "Validates CreatedAt is not zero",
+            "Validates UpdatedAt >= CreatedAt",
+            "Validates all contained Messages (cascade)"
+          ]
+        },
+        {
+          "id": "3.2",
+          "title": "Implement Participant.Validate() method",
+          "description": "Add Validate() method to Participant struct that validates: AgentID is not empty, Role is not empty, JoinedAt is not zero.",
+          "status": "pending",
+          "files": [
+            "Yarn/conversation.go"
+          ],
+          "acceptance_criteria": [
+            "Participant.Validate() returns *ValidationError on failure, nil on success",
+            "Validates AgentID is required",
+            "Validates Role is required",
+            "Validates JoinedAt is not zero"
+          ]
+        },
+        {
+          "id": "3.3",
+          "title": "Add Conversation validation tests",
+          "description": "Create comprehensive tests for Conversation.Validate() covering valid conversations, missing fields, time consistency, invalid messages, and participant validation.",
+          "status": "pending",
+          "files": [
+            "Yarn/conversation_test.go"
+          ],
+          "acceptance_criteria": [
+            "Tests for valid conversation passes validation",
+            "Tests for each validation rule failure",
+            "Tests for cascade message validation",
+            "Tests for participant validation",
+            "All tests pass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Session Validation",
+      "description": "Add Validate() method to Session type with validation of configuration and contained data.",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Implement Session.Validate() method",
+          "description": "Add Validate() method to Session struct that validates: ID is not empty, Name is not empty, StartedAt is not zero, EndedAt (if set) is after StartedAt, Config.MeasurementMode is valid, all Conversations are valid, all Measurements are valid.",
+          "status": "pending",
+          "files": [
+            "Yarn/session.go"
+          ],
+          "acceptance_criteria": [
+            "Session.Validate() returns *ValidationError on failure, nil on success",
+            "Validates ID is required",
+            "Validates Name is required",
+            "Validates StartedAt is not zero",
+            "Validates EndedAt > StartedAt (if EndedAt set)",
+            "Validates MeasurementMode is valid",
+            "Validates all Conversations (cascade)",
+            "Validates all Measurements (cascade)"
+          ]
+        },
+        {
+          "id": "4.2",
+          "title": "Implement SessionConfig.Validate() and MeasurementMode.IsValid()",
+          "description": "Add Validate() method to SessionConfig and IsValid() helper to MeasurementMode. SessionConfig validates MeasurementMode is valid. MeasurementMode.IsValid() returns true for passive/active/triggered.",
+          "status": "pending",
+          "files": [
+            "Yarn/session.go"
+          ],
+          "acceptance_criteria": [
+            "MeasurementMode.IsValid() returns true for valid modes",
+            "SessionConfig.Validate() validates measurement mode",
+            "Empty MeasurementMode is handled (default or error)"
+          ]
+        },
+        {
+          "id": "4.3",
+          "title": "Add Session validation tests",
+          "description": "Create comprehensive tests for Session.Validate() covering valid sessions, missing fields, time consistency, invalid config, cascade validation for conversations and measurements.",
+          "status": "pending",
+          "files": [
+            "Yarn/session_test.go"
+          ],
+          "acceptance_criteria": [
+            "Tests for valid session passes validation",
+            "Tests for each validation rule failure",
+            "Tests for time consistency (EndedAt after StartedAt)",
+            "Tests for cascade validation",
+            "All tests pass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Measurement Validation",
+      "description": "Add Validate() method to Measurement type with validation of metrics and participant data.",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Implement Measurement.Validate() method",
+          "description": "Add Validate() method to Measurement struct that validates: ID is not empty, Timestamp is not zero, TurnNumber >= 0, at least one of SenderID or ReceiverID is set, DEff >= 0, Beta >= 0 if set, Alignment in [-1, 1] range, BetaStatus is valid, hidden states (if present) are valid.",
+          "status": "pending",
+          "files": [
+            "Yarn/measurement.go"
+          ],
+          "acceptance_criteria": [
+            "Measurement.Validate() returns *ValidationError on failure, nil on success",
+            "Validates ID is required",
+            "Validates Timestamp is not zero",
+            "Validates TurnNumber >= 0",
+            "Validates at least one participant",
+            "Validates metric ranges (DEff >= 0, Alignment in [-1, 1])",
+            "Validates BetaStatus is valid",
+            "Validates HiddenState if present"
+          ]
+        },
+        {
+          "id": "5.2",
+          "title": "Implement BetaStatus.IsValid() method",
+          "description": "Add IsValid() method to BetaStatus that returns true for valid status values: optimal, monitor, concerning, critical, unknown.",
+          "status": "pending",
+          "files": [
+            "Yarn/measurement.go"
+          ],
+          "acceptance_criteria": [
+            "BetaStatus.IsValid() returns true for all defined constants",
+            "Returns false for empty or invalid values"
+          ]
+        },
+        {
+          "id": "5.3",
+          "title": "Add Measurement validation tests",
+          "description": "Create comprehensive tests for Measurement.Validate() covering valid measurements, missing fields, invalid metrics, BetaStatus validation, and hidden state cascade validation.",
+          "status": "pending",
+          "files": [
+            "Yarn/measurement_test.go"
+          ],
+          "acceptance_criteria": [
+            "Tests for valid measurement passes validation",
+            "Tests for each validation rule failure",
+            "Tests for metric range validation",
+            "Tests for BetaStatus validation",
+            "All tests pass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Integration and Documentation",
+      "description": "Ensure all validation works together and document the validation pattern.",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "6.1",
+          "title": "Add integration tests for cascade validation",
+          "description": "Create integration tests that verify full cascade validation works: Session -> Conversations -> Messages, Session -> Measurements. Test that invalid nested objects cause parent validation to fail with appropriate error context.",
+          "status": "pending",
+          "files": [
+            "Yarn/validation_test.go"
+          ],
+          "acceptance_criteria": [
+            "Integration test for Session with invalid Conversation",
+            "Integration test for Session with invalid Measurement",
+            "Integration test for Conversation with invalid Message",
+            "Error messages indicate nested validation failures"
+          ]
+        },
+        {
+          "id": "6.2",
+          "title": "Run full test suite and verify coverage",
+          "description": "Run go test ./Yarn/... to verify all tests pass. Check test coverage is reasonable (>80% for validation code).",
+          "status": "pending",
+          "files": [],
+          "acceptance_criteria": [
+            "All tests pass",
+            "No regressions in existing functionality",
+            "Test coverage > 80% for validation methods"
+          ]
+        }
+      ]
+    }
+  ],
+  "final_acceptance": [
+    "All Yarn types (Message, Conversation, Session, Measurement) have Validate() methods",
+    "ValidationError type exists in Yarn package",
+    "Helper IsValid() methods exist for enums (MessageRole, MeasurementMode, BetaStatus)",
+    "All tests pass with go test ./Yarn/...",
+    "Validation pattern matches Wool/agent.go style"
+  ],
+  "spec_file": "spec.md",
+  "last_updated": "2025-12-26T04:33:41.787712+00:00"
+}

@@ -1,6 +1,7 @@
 package yarn
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -115,4 +116,39 @@ func (c *Conversation) MessagesWithHiddenStates() []*Message {
 		}
 	}
 	return result
+}
+
+// Validate checks if the conversation is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (c *Conversation) Validate() *ValidationError {
+	if c.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if c.Name == "" {
+		return &ValidationError{Field: "name", Message: "name is required"}
+	}
+	if c.CreatedAt.IsZero() {
+		return &ValidationError{Field: "created_at", Message: "created_at is required"}
+	}
+	if c.UpdatedAt.Before(c.CreatedAt) {
+		return &ValidationError{Field: "updated_at", Message: "updated_at must not be before created_at"}
+	}
+
+	// Cascade validation: validate all messages
+	for i, msg := range c.Messages {
+		if msg == nil {
+			return &ValidationError{
+				Field:   "messages",
+				Message: "message at index " + strconv.Itoa(i) + " is nil",
+			}
+		}
+		if err := msg.Validate(); err != nil {
+			return &ValidationError{
+				Field:   "messages[" + strconv.Itoa(i) + "]." + err.Field,
+				Message: err.Message,
+			}
+		}
+	}
+
+	return nil
 }

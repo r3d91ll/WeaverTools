@@ -1,0 +1,46 @@
+# Build Progress: Add Validation to Yarn Types
+
+## Overview
+Extend the Wool validation pattern (Validate() method returning ValidationError) to Yarn types: Message, Conversation, Session, Measurement.
+
+## Status: PLANNING COMPLETE
+
+---
+
+## 2025-12-26: Implementation Plan Created
+
+### Analyzed Codebase:
+- Reviewed Wool/agent.go for validation pattern:
+  - ValidationError struct with Field and Message fields
+  - Error() method returns "field: message" format
+  - Validate() returns *ValidationError on failure, nil on success
+  - Checks: required fields, valid ranges, consistency rules
+
+- Reviewed Yarn types requiring validation:
+  - Message (message.go): ID, Role, Content, Timestamp, HiddenState, tool fields
+  - Conversation (conversation.go): ID, Name, Messages, Participants, timestamps
+  - Session (session.go): ID, Name, StartedAt, EndedAt, Config, Conversations, Measurements
+  - Measurement (measurement.go): ID, Timestamp, TurnNumber, participants, metrics, HiddenStates
+
+### Implementation Plan Summary:
+- **Phase 1**: Create Yarn/validation.go with ValidationError type
+- **Phase 2**: Message.Validate() + HiddenState.Validate() + tests
+- **Phase 3**: Conversation.Validate() + Participant.Validate() + tests
+- **Phase 4**: Session.Validate() + SessionConfig.Validate() + MeasurementMode.IsValid() + tests
+- **Phase 5**: Measurement.Validate() + BetaStatus.IsValid() + tests
+- **Phase 6**: Integration tests + coverage verification
+
+### Total Subtasks: 14
+### Estimated Files to Create/Modify:
+- Yarn/validation.go (new)
+- Yarn/message.go (modify)
+- Yarn/message_test.go (new)
+- Yarn/conversation.go (modify)
+- Yarn/conversation_test.go (new)
+- Yarn/session.go (modify)
+- Yarn/session_test.go (new)
+- Yarn/measurement.go (modify)
+- Yarn/measurement_test.go (new)
+- Yarn/validation_test.go (new)
+
+---

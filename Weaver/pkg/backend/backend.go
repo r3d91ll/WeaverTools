@@ -5,6 +5,8 @@ package backend
 import (
 	"context"
 	"time"
+
+	yarn "github.com/r3d91ll/yarn"
 )
 
 // Type identifies the backend type.
@@ -31,14 +33,6 @@ type ChatMessage struct {
 	Name    string `json:"name,omitempty"`
 }
 
-// HiddenState represents the boundary object.
-type HiddenState struct {
-	Vector []float32 `json:"vector"`
-	Shape  []int     `json:"shape"`
-	Layer  int       `json:"layer"`
-	DType  string    `json:"dtype"`
-}
-
 // TokenUsage tracks token consumption.
 type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -59,13 +53,13 @@ type ChatRequest struct {
 
 // ChatResponse contains the model's response.
 type ChatResponse struct {
-	Content      string         `json:"content"`
-	Usage        TokenUsage     `json:"usage"`
-	HiddenState  *HiddenState   `json:"hidden_state,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
-	LatencyMS    float64        `json:"latency_ms"`
-	Model        string         `json:"model"`
-	FinishReason string         `json:"finish_reason"`
+	Content      string            `json:"content"`
+	Usage        TokenUsage        `json:"usage"`
+	HiddenState  *yarn.HiddenState `json:"hidden_state,omitempty"`
+	Metadata     map[string]any    `json:"metadata,omitempty"`
+	LatencyMS    float64           `json:"latency_ms"`
+	Model        string            `json:"model"`
+	FinishReason string            `json:"finish_reason"`
 }
 
 // StreamChunk represents a chunk of streamed response.

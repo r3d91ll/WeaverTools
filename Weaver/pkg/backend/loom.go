@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	yarn "github.com/r3d91ll/yarn"
 )
 
 // Loom connects to The Loom server for inference with hidden state extraction.
@@ -174,7 +176,7 @@ func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 	}
 
 	if loomResp.HiddenState != nil {
-		result.HiddenState = &HiddenState{
+		result.HiddenState = &yarn.HiddenState{
 			Vector: loomResp.HiddenState.Final,
 			Shape:  loomResp.HiddenState.Shape,
 			Layer:  loomResp.HiddenState.Layer,

@@ -1,11 +1,11 @@
 {
   "active": true,
   "spec": "005-add-animated-spinner-for-long-running-operations",
-  "state": "building",
+  "state": "complete",
   "subtasks": {
-    "completed": 12,
+    "completed": 13,
     "total": 13,
-    "in_progress": 1,
+    "in_progress": 0,
     "failed": 0
   },
   "phase": {
@@ -21,5 +21,5 @@
     "number": 14,
     "started_at": "2025-12-25T22:22:19.433335"
   },
-  "last_update": "2025-12-25T22:51:01.933288"
+  "last_update": "2025-12-25T22:52:54.193467"
 }

@@ -1,0 +1,47 @@
+# Build Progress: Add Animated Spinner for Long-Running Operations
+
+## Status: PLANNING COMPLETE
+
+## Summary
+Replace static 'thinking...' text with animated spinners across the Weaver CLI.
+The main integration point is Weaver/pkg/shell/shell.go line 212.
+
+## Implementation Plan Created
+- **3 Phases, 13 Subtasks**
+- **Estimated Time: 4 hours**
+
+### Phase 1: Core Spinner Package (5 subtasks)
+- Create Weaver/pkg/spinner/ package
+- Implement animation loop with ANSI escape codes
+- Add elapsed time tracking
+- Thread-safe Start/Stop/Update methods
+- Success/Failure completion states
+
+### Phase 2: Shell Integration (5 subtasks)
+- Replace "thinking..." in handleMessage (line 212)
+- Add spinner to /extract command
+- Add spinner to /analyze command
+- Add spinner to /compare command
+- Add spinner to /validate iterations
+
+### Phase 3: Testing and Polish (3 subtasks)
+- Unit tests for spinner package
+- Non-TTY fallback mode
+- Full test suite verification
+
+## Key Files to Modify
+- NEW: Weaver/pkg/spinner/spinner.go
+- NEW: Weaver/pkg/spinner/spinner_test.go
+- MODIFY: Weaver/pkg/shell/shell.go
+
+## Technical Approach
+- Use Braille spinner characters for smooth animation
+- ANSI escape codes for cursor control
+- sync.Mutex for thread safety
+- 80-100ms refresh rate
+
+## Next Steps
+Ready to begin implementation with subtask 1.1
+
+---
+Last Updated: 2025-12-26

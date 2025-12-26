@@ -1,0 +1,20 @@
+{
+  "discovered_files": {
+    "Weaver/pkg/shell/shell.go": {
+      "description": "Line 212 contains the static 'thinking...' text that needs to be replaced with animated spinner. Also lines 342, 389, 457, 508, 519 show other long-running operations that need spinners.",
+      "category": "integration_point",
+      "discovered_at": "2025-12-26T04:24:52.441228+00:00"
+    },
+    "Weaver/pkg": {
+      "description": "Package structure follows pattern of separate directories per feature (analysis, backend, concepts, config, runtime, shell). New spinner package should be at Weaver/pkg/spinner/.",
+      "category": "architecture",
+      "discovered_at": "2025-12-26T04:24:52.453018+00:00"
+    },
+    "Weaver/pkg/spinner/spinner.go": {
+      "description": "New spinner package with core types: CharSet (animation characters), Config (refresh rate, elapsed time, writer options), Spinner struct (mutex-protected, with start/stop channels). Common character sets: Braille, Dots, Line, Arc. Constructor functions New() and NewWithConfig().",
+      "category": "package_structure",
+      "discovered_at": "2025-12-26T04:27:12.196793+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:27:12.196803+00:00"
+}

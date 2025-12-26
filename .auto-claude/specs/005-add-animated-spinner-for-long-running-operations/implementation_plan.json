@@ -1,0 +1,240 @@
+{
+  "feature": "Add animated spinner for long-running operations",
+  "description": "Replace static 'thinking...' text with an animated spinner that shows progress and can display elapsed time. This provides better visual feedback during agent responses, concept extraction, and analysis operations.",
+  "created_at": "2025-12-26T04:18:04.536Z",
+  "updated_at": "2025-12-26T04:26:00.000Z",
+  "status": "in_progress",
+  "planStatus": "ready",
+  "workflow_type": "development",
+  "spec_file": "spec.md",
+  "estimated_total_hours": 4,
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Core Spinner Package",
+      "description": "Create a reusable spinner package in Weaver/pkg/spinner with animation, timing, and terminal handling capabilities.",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create spinner package structure",
+          "description": "Create Weaver/pkg/spinner directory and spinner.go file with core types: Spinner struct, Config struct, and common spinner character sets (braille, dots, line, arc).",
+          "estimated_hours": 0.5,
+          "status": "completed",
+          "dependencies": [],
+          "files": [
+            "Weaver/pkg/spinner/spinner.go"
+          ],
+          "notes": "Created Weaver/pkg/spinner/spinner.go with core types: CharSet type, Spinner struct, Config struct, and common character sets (Braille, Dots, Line, Arc). Includes constructor functions New() and NewWithConfig(), plus helper methods Message(), IsActive(), and Elapsed().",
+          "updated_at": "2025-12-26T04:27:04.966653+00:00"
+        },
+        {
+          "id": "1.2",
+          "title": "Implement spinner animation loop",
+          "description": "Implement the core animation loop using a goroutine with configurable refresh rate, ANSI cursor manipulation for smooth updates, and proper terminal escape sequences for line clearing.",
+          "estimated_hours": 0.75,
+          "status": "pending",
+          "dependencies": [
+            "1.1"
+          ],
+          "files": [
+            "Weaver/pkg/spinner/spinner.go"
+          ]
+        },
+        {
+          "id": "1.3",
+          "title": "Add elapsed time display",
+          "description": "Add elapsed time tracking and display in the spinner message. Support formatting like '(1.2s)' or '(1m 30s)' depending on duration. Make it optional via Config.",
+          "estimated_hours": 0.5,
+          "status": "pending",
+          "dependencies": [
+            "1.2"
+          ],
+          "files": [
+            "Weaver/pkg/spinner/spinner.go"
+          ]
+        },
+        {
+          "id": "1.4",
+          "title": "Implement Start/Stop/Update methods",
+          "description": "Implement thread-safe Start(), Stop(), Update(message) methods with proper synchronization using mutex. Handle edge cases like double-start, stop-before-start.",
+          "estimated_hours": 0.5,
+          "status": "pending",
+          "dependencies": [
+            "1.2"
+          ],
+          "files": [
+            "Weaver/pkg/spinner/spinner.go"
+          ]
+        },
+        {
+          "id": "1.5",
+          "title": "Add success/failure completion states",
+          "description": "Add Success(message) and Fail(message) methods that stop the spinner and display a final status indicator (checkmark green for success, X red for failure) with optional custom message.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "1.4"
+          ],
+          "files": [
+            "Weaver/pkg/spinner/spinner.go"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Shell Integration",
+      "description": "Integrate the spinner package into the shell for all long-running operations.",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Replace thinking indicator in handleMessage",
+          "description": "Replace the static 'fmt.Printf(\"thinking...\")' on line 212 of shell.go with a spinner that shows '[agent] thinking...' with elapsed time. Start spinner before agent.Chat(), stop on completion.",
+          "estimated_hours": 0.5,
+          "status": "pending",
+          "dependencies": [
+            "1.5"
+          ],
+          "files": [
+            "Weaver/pkg/shell/shell.go"
+          ]
+        },
+        {
+          "id": "2.2",
+          "title": "Add spinner to handleExtract",
+          "description": "Wrap the concept extraction operation in handleExtract() with a spinner showing 'Extracting N samples for concept...' with elapsed time and success/failure states.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "1.5"
+          ],
+          "files": [
+            "Weaver/pkg/shell/shell.go"
+          ]
+        },
+        {
+          "id": "2.3",
+          "title": "Add spinner to handleAnalyze",
+          "description": "Wrap the geometry analysis in handleAnalyze() with a spinner showing 'Analyzing concept...' with vector count and elapsed time.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "1.5"
+          ],
+          "files": [
+            "Weaver/pkg/shell/shell.go"
+          ]
+        },
+        {
+          "id": "2.4",
+          "title": "Add spinner to handleCompare",
+          "description": "Wrap the bilateral comparison in handleCompare() with a spinner showing 'Comparing concept1 vs concept2...' with elapsed time.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "1.5"
+          ],
+          "files": [
+            "Weaver/pkg/shell/shell.go"
+          ]
+        },
+        {
+          "id": "2.5",
+          "title": "Add spinner to handleValidate iterations",
+          "description": "Wrap each iteration in handleValidate() with a spinner for the extraction and analysis steps, replacing the current fmt.Printf status updates.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "1.5"
+          ],
+          "files": [
+            "Weaver/pkg/shell/shell.go"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Testing and Polish",
+      "description": "Add unit tests, handle edge cases, and ensure consistent behavior across all spinners.",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Write unit tests for spinner package",
+          "description": "Create Weaver/pkg/spinner/spinner_test.go with tests for: basic start/stop, elapsed time formatting, thread safety (concurrent start/stop), Update() message changes, Success/Fail states.",
+          "estimated_hours": 0.5,
+          "status": "pending",
+          "dependencies": [
+            "1.5"
+          ],
+          "files": [
+            "Weaver/pkg/spinner/spinner_test.go"
+          ]
+        },
+        {
+          "id": "3.2",
+          "title": "Add non-TTY fallback",
+          "description": "Detect when stdout is not a TTY (piped output) and fall back to static messages without animation to avoid garbled output in non-interactive contexts.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "1.4"
+          ],
+          "files": [
+            "Weaver/pkg/spinner/spinner.go"
+          ]
+        },
+        {
+          "id": "3.3",
+          "title": "Run full test suite and verify",
+          "description": "Run 'go test -v ./...' in Weaver directory to ensure all tests pass. Run 'go vet ./...' and 'go build ./...' to verify no build issues.",
+          "estimated_hours": 0.25,
+          "status": "pending",
+          "dependencies": [
+            "2.1",
+            "2.2",
+            "2.3",
+            "2.4",
+            "2.5",
+            "3.1",
+            "3.2"
+          ],
+          "files": []
+        }
+      ]
+    }
+  ],
+  "services_involved": [
+    "Weaver"
+  ],
+  "success_criteria": [
+    "All 'thinking...' static text replaced with animated spinners",
+    "Spinners display elapsed time during operation",
+    "Clean start/stop behavior with no terminal artifacts",
+    "Success/failure states shown with appropriate indicators",
+    "All existing tests pass",
+    "New spinner package has unit test coverage",
+    "Fallback to static output when not in TTY mode"
+  ],
+  "technical_notes": [
+    "Use Braille spinner characters for smooth animation",
+    "ANSI escape codes for cursor control and line clearing",
+    "Keep spinner refresh rate around 80-100ms for smooth visual effect",
+    "Ensure cursor is always restored on Stop() even if panics occur (defer)",
+    "Use sync.Mutex for thread-safe spinner operations",
+    "Target file for 'thinking...' text: Weaver/pkg/shell/shell.go line 212"
+  ],
+  "final_acceptance": [
+    "go build ./... succeeds in Weaver directory",
+    "go test -v ./... passes all tests",
+    "Manual testing shows smooth spinner animation",
+    "Spinner shows elapsed time during long operations",
+    "Clean terminal state after spinner stops"
+  ],
+  "qa_status": {
+    "tested": false,
+    "passed": false,
+    "issues": []
+  },
+  "last_updated": "2025-12-26T04:27:04.966657+00:00"
+}

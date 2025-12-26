@@ -59,9 +59,9 @@ linters-settings:
   govet:
     # Enable all analyzers
     enable-all: true
-    # Disable shadow checking for now (can be noisy)
-    disable:
-      - shadow
+    # Enable shadow checking to detect variable shadowing issues
+    # Shadow checking helps prevent bugs where a variable is accidentally
+    # redeclared in an inner scope, hiding the outer variable
 
   # errcheck settings
   errcheck:
@@ -69,6 +69,33 @@ linters-settings:
     check-blank: false
     # Check type assertions
     check-type-assertions: true
+    # Exclude common patterns where error checking is intentionally skipped
+    # These are functions whose return values are commonly (and safely) ignored
+    exclude-functions:
+      # fmt print functions - output errors are rarely actionable
+      - fmt.Print
+      - fmt.Printf
+      - fmt.Println
+      - fmt.Fprint
+      - fmt.Fprintf
+      - fmt.Fprintln
+      # io.Closer - Close() errors on read-only resources are often ignored
+      - (*os.File).Close
+      - (io.Closer).Close
+      - (*bufio.Reader).Reset
+      - (*bufio.Writer).Flush
+      # bytes.Buffer write operations never fail
+      - (*bytes.Buffer).Write
+      - (*bytes.Buffer).WriteByte
+      - (*bytes.Buffer).WriteRune
+      - (*bytes.Buffer).WriteString
+      # strings.Builder write operations never fail
+      - (*strings.Builder).Write
+      - (*strings.Builder).WriteByte
+      - (*strings.Builder).WriteRune
+      - (*strings.Builder).WriteString
+      # hash.Hash Write never returns an error
+      - (hash.Hash).Write
 
   # staticcheck settings
   staticcheck:
@@ -135,6 +162,7 @@ linters-settings:
         sizeThreshold: 80
 
   # revive settings - extensible linter
+  # Configured to match the WeaverTools codebase conventions
   revive:
     # Confidence threshold for issues
     confidence: 0.8
@@ -143,34 +171,94 @@ linters-settings:
     # Enable all rules by default, then configure exceptions
     enable-all-rules: false
     rules:
-      # Enable specific rules for best practices
+      # === Essential Best Practices ===
       - name: blank-imports
+        # Disallow blank imports except for side effects with comments
       - name: context-as-argument
+        # Context should be the first parameter of a function
+        arguments:
+          - allowTypesBefore: "*testing.T"
       - name: context-keys-type
+        # Context keys should be typed to avoid collisions
       - name: error-return
+        # Error should be the last return value
       - name: error-strings
+        # Error strings should not be capitalized or end with punctuation
       - name: error-naming
+        # Error variables should be named errFoo or ErrFoo
       - name: exported
         disabled: false
         arguments:
           - "checkPrivateReceivers"
+          - "sayRepetitiveInsteadOfStutters"
       - name: if-return
+        # Avoid redundant else when if block ends with return
       - name: increment-decrement
+        # Use ++ and -- instead of += 1 and -= 1
       - name: var-declaration
-      - name: package-comments
-        disabled: true  # Can be noisy, enable when ready
+        # Simplify variable declarations when possible
       - name: range
+        # Prefer range loops over index-based loops when possible
       - name: receiver-naming
+        # Receiver names should be consistent and short
       - name: time-naming
+        # Time variables should follow Go conventions
       - name: unexported-return
+        # Exported functions should not return unexported types
       - name: indent-error-flow
+        # Prefer early returns to reduce nesting
       - name: errorf
+        # Use fmt.Errorf for error formatting
       - name: empty-block
+        # Avoid empty code blocks
       - name: superfluous-else
+        # Avoid else after if with break/continue/return
+      - name: unreachable-code
+        # Detect unreachable code
+      - name: redefines-builtin-id
+        # Don't redefine builtin identifiers
+      # === Additional Safety Rules ===
+      - name: dot-imports
+        # Disallow dot imports (except for tests)
+      - name: early-return
+        # Prefer early returns to reduce nesting
+      - name: confusing-naming
+        # Avoid confusing variable and method names
+      - name: modifies-value-receiver
+        # Detect methods that modify value receivers (ineffective)
+      - name: constant-logical-expr
+        # Detect constant logical expressions (always true/false)
+      - name: unnecessary-stmt
+        # Detect unnecessary statements
+      - name: defer
+        # Check for common defer issues
+        arguments:
+          - ["call-chain", "loop", "recover"]
+      - name: import-shadowing
+        # Detect when local variables shadow imported packages
+      - name: waitgroup-by-value
+        # WaitGroup should not be passed by value
+      - name: atomic
+        # Check for common issues with sync/atomic
+      # === Disabled Rules (intentionally relaxed) ===
+      - name: package-comments
+        disabled: true  # Enable when package comments are added
       - name: unused-parameter
         disabled: true  # Can be noisy with interface implementations
-      - name: unreachable-code
-      - name: redefines-builtin-id
+      - name: cognitive-complexity
+        disabled: true  # Can be too restrictive for complex logic
+      - name: cyclomatic
+        disabled: true  # Similar to cognitive-complexity
+      - name: function-length
+        disabled: true  # Some functions are legitimately long
+      - name: line-length-limit
+        disabled: true  # gofmt handles this appropriately
+      - name: max-public-structs
+        disabled: true  # Not applicable to all packages
+      - name: add-constant
+        disabled: true  # Too aggressive for small constants
+      - name: unhandled-error
+        disabled: true  # errcheck handles this better
 
 issues:
 

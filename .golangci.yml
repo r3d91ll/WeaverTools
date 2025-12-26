@@ -1,0 +1,90 @@
+# golangci-lint configuration for WeaverTools
+# This configuration enables core linters for code quality and bug detection.
+
+run:
+  # Timeout for analysis (set high for CI environments)
+  timeout: 5m
+
+  # Include test files in analysis
+  tests: true
+
+  # Number of operating system threads
+  concurrency: 4
+
+  # Allow multiple parallel golangci-lint instances
+  allow-parallel-runners: true
+
+  # Go version to use for analysis
+  go: "1.23"
+
+  # Directories to skip
+  skip-dirs:
+    - vendor
+    - .git
+
+linters:
+  # Disable all linters by default and explicitly enable ones we want
+  disable-all: true
+
+  enable:
+    # Core linters - essential for any Go project
+    - gofmt        # Checks if code is gofmt-ed
+    - govet        # Reports suspicious constructs
+    - errcheck     # Checks for unchecked errors
+    - staticcheck  # State-of-the-art static analysis
+    - gosimple     # Suggests code simplifications
+    - ineffassign  # Detects ineffectual assignments
+    - unused       # Finds unused code
+    - typecheck    # Parses and type-checks Go code
+
+linters-settings:
+  # gofmt settings
+  gofmt:
+    # Use tabs (Go default)
+    simplify: true
+
+  # govet settings
+  govet:
+    # Enable all analyzers
+    enable-all: true
+    # Disable shadow checking for now (can be noisy)
+    disable:
+      - shadow
+
+  # errcheck settings
+  errcheck:
+    # Check for ignored errors with blank identifier
+    check-blank: false
+    # Check type assertions
+    check-type-assertions: true
+
+  # staticcheck settings
+  staticcheck:
+    # Use the latest staticcheck checks
+    checks: ["all"]
+
+issues:
+  # Maximum issues count per one linter (0 = unlimited)
+  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text (0 = unlimited)
+  max-same-issues: 0
+
+  # Exclude some checks for test files
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+
+severity:
+  # Set the default severity for issues
+  default-severity: warning
+
+  # Rules for changing issue severity
+  rules:
+    - linters:
+        - errcheck
+      severity: error
+    - linters:
+        - staticcheck
+      severity: error

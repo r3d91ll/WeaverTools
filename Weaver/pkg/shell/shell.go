@@ -195,14 +195,14 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 		if len(parts) > 1 {
 			message = parts[1]
 		} else {
-			return fmt.Errorf("no message after @%s", targetAgent)
+			return createMissingMessageError(targetAgent)
 		}
 	}
 
 	// Get agent
 	agent, ok := s.agents.Get(targetAgent)
 	if !ok {
-		return fmt.Errorf("agent %q not found", targetAgent)
+		return createAgentNotFoundError(targetAgent, s.agents.List())
 	}
 
 	// Add user message to conversation
@@ -215,7 +215,7 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
 	if err != nil {
-		return err
+		return createChatError(agent.Name(), agent.BackendName(), err)
 	}
 
 	// Add response to conversation
@@ -695,6 +695,99 @@ func (s *Shell) findHiddenStateAgent(ctx context.Context) (*runtime.Agent, error
 		}
 	}
 	return nil, fmt.Errorf("no agent with hidden state support available")
+}
+
+// -----------------------------------------------------------------------------
+// Error Helper Functions
+// -----------------------------------------------------------------------------
+
+// createMissingMessageError creates a structured error when no message follows @agent prefix.
+func createMissingMessageError(agentName string) *werrors.WeaverError {
+	return werrors.Command(werrors.ErrCommandInvalidSyntax, "no message provided after @agent prefix").
+		WithContext("agent", agentName).
+		WithContext("input", "@"+agentName).
+		WithSuggestion("Provide a message after the agent prefix: @" + agentName + " <your message>").
+		WithSuggestion("Example: @" + agentName + " Hello, can you help me?").
+		WithSuggestion("To list available agents, use the /agents command")
+}
+
+// createAgentNotFoundError creates a structured error when the specified agent doesn't exist.
+func createAgentNotFoundError(agentName string, availableAgents []string) *werrors.WeaverError {
+	err := werrors.AgentNotFound(agentName)
+
+	// Add available agents to context
+	if len(availableAgents) > 0 {
+		sort.Strings(availableAgents)
+		err.WithContext("available_agents", strings.Join(availableAgents, ", "))
+		err.WithSuggestion("Available agents: " + strings.Join(availableAgents, ", "))
+	}
+
+	err.WithSuggestion("Check the agent name for typos")
+	err.WithSuggestion("Use /agents to list all available agents")
+
+	return err
+}
+
+// createChatError creates a structured error when chat with an agent fails.
+func createChatError(agentName, backendName string, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	// Detect specific error types and provide targeted suggestions
+	switch {
+	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "connect:"):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: backend connection error").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Check if the " + backendName + " backend is running").
+			WithSuggestion("Verify the backend connection settings in your configuration").
+			WithSuggestion("Try using a different agent with /agents to see alternatives")
+
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request timed out").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("The backend is taking too long to respond").
+			WithSuggestion("Try a shorter message or simpler request").
+			WithSuggestion("Check if the backend service is overloaded")
+
+	case strings.Contains(errStr, "unauthorized") || strings.Contains(errStr, "auth") || strings.Contains(errStr, "401"):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: authentication error").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Check your API credentials for the " + backendName + " backend").
+			WithSuggestion("For Claude: Run 'claude auth login' to re-authenticate").
+			WithSuggestion("For Loom: Verify your API token configuration")
+
+	case strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "429"):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: rate limit exceeded").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Wait a moment before trying again").
+			WithSuggestion("Consider using a different agent or backend")
+
+	case strings.Contains(errStr, "model") && (strings.Contains(errStr, "not found") || strings.Contains(errStr, "invalid")):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: model configuration error").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Check the model name in the agent configuration").
+			WithSuggestion("Verify the model is available on the backend")
+
+	case strings.Contains(errStr, "context canceled"):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request was interrupted").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("The request was canceled before completion").
+			WithSuggestion("Try the request again")
+
+	default:
+		// Generic chat failure with the original error
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Check the backend connection with /agents").
+			WithSuggestion("Try the request again").
+			WithSuggestion("If the problem persists, check the backend logs")
+	}
 }
 
 // Close closes the shell.

@@ -9,9 +9,9 @@
     "failed": 0
   },
   "phase": {
-    "current": "",
-    "id": 0,
-    "total": 0
+    "current": "Verification",
+    "id": null,
+    "total": 2
   },
   "workers": {
     "active": 0,

@@ -130,9 +130,7 @@ func main() {
 	// Check at least one backend is available
 	available := registry.Available(ctx)
 	if len(available) == 0 {
-		fmt.Println("⚠ No backends available!")
-		fmt.Println("  • Ensure 'claude' CLI is installed for Claude Code")
-		fmt.Println("  • Ensure The Loom is running at", cfg.Backends.Loom.URL)
+		werrors.Display(createBackendUnavailableError(cfg, status))
 		os.Exit(1)
 	}
 
@@ -320,4 +318,59 @@ func createConfigInitError(path string, err error) *werrors.WeaverError {
 	// Generic init failure
 	return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "failed to initialize configuration").
 		WithContext("path", path)
+}
+
+// createBackendUnavailableError creates a structured error when no backends are available.
+// It provides specific suggestions for each configured backend type.
+func createBackendUnavailableError(cfg *config.Config, status map[string]backend.Status) *werrors.WeaverError {
+	// Build the error with context about configured backends
+	err := werrors.Backend(werrors.ErrBackendUnavailable, "no backends available")
+
+	// Track which backends are configured and their status
+	var configuredBackends []string
+
+	// Add context for Claude Code backend
+	if cfg.Backends.ClaudeCode.Enabled {
+		configuredBackends = append(configuredBackends, "claudecode")
+		if s, ok := status["claudecode"]; ok && !s.Available {
+			err = err.WithContext("claudecode_status", "not available")
+		}
+	}
+
+	// Add context for Loom backend
+	if cfg.Backends.Loom.Enabled {
+		configuredBackends = append(configuredBackends, "loom")
+		if s, ok := status["loom"]; ok && !s.Available {
+			err = err.WithContext("loom_status", "not available")
+			err = err.WithContext("loom_url", cfg.Backends.Loom.URL)
+		}
+	}
+
+	// Add configured backends summary
+	if len(configuredBackends) > 0 {
+		err = err.WithContext("configured_backends", strings.Join(configuredBackends, ", "))
+	}
+
+	// Add backend-specific suggestions
+	// Claude Code suggestions
+	if cfg.Backends.ClaudeCode.Enabled {
+		err = err.WithSuggestion("For Claude Code: Ensure 'claude' CLI is installed and in your PATH")
+		err = err.WithSuggestion("Install Claude CLI with: npm install -g @anthropic-ai/claude-cli")
+		err = err.WithSuggestion("After installing, run 'claude auth login' to authenticate")
+	}
+
+	// Loom suggestions
+	if cfg.Backends.Loom.Enabled {
+		err = err.WithSuggestion(fmt.Sprintf("For Loom: Ensure The Loom server is running at %s", cfg.Backends.Loom.URL))
+		err = err.WithSuggestion("Check Loom server status with: curl " + cfg.Backends.Loom.URL + "/health")
+		err = err.WithSuggestion("Start the Loom server if it's not running")
+	}
+
+	// General suggestions
+	if !cfg.Backends.ClaudeCode.Enabled && !cfg.Backends.Loom.Enabled {
+		err = err.WithSuggestion("Enable at least one backend in your config file")
+		err = err.WithSuggestion("Run 'weaver --init' to create a default configuration with backends enabled")
+	}
+
+	return err
 }

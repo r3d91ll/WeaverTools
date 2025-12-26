@@ -194,3 +194,54 @@ fmt-check: ## Check if code is formatted (no changes)
 		exit 1; \
 	fi
 	@echo "All files are properly formatted."
+
+# ==============================================================================
+# Utility Targets
+# ==============================================================================
+
+.PHONY: clean
+clean: ## Remove build artifacts and generated files
+	@echo "Cleaning build artifacts..."
+	@rm -f $(BINARY_PATH)
+	@rm -f $(COVERAGE_FILE)
+	@for dir in $(ALL_GO_DIRS); do \
+		echo "  Cleaning $$dir..."; \
+		(cd $$dir && $(GOCLEAN) ./...) || exit 1; \
+	done
+	@echo "Clean complete."
+
+.PHONY: deps
+deps: ## Download and verify dependencies for all modules
+	@echo "Downloading dependencies for all modules..."
+	@for dir in $(ALL_GO_DIRS); do \
+		echo "  Downloading dependencies for $$dir..."; \
+		(cd $$dir && $(GOMOD) download) || exit 1; \
+	done
+	@echo "Verifying dependencies..."
+	@for dir in $(ALL_GO_DIRS); do \
+		echo "  Verifying $$dir..."; \
+		(cd $$dir && $(GOMOD) verify) || exit 1; \
+	done
+	@echo "All dependencies downloaded and verified."
+
+.PHONY: deps-tidy
+deps-tidy: ## Tidy dependencies for all modules
+	@echo "Tidying dependencies for all modules..."
+	@for dir in $(ALL_GO_DIRS); do \
+		echo "  Tidying $$dir..."; \
+		(cd $$dir && $(GOMOD) tidy) || exit 1; \
+	done
+	@echo "Dependencies tidied."
+
+.PHONY: check
+check: fmt-check vet lint test ## Run all quality checks (format, vet, lint, test)
+	@echo "All quality checks passed!"
+
+.PHONY: help
+help: ## Show this help message
+	@echo "WeaverTools Makefile"
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'

@@ -53,6 +53,17 @@ func (m MeasurementMode) IsValid() bool {
 	}
 }
 
+// Validate checks if the session config is valid.
+// Returns a ValidationError if invalid, nil if valid.
+// Empty MeasurementMode is allowed (treated as default).
+func (c *SessionConfig) Validate() *ValidationError {
+	// MeasurementMode must be valid if set
+	if c.MeasurementMode != "" && !c.MeasurementMode.IsValid() {
+		return &ValidationError{Field: "measurement_mode", Message: "invalid measurement mode"}
+	}
+	return nil
+}
+
 // Validate checks if the session is valid.
 // Returns a ValidationError if invalid, nil if valid.
 func (s *Session) Validate() *ValidationError {

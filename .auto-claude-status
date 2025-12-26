@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "008-add-golangci-lint-configuration-for-automated-code",
+  "state": "complete",
+  "subtasks": {
+    "completed": 12,
+    "total": 12,
+    "in_progress": 0,
+    "failed": 0
+  },
+  "phase": {
+    "current": "",
+    "id": 0,
+    "total": 0
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 0,
+    "started_at": "2025-12-25T20:40:15.422269"
+  },
+  "last_update": "2025-12-25T20:40:15.423112"
+}

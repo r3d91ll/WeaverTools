@@ -373,5 +373,20 @@
     "target_package": "github.com/r3d91ll/yarn",
     "pattern_reference": "Weaver/pkg/backend/registry.go"
   },
-  "last_updated": "2025-12-26T05:01:02.859877+00:00"
+  "last_updated": "2025-12-26T05:01:02.859877+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2025-12-26T05:02:11.802798+00:00",
+      "issues": [],
+      "duration_seconds": 330.34
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
 }

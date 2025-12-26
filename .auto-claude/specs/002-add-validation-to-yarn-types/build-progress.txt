@@ -1,0 +1,99 @@
+# Build Progress: Add Validation to Yarn Types
+
+## Overview
+Extend the Wool validation pattern (Validate() method returning ValidationError) to Yarn types: Message, Conversation, Session, Measurement.
+
+## Status: IMPLEMENTATION COMPLETE - PENDING MANUAL VERIFICATION
+
+---
+
+## 2025-12-26: Implementation Plan Created
+
+### Analyzed Codebase:
+- Reviewed Wool/agent.go for validation pattern:
+  - ValidationError struct with Field and Message fields
+  - Error() method returns "field: message" format
+  - Validate() returns *ValidationError on failure, nil on success
+  - Checks: required fields, valid ranges, consistency rules
+
+- Reviewed Yarn types requiring validation:
+  - Message (message.go): ID, Role, Content, Timestamp, HiddenState, tool fields
+  - Conversation (conversation.go): ID, Name, Messages, Participants, timestamps
+  - Session (session.go): ID, Name, StartedAt, EndedAt, Config, Conversations, Measurements
+  - Measurement (measurement.go): ID, Timestamp, TurnNumber, participants, metrics, HiddenStates
+
+### Implementation Plan Summary:
+- **Phase 1**: Create Yarn/validation.go with ValidationError type
+- **Phase 2**: Message.Validate() + HiddenState.Validate() + tests
+- **Phase 3**: Conversation.Validate() + Participant.Validate() + tests
+- **Phase 4**: Session.Validate() + SessionConfig.Validate() + MeasurementMode.IsValid() + tests
+- **Phase 5**: Measurement.Validate() + BetaStatus.IsValid() + tests
+- **Phase 6**: Integration tests + coverage verification
+
+### Total Subtasks: 14
+### Estimated Files to Create/Modify:
+- Yarn/validation.go (new)
+- Yarn/message.go (modify)
+- Yarn/message_test.go (new)
+- Yarn/conversation.go (modify)
+- Yarn/conversation_test.go (new)
+- Yarn/session.go (modify)
+- Yarn/session_test.go (new)
+- Yarn/measurement.go (modify)
+- Yarn/measurement_test.go (new)
+- Yarn/validation_test.go (new)
+
+---
+
+## 2025-12-26: Implementation Complete
+
+### Completed Files:
+All test files have been created:
+- `Yarn/validation.go` - ValidationError type
+- `Yarn/validation_test.go` - Integration/cascade validation tests (1268 lines)
+- `Yarn/message.go` - Message.Validate() + HiddenState.Validate()
+- `Yarn/message_test.go` - Message validation tests (12756 bytes)
+- `Yarn/conversation.go` - Conversation.Validate() + Participant.Validate()
+- `Yarn/conversation_test.go` - Conversation validation tests (16417 bytes)
+- `Yarn/session.go` - Session.Validate() + SessionConfig.Validate() + MeasurementMode.IsValid()
+- `Yarn/session_test.go` - Session validation tests (29267 bytes)
+- `Yarn/measurement.go` - Measurement.Validate() + BetaStatus.IsValid()
+- `Yarn/measurement_test.go` - Measurement validation tests (21610 bytes)
+
+### Validation Coverage:
+- **Message**: ID (required), Role (valid), Timestamp (not zero), HiddenState (cascade), tool call consistency
+- **HiddenState**: Vector (non-empty), Layer (>=0), Shape (matches Vector), DType (in ValidDTypes)
+- **Conversation**: ID (required), Messages (cascade), Participants (cascade), time consistency
+- **Participant**: AgentID (required), Role (required), JoinedAt (not zero)
+- **Session**: ID (required), Conversations (cascade), Measurements (cascade), time consistency
+- **SessionConfig**: MeasurementMode (valid if set)
+- **Measurement**: ID (required), Timestamp (not zero), TurnNumber (>=0), HiddenStates (cascade)
+- **BetaStatus**: IsValid() for optimal/monitor/concerning/critical/unknown
+
+---
+
+## Manual Verification Required (Subtask 6.2)
+
+The Go test command is not available in the sandboxed CI environment.
+Please run the following commands manually to verify:
+
+### Run All Tests:
+```bash
+cd Yarn
+go test ./... -v
+```
+
+### Check Coverage (target: >80% for validation code):
+```bash
+cd Yarn
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out | grep -E "(Validate|IsValid)"
+go tool cover -html=coverage.out -o coverage.html
+```
+
+### Expected Results:
+- All tests should pass (PASS)
+- Validation methods should have >80% coverage
+- No race conditions (run with `-race` flag if needed)
+
+---

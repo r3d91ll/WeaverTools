@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -41,6 +42,87 @@ const (
 	MeasureActive    MeasurementMode = "active"    // Every exchange
 	MeasureTriggered MeasurementMode = "triggered" // On request
 )
+
+// IsValid returns true if this is a valid measurement mode.
+func (m MeasurementMode) IsValid() bool {
+	switch m {
+	case MeasurePassive, MeasureActive, MeasureTriggered:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks if the session config is valid.
+// Returns a ValidationError if invalid, nil if valid.
+// Empty MeasurementMode is allowed (treated as default).
+func (c *SessionConfig) Validate() *ValidationError {
+	// MeasurementMode must be valid if set
+	if c.MeasurementMode != "" && !c.MeasurementMode.IsValid() {
+		return &ValidationError{Field: "measurement_mode", Message: "invalid measurement mode"}
+	}
+	return nil
+}
+
+// Validate checks if the session is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (s *Session) Validate() *ValidationError {
+	if s.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if s.Name == "" {
+		return &ValidationError{Field: "name", Message: "name is required"}
+	}
+	if s.StartedAt.IsZero() {
+		return &ValidationError{Field: "started_at", Message: "started_at is required"}
+	}
+
+	// EndedAt must be after StartedAt if set
+	if s.EndedAt != nil && !s.EndedAt.IsZero() {
+		if s.EndedAt.Before(s.StartedAt) || s.EndedAt.Equal(s.StartedAt) {
+			return &ValidationError{Field: "ended_at", Message: "ended_at must be after started_at"}
+		}
+	}
+
+	// Validate MeasurementMode if set
+	if s.Config.MeasurementMode != "" && !s.Config.MeasurementMode.IsValid() {
+		return &ValidationError{Field: "config.measurement_mode", Message: "invalid measurement mode"}
+	}
+
+	// Cascade validation: validate all conversations
+	for i, conv := range s.Conversations {
+		if conv == nil {
+			return &ValidationError{
+				Field:   "conversations",
+				Message: "conversation at index " + strconv.Itoa(i) + " is nil",
+			}
+		}
+		if err := conv.Validate(); err != nil {
+			return &ValidationError{
+				Field:   "conversations[" + strconv.Itoa(i) + "]." + err.Field,
+				Message: err.Message,
+			}
+		}
+	}
+
+	// Cascade validation: validate all measurements
+	for i, m := range s.Measurements {
+		if m == nil {
+			return &ValidationError{
+				Field:   "measurements",
+				Message: "measurement at index " + strconv.Itoa(i) + " is nil",
+			}
+		}
+		if err := m.Validate(); err != nil {
+			return &ValidationError{
+				Field:   "measurements[" + strconv.Itoa(i) + "]." + err.Field,
+				Message: err.Message,
+			}
+		}
+	}
+
+	return nil
+}
 
 // NewSession creates a new session.
 func NewSession(name, description string) *Session {

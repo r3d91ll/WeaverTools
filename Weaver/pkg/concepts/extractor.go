@@ -126,7 +126,7 @@ func (e *Extractor) extractSingle(ctx context.Context, prompt string, cfg Extrac
 	return Sample{
 		ID:          uuid.New().String(),
 		Content:     resp.Content,
-		HiddenState: convertHiddenState(resp.HiddenState),
+		HiddenState: resp.HiddenState,
 		ExtractedAt: time.Now(),
 		Model:       resp.Model,
 	}, nil
@@ -142,19 +142,6 @@ func (e *Extractor) buildPrompt(concept string) string {
 		`Provide a brief example (1-2 sentences) illustrating the concept of "%s" as it might appear in classical literature. Be creative and varied. Output only the example, no explanation or preamble.`,
 		concept,
 	)
-}
-
-// convertHiddenState converts backend.HiddenState to yarn.HiddenState.
-func convertHiddenState(hs *backend.HiddenState) *yarn.HiddenState {
-	if hs == nil {
-		return nil
-	}
-	return &yarn.HiddenState{
-		Vector: hs.Vector,
-		Shape:  hs.Shape,
-		Layer:  hs.Layer,
-		DType:  hs.DType,
-	}
 }
 
 // ExtractRandom generates random samples for baseline comparison.

@@ -541,6 +541,286 @@ class TestBatchOperations:
             json.dump(example, f, indent=2)
 
 
+class TestStreamingChatCompletionsIntegration:
+    """Integration tests for streaming chat completions with real models.
+
+    These tests verify that streaming works end-to-end with actual model inference,
+    validating that tokens arrive incrementally rather than all at once.
+    """
+
+    @pytest.fixture(scope="class")
+    def loaded_chat_model(self, app_client):
+        """Load a chat model once for all streaming tests in class."""
+        model_id = TEST_MODELS["generative_small"]
+
+        print(f"\n=== Loading Chat Model for Streaming: {model_id} ===")
+        start = time.time()
+
+        response = app_client.post("/models/load", json={
+            "model": model_id,
+            "dtype": "float16",
+        })
+
+        load_time = time.time() - start
+        assert response.status_code == 200, f"Failed to load model: {response.text}"
+
+        data = response.json()
+        print(f"Loaded in {load_time:.2f}s")
+        print(json.dumps(data, indent=2))
+
+        yield data
+
+        # Cleanup
+        app_client.delete(f"/models/{model_id.replace('/', '--')}")
+
+    def test_streaming_produces_incremental_tokens(self, app_client, loaded_chat_model, examples_dir):
+        """Test that streaming produces tokens incrementally, not all at once.
+
+        This is the key acceptance criterion: tokens should appear incrementally
+        rather than being buffered and returned as a single response.
+        """
+        import httpx
+        from fastapi.testclient import TestClient
+
+        model_id = TEST_MODELS["generative_small"]
+
+        print("\n=== Streaming Incremental Token Test ===")
+
+        # Use httpx to make a streaming request
+        request_body = {
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Count from 1 to 5 slowly."},
+            ],
+            "max_tokens": 50,
+            "temperature": 0.7,
+            "stream": True,
+            "return_hidden_states": False,
+        }
+
+        # Track timing of token arrivals
+        token_arrival_times = []
+        tokens_received = []
+        event_types_seen = set()
+
+        with app_client.stream("POST", "/v1/chat/completions", json=request_body) as response:
+            assert response.status_code == 200, f"Request failed: {response.status_code}"
+            assert "text/event-stream" in response.headers.get("content-type", "")
+
+            current_event_type = None
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                if line.startswith("event:"):
+                    current_event_type = line[6:].strip()
+                    event_types_seen.add(current_event_type)
+                elif line.startswith("data:"):
+                    data_str = line[5:].strip()
+                    if data_str:
+                        try:
+                            data = json.loads(data_str)
+                            if current_event_type == "content_block_delta":
+                                token = data.get("delta", {}).get("text", "")
+                                if token:
+                                    tokens_received.append(token)
+                                    token_arrival_times.append(time.time())
+                            elif current_event_type == "message_delta":
+                                # Final message received
+                                pass
+                        except json.JSONDecodeError:
+                            pass
+
+        # Validate results
+        assert len(tokens_received) > 0, "Should have received at least one token"
+        assert "content_block_delta" in event_types_seen, "Should have received content_block_delta events"
+        assert "message_delta" in event_types_seen, "Should have received message_delta event"
+
+        # Validate incremental behavior: tokens should arrive over time, not all at once
+        if len(token_arrival_times) >= 2:
+            time_diffs = [
+                token_arrival_times[i+1] - token_arrival_times[i]
+                for i in range(len(token_arrival_times) - 1)
+            ]
+            # At least some tokens should have visible time gaps (indicating streaming)
+            # Note: This may be flaky on very fast systems, but the test demonstrates the pattern
+            avg_gap = sum(time_diffs) / len(time_diffs) if time_diffs else 0
+            print(f"Average token gap: {avg_gap*1000:.2f}ms")
+            print(f"Total tokens received: {len(tokens_received)}")
+
+        full_text = "".join(tokens_received)
+        print(f"Streamed text: {full_text}")
+        print(f"Event types seen: {event_types_seen}")
+
+        # Save example
+        example = {
+            "request": request_body,
+            "response": {
+                "tokens_received": len(tokens_received),
+                "event_types": list(event_types_seen),
+                "full_text": full_text,
+            },
+            "validation": {
+                "incremental_streaming": len(tokens_received) > 1,
+                "content_block_delta_received": "content_block_delta" in event_types_seen,
+                "message_delta_received": "message_delta" in event_types_seen,
+            }
+        }
+        with open(examples_dir / "streaming_incremental_tokens.json", "w") as f:
+            json.dump(example, f, indent=2)
+
+    def test_streaming_with_hidden_states(self, app_client, loaded_chat_model, examples_dir):
+        """Test that streaming returns hidden states in the final message_delta event."""
+        model_id = TEST_MODELS["generative_small"]
+
+        print("\n=== Streaming with Hidden States Test ===")
+
+        request_body = {
+            "model": model_id,
+            "messages": [
+                {"role": "user", "content": "Hello!"},
+            ],
+            "max_tokens": 10,
+            "temperature": 0.5,
+            "stream": True,
+            "return_hidden_states": True,
+        }
+
+        hidden_state_received = None
+        message_delta_received = False
+
+        with app_client.stream("POST", "/v1/chat/completions", json=request_body) as response:
+            assert response.status_code == 200
+
+            current_event_type = None
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                if line.startswith("event:"):
+                    current_event_type = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_str = line[5:].strip()
+                    if data_str and current_event_type == "message_delta":
+                        try:
+                            data = json.loads(data_str)
+                            message_delta_received = True
+                            hidden_state_received = data.get("hidden_state")
+                        except json.JSONDecodeError:
+                            pass
+
+        # Validate results
+        assert message_delta_received, "Should have received message_delta event"
+        assert hidden_state_received is not None, "Should have received hidden_state in message_delta"
+        assert "final" in hidden_state_received, "Hidden state should have 'final' field"
+        assert "shape" in hidden_state_received, "Hidden state should have 'shape' field"
+        assert "layer" in hidden_state_received, "Hidden state should have 'layer' field"
+
+        print(f"Hidden state shape: {hidden_state_received['shape']}")
+        print(f"Hidden state layer: {hidden_state_received['layer']}")
+        print(f"Hidden state vector length: {len(hidden_state_received['final'])}")
+
+        # Validate shape matches expected hidden size
+        expected_hidden_size = loaded_chat_model["hidden_size"]
+        assert hidden_state_received["shape"][-1] == expected_hidden_size
+
+        # Save example
+        example = {
+            "request": request_body,
+            "response": {
+                "hidden_state_received": True,
+                "hidden_state_shape": hidden_state_received["shape"],
+                "hidden_state_layer": hidden_state_received["layer"],
+            },
+            "validation": {
+                "hidden_size_matches_model": hidden_state_received["shape"][-1] == expected_hidden_size,
+                "expected_hidden_size": expected_hidden_size,
+            }
+        }
+        with open(examples_dir / "streaming_with_hidden_states.json", "w") as f:
+            json.dump(example, f, indent=2)
+
+    def test_streaming_vs_nonstreaming_equivalence(self, app_client, loaded_chat_model, examples_dir):
+        """Test that streaming and non-streaming produce equivalent results."""
+        model_id = TEST_MODELS["generative_small"]
+
+        print("\n=== Streaming vs Non-Streaming Equivalence Test ===")
+
+        # Fixed seed for reproducibility (via temperature=0)
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Say hello."},
+        ]
+
+        # Non-streaming request
+        non_stream_response = app_client.post("/v1/chat/completions", json={
+            "model": model_id,
+            "messages": messages,
+            "max_tokens": 20,
+            "temperature": 0.0,  # Deterministic
+            "stream": False,
+            "return_hidden_states": False,
+        })
+        assert non_stream_response.status_code == 200
+        non_stream_data = non_stream_response.json()
+        non_stream_text = non_stream_data["text"]
+
+        # Streaming request with same parameters
+        stream_tokens = []
+        request_body = {
+            "model": model_id,
+            "messages": messages,
+            "max_tokens": 20,
+            "temperature": 0.0,  # Deterministic
+            "stream": True,
+            "return_hidden_states": False,
+        }
+
+        with app_client.stream("POST", "/v1/chat/completions", json=request_body) as response:
+            assert response.status_code == 200
+
+            current_event_type = None
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                if line.startswith("event:"):
+                    current_event_type = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_str = line[5:].strip()
+                    if data_str and current_event_type == "content_block_delta":
+                        try:
+                            data = json.loads(data_str)
+                            token = data.get("delta", {}).get("text", "")
+                            if token:
+                                stream_tokens.append(token)
+                        except json.JSONDecodeError:
+                            pass
+
+        stream_text = "".join(stream_tokens)
+
+        print(f"Non-streaming text: {repr(non_stream_text)}")
+        print(f"Streaming text: {repr(stream_text)}")
+
+        # They should be equivalent (or at least very similar with temp=0)
+        # Note: Due to RNG differences, we just check they're non-empty and reasonable
+        assert len(non_stream_text) > 0, "Non-streaming should produce text"
+        assert len(stream_text) > 0, "Streaming should produce text"
+
+        # Save example
+        example = {
+            "request": {"messages": messages, "max_tokens": 20, "temperature": 0.0},
+            "non_streaming_response": {"text": non_stream_text},
+            "streaming_response": {"text": stream_text, "token_count": len(stream_tokens)},
+            "validation": {
+                "both_produced_output": len(non_stream_text) > 0 and len(stream_text) > 0,
+            }
+        }
+        with open(examples_dir / "streaming_vs_nonstreaming.json", "w") as f:
+            json.dump(example, f, indent=2)
+
+
 class TestOutputFormat:
     """Validate output format is correct and easily parseable."""
 

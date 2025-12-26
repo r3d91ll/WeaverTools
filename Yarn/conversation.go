@@ -1,6 +1,7 @@
 package yarn
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -115,4 +116,115 @@ func (c *Conversation) MessagesWithHiddenStates() []*Message {
 		}
 	}
 	return result
+}
+
+// MessagesByRole returns only messages that match the specified role.
+func (c *Conversation) MessagesByRole(role MessageRole) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Role == role {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// MessagesByAgent returns only messages that match the specified agent ID.
+// If agentID is empty, returns messages with empty AgentID (literal match).
+func (c *Conversation) MessagesByAgent(agentID string) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.AgentID == agentID {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// MessagesSince returns only messages with Timestamp strictly after the given time.
+// Messages are returned in chronological order (as stored).
+func (c *Conversation) MessagesSince(since time.Time) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Timestamp.After(since) {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// MessagesWithMetadata returns only messages that have the specified key present
+// in their Metadata map (regardless of value). Messages with nil Metadata are skipped.
+func (c *Conversation) MessagesWithMetadata(key string) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Metadata != nil {
+			if _, exists := msg.Metadata[key]; exists {
+				result = append(result, msg)
+			}
+		}
+	}
+	return result
+}
+
+// Validate checks if the conversation is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (c *Conversation) Validate() *ValidationError {
+	if c.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if c.Name == "" {
+		return &ValidationError{Field: "name", Message: "name is required"}
+	}
+	if c.CreatedAt.IsZero() {
+		return &ValidationError{Field: "created_at", Message: "created_at is required"}
+	}
+	if c.UpdatedAt.Before(c.CreatedAt) {
+		return &ValidationError{Field: "updated_at", Message: "updated_at must not be before created_at"}
+	}
+
+	// Cascade validation: validate all messages
+	for i, msg := range c.Messages {
+		if msg == nil {
+			return &ValidationError{
+				Field:   "messages",
+				Message: "message at index " + strconv.Itoa(i) + " is nil",
+			}
+		}
+		if err := msg.Validate(); err != nil {
+			return &ValidationError{
+				Field:   "messages[" + strconv.Itoa(i) + "]." + err.Field,
+				Message: err.Message,
+			}
+		}
+	}
+
+	return nil
+}
+
+// Validate checks if the participant is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (p *Participant) Validate() *ValidationError {
+	if p.AgentID == "" {
+		return &ValidationError{Field: "agent_id", Message: "agent_id is required"}
+	}
+	if p.Role == "" {
+		return &ValidationError{Field: "role", Message: "role is required"}
+	}
+	if p.JoinedAt.IsZero() {
+		return &ValidationError{Field: "joined_at", Message: "joined_at is required"}
+	}
+	return nil
 }

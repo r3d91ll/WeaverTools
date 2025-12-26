@@ -160,3 +160,20 @@ func (c *Conversation) MessagesSince(since time.Time) []*Message {
 	}
 	return result
 }
+
+// MessagesWithMetadata returns only messages that have the specified key present
+// in their Metadata map (regardless of value). Messages with nil Metadata are skipped.
+func (c *Conversation) MessagesWithMetadata(key string) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Metadata != nil {
+			if _, exists := msg.Metadata[key]; exists {
+				result = append(result, msg)
+			}
+		}
+	}
+	return result
+}

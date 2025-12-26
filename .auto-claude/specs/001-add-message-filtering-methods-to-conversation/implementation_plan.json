@@ -39,8 +39,9 @@
           "title": "Implement MessagesSince method",
           "description": "Add MessagesSince(since time.Time) []*Message method to filter messages with Timestamp strictly after the given time. Return messages in chronological order (as stored).",
           "file": "Yarn/conversation.go",
-          "status": "pending",
-          "notes": ""
+          "status": "completed",
+          "notes": "Implemented MessagesSince(since time.Time) []*Message method following the thread-safe pattern (RLock, iterate, append matches, return copy). Uses msg.Timestamp.After(since) for strictly-after comparison. Returns messages in chronological order. Committed as 907542a.",
+          "updated_at": "2025-12-26T04:27:55.171169+00:00"
         },
         {
           "id": "1.4",
@@ -110,5 +111,5 @@
     "issues": "",
     "tests_passed": ""
   },
-  "last_updated": "2025-12-26T04:26:39.483989+00:00"
+  "last_updated": "2025-12-26T04:27:55.171175+00:00"
 }

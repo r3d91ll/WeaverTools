@@ -141,12 +141,13 @@
           "id": "3.3",
           "title": "Update agent creation errors",
           "description": "Improve agent creation failure messages to include which field is invalid, what valid options are, and example configurations.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 15,
           "files": [
             "Weaver/cmd/weaver/main.go"
           ],
-          "notes": ""
+          "notes": "Added createAgentCreationError() helper function in Weaver/cmd/weaver/main.go that provides structured error messages for agent creation failures. The function:\n\n1. Detects specific error types:\n   - Agent already exists \u2192 ErrAgentAlreadyExists with unique name guidance\n   - Backend not found \u2192 ErrAgentInvalidConfig with valid backend options (loom, claudecode)\n   - Invalid role \u2192 ErrAgentInvalidConfig with valid role options and role descriptions\n   - Tools incompatible with role \u2192 ErrAgentInvalidConfig with role/tools guidance\n   - Temperature out of range \u2192 ErrAgentInvalidConfig with valid range (0.0-2.0)\n   - top_p out of range \u2192 ErrAgentInvalidConfig with valid range (0.0-1.0)\n   - Missing required fields \u2192 ErrAgentInvalidConfig with example configuration\n\n2. Includes context for each error:\n   - agent name, invalid_field, invalid_value, valid_options/valid_range\n\n3. Provides actionable suggestions with example YAML configurations\n\n4. Falls back to generic ErrAgentCreationFailed with full context for unknown failures\n\nReplaced simple fmt.Printf error output on line 187 with werrors.Display(createAgentCreationError(...)).\n\nCommitted as 6c0b73e.",
+          "updated_at": "2025-12-26T05:01:20.154795+00:00"
         },
         {
           "id": "3.4",
@@ -506,5 +507,5 @@
     "issues": "",
     "tests_passed": ""
   },
-  "last_updated": "2025-12-26T04:58:48.120860+00:00"
+  "last_updated": "2025-12-26T05:01:20.154800+00:00"
 }

@@ -239,12 +239,12 @@ func main() {
 		DefaultAgent: defaultAgent,
 	})
 	if err != nil {
-		fmt.Printf("Failed to create shell: %v\n", err)
+		werrors.Display(createShellInitError(historyFile, err))
 		os.Exit(1)
 	}
 
 	if err := sh.Run(ctx); err != nil && err != context.Canceled {
-		fmt.Printf("Shell error: %v\n", err)
+		werrors.Display(createShellRunError(err))
 		os.Exit(1)
 	}
 
@@ -493,4 +493,142 @@ func createAgentCreationError(name string, agentCfg config.AgentConfig, err erro
 		WithSuggestion(fmt.Sprintf("Valid backends: %s", strings.Join(validBackends, ", "))).
 		WithSuggestion("Ensure the specified backend is enabled in the backends section").
 		WithSuggestion("Run 'weaver --init' to see an example configuration")
+}
+
+// createShellInitError creates a structured error for shell initialization failures.
+// It analyzes the underlying error to provide specific guidance on readline setup,
+// history file permissions, and terminal configuration.
+func createShellInitError(historyFile string, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for history file permission issues
+	if strings.Contains(errStr, "permission") ||
+		strings.Contains(errStr, "Permission denied") ||
+		os.IsPermission(err) {
+		return werrors.Command(werrors.ErrShellHistoryFailed, "cannot access shell history file").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithContext("error_type", "permission denied").
+			WithSuggestion("Check permissions on history file: ls -la " + historyFile).
+			WithSuggestion("Fix permissions with: chmod 600 " + historyFile).
+			WithSuggestion("Or remove and let Weaver recreate it: rm " + historyFile)
+	}
+
+	// Check for history file directory not found
+	historyDir := filepath.Dir(historyFile)
+	if strings.Contains(errStr, "no such file or directory") ||
+		strings.Contains(errStr, "directory") {
+		return werrors.Command(werrors.ErrShellHistoryFailed, "history file directory does not exist").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithContext("directory", historyDir).
+			WithSuggestion("Create the directory: mkdir -p " + historyDir).
+			WithSuggestion("Ensure your home directory is properly configured")
+	}
+
+	// Check for disk full or write errors related to history
+	if strings.Contains(errStr, "no space") ||
+		strings.Contains(errStr, "disk full") ||
+		strings.Contains(errStr, "quota") {
+		return werrors.Command(werrors.ErrShellHistoryFailed, "cannot write to history file - disk full").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithSuggestion("Free up disk space on your system").
+			WithSuggestion("Clear the history file: rm " + historyFile)
+	}
+
+	// Check for readline library issues
+	if strings.Contains(errStr, "readline") ||
+		strings.Contains(errStr, "terminal") ||
+		strings.Contains(errStr, "tty") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "failed to initialize readline/terminal").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithContext("terminal", os.Getenv("TERM")).
+			WithSuggestion("Ensure TERM environment variable is set correctly").
+			WithSuggestion("Try setting: export TERM=xterm-256color").
+			WithSuggestion("If running in a non-interactive context, Weaver requires a TTY")
+	}
+
+	// Check for invalid terminal or not a TTY
+	if strings.Contains(errStr, "not a terminal") ||
+		strings.Contains(errStr, "inappropriate ioctl") ||
+		strings.Contains(errStr, "bad file descriptor") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "not connected to a valid terminal").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithSuggestion("Weaver requires an interactive terminal (TTY) to run").
+			WithSuggestion("If running in a script, consider using pipes or the API directly").
+			WithSuggestion("If running in Docker, use: docker run -it ...")
+	}
+
+	// Check for Ctrl-C or signal interruption during init
+	if strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "signal") {
+		return werrors.Command(werrors.ErrShellInitFailed, "shell initialization interrupted").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithSuggestion("Try starting Weaver again").
+			WithSuggestion("Allow initialization to complete before pressing Ctrl-C")
+	}
+
+	// Generic shell initialization error
+	return werrors.CommandWrap(err, werrors.ErrShellInitFailed, "failed to initialize interactive shell").
+		WithContext("history_file", historyFile).
+		WithSuggestion("Check that your terminal supports interactive input").
+		WithSuggestion("Verify the history file path is writable: touch " + historyFile).
+		WithSuggestion("Ensure readline library is properly installed on your system")
+}
+
+// createShellRunError creates a structured error for shell runtime failures.
+// It provides context about what went wrong during shell execution.
+func createShellRunError(err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for EOF/input stream closed
+	if strings.Contains(errStr, "EOF") ||
+		strings.Contains(errStr, "closed pipe") ||
+		strings.Contains(errStr, "broken pipe") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "input stream closed unexpectedly").
+			WithCause(err).
+			WithSuggestion("The input stream was closed. This can happen when:").
+			WithSuggestion("  - Running Weaver in a non-interactive script").
+			WithSuggestion("  - The terminal connection was lost").
+			WithSuggestion("  - Input was piped and reached end of file").
+			WithSuggestion("For non-interactive use, consider using the API directly")
+	}
+
+	// Check for interrupt/signal during execution
+	if strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "signal") {
+		return werrors.Command(werrors.ErrShellInitFailed, "shell execution interrupted").
+			WithCause(err).
+			WithSuggestion("The shell was interrupted by a signal").
+			WithSuggestion("Use /quit or /exit to gracefully exit Weaver")
+	}
+
+	// Check for readline-specific errors during execution
+	if strings.Contains(errStr, "readline") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "readline error during shell execution").
+			WithCause(err).
+			WithSuggestion("Try restarting Weaver").
+			WithSuggestion("If the problem persists, check your terminal configuration").
+			WithSuggestion("Ensure TERM environment variable is set correctly")
+	}
+
+	// Check for I/O errors
+	if strings.Contains(errStr, "input/output error") ||
+		strings.Contains(errStr, "I/O error") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "terminal I/O error").
+			WithCause(err).
+			WithSuggestion("There was an error reading from or writing to the terminal").
+			WithSuggestion("This can happen if the terminal connection was interrupted").
+			WithSuggestion("Try reconnecting to your terminal session and restart Weaver")
+	}
+
+	// Generic shell run error
+	return werrors.CommandWrap(err, werrors.ErrShellInitFailed, "shell encountered an error").
+		WithSuggestion("Try restarting Weaver").
+		WithSuggestion("Check system logs for any relevant error messages").
+		WithSuggestion("If the problem persists, please report the issue with the error details above")
 }

@@ -95,7 +95,7 @@
           "id": "2.1",
           "title": "Create SessionStatus struct",
           "description": "Define SessionStatus struct to represent session status with Name, ID, IsActive, StartedAt, EndedAt, and Stats fields.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -104,13 +104,15 @@
             "SessionStatus struct defined with appropriate JSON tags",
             "Includes Name, ID, IsActive, StartedAt, EndedAt fields",
             "Includes embedded or referenced SessionStats"
-          ]
+          ],
+          "notes": "Added SessionStatus struct to Yarn/registry.go with fields: Name (string), ID (string), IsActive (bool), StartedAt (time.Time), EndedAt (*time.Time), Stats (SessionStats). All fields have appropriate JSON tags. EndedAt uses omitempty for proper nil handling. Follows Backend Registry pattern exactly. Committed as 06bf045.",
+          "updated_at": "2025-12-26T04:31:39.014510+00:00"
         },
         {
           "id": "2.2",
           "title": "Implement Status method",
           "description": "Add Status() map[string]SessionStatus method to return status for all registered sessions. Copies sessions before releasing lock to avoid holding lock during stats computation.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -119,13 +121,15 @@
             "Returns map of session name to SessionStatus",
             "Copies sessions before releasing lock (pattern from Backend Registry)",
             "Computes stats for each session"
-          ]
+          ],
+          "notes": "Implemented Status() map[string]SessionStatus method following Backend Registry pattern exactly. Copies sessions map while holding RLock, releases lock before computing stats for each session via session.Stats(). Returns map of session name to SessionStatus with Name, ID, IsActive, StartedAt, EndedAt, and Stats fields. Committed as 1ab1cdf.",
+          "updated_at": "2025-12-26T04:33:25.234814+00:00"
         },
         {
           "id": "2.3",
           "title": "Implement Active method",
           "description": "Add Active() []*Session method to return all sessions that have not ended (EndedAt is nil). Similar to Backend Registry's Available() method.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -134,13 +138,15 @@
             "Returns slice of sessions where EndedAt is nil",
             "Properly handles concurrent access",
             "Returns empty slice when no active sessions"
-          ]
+          ],
+          "notes": "Implemented Active() []*Session method following Backend Registry's Available() pattern exactly. Copies sessions slice while holding RLock, releases lock before filtering, returns only sessions where EndedAt == nil. Returns empty slice when no active sessions. Committed as 7afe3cc.",
+          "updated_at": "2025-12-26T04:34:55.342874+00:00"
         },
         {
           "id": "2.4",
           "title": "Implement Unregister method",
           "description": "Add Unregister(name string) error method to remove a session from the registry. Returns error if session not found.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -149,7 +155,9 @@
             "Removes session from map with write lock",
             "Returns error if session not found",
             "Returns nil on successful removal"
-          ]
+          ],
+          "notes": "Implemented Unregister(name string) error method following Register method pattern exactly. Uses write lock (mu.Lock/defer Unlock) for thread-safe map modification, returns error if session name not found, uses delete() to remove session from map, returns nil on successful removal. Committed as 63ecc46.",
+          "updated_at": "2025-12-26T04:36:19.237850+00:00"
         }
       ]
     },
@@ -162,7 +170,7 @@
           "id": "3.1",
           "title": "Implement Create method",
           "description": "Add Create(name, description string) (*Session, error) method that creates a new session and registers it in one operation.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -172,13 +180,15 @@
             "Registers session with given name",
             "Returns created session and nil on success",
             "Returns nil and error if name already exists"
-          ]
+          ],
+          "notes": "Implemented Create(name, description string) (*Session, error) method following existing Register method pattern exactly. Uses write lock (mu.Lock/defer Unlock), checks for duplicate names returning error if exists, creates session using NewSession(), registers it in map, returns session and nil on success. Committed as cd01475.",
+          "updated_at": "2025-12-26T04:37:42.428349+00:00"
         },
         {
           "id": "3.2",
           "title": "Implement GetOrCreate method",
           "description": "Add GetOrCreate(name, description string) (*Session, bool) method that returns existing session or creates new one. Returns session and bool indicating if it was created.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -187,7 +197,9 @@
             "Returns existing session and false if found",
             "Creates and returns new session and true if not found",
             "Thread-safe implementation"
-          ]
+          ],
+          "notes": "Implemented GetOrCreate(name, description string) (*Session, bool) method following Create method pattern exactly. Uses write lock (mu.Lock/defer Unlock) for thread-safe access, returns existing session and false if found, creates new session using NewSession(), registers it in map, and returns it with true if not found. Committed as 2db73e0.",
+          "updated_at": "2025-12-26T04:39:02.513037+00:00"
         },
         {
           "id": "3.3",
@@ -340,5 +352,5 @@
     "target_package": "github.com/r3d91ll/yarn",
     "pattern_reference": "Weaver/pkg/backend/registry.go"
   },
-  "last_updated": "2025-12-26T04:30:09.967411+00:00"
+  "last_updated": "2025-12-26T04:39:02.513045+00:00"
 }

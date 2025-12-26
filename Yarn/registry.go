@@ -144,3 +144,10 @@ func (r *SessionRegistry) GetOrCreate(name, description string) (*Session, bool)
 	r.sessions[name] = session
 	return session, true
 }
+
+// Count returns the number of registered sessions.
+func (r *SessionRegistry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.sessions)
+}

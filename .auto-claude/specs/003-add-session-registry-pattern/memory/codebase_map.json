@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:42.351747+00:00"
     },
     "Yarn/registry.go": {
-      "description": "SessionRegistry.List() method implemented with read lock protection (RLock/RUnlock), returning []string of all registered session names. Pre-allocates slice with capacity for efficiency.",
+      "description": "GetOrCreate() method returns existing session (bool=false) or creates new one (bool=true). Uses write lock for atomic check-and-create operation. Common pattern for idempotent session retrieval.",
       "category": "pattern",
-      "discovered_at": "2025-12-26T04:30:14.957134+00:00"
+      "discovered_at": "2025-12-26T04:39:07.864062+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:30:14.957144+00:00"
+  "last_updated": "2025-12-26T04:39:07.864070+00:00"
 }

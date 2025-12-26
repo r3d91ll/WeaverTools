@@ -47,11 +47,83 @@
         }
       ],
       "status": "completed"
+    },
+    "2.1": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2025-12-25T22:31:47.261148",
+          "approach": "Implemented: Define SessionStatus struct to represent session status with Name, ID, IsActive, StartedAt, EndedAt,",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "2.2": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2025-12-25T22:33:40.235595",
+          "approach": "Implemented: Add Status() map[string]SessionStatus method to return status for all registered sessions. Copies se",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "2.3": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2025-12-25T22:35:10.541804",
+          "approach": "Implemented: Add Active() []*Session method to return all sessions that have not ended (EndedAt is nil). Similar ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "2.4": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2025-12-25T22:36:32.503460",
+          "approach": "Implemented: Add Unregister(name string) error method to remove a session from the registry. Returns error if ses",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.1": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2025-12-25T22:37:55.610053",
+          "approach": "Implemented: Add Create(name, description string) (*Session, error) method that creates a new session and registe",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.2": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2025-12-25T22:39:14.960741",
+          "approach": "Implemented: Add GetOrCreate(name, description string) (*Session, bool) method that returns existing session or c",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-25T22:22:18.354500",
-    "last_updated": "2025-12-25T22:30:23.549844"
+    "last_updated": "2025-12-25T22:39:14.960744"
   }
 }

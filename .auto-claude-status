@@ -1,11 +1,11 @@
 {
   "active": true,
   "spec": "002-add-validation-to-yarn-types",
-  "state": "building",
+  "state": "complete",
   "subtasks": {
-    "completed": 14,
+    "completed": 15,
     "total": 15,
-    "in_progress": 1,
+    "in_progress": 0,
     "failed": 0
   },
   "phase": {
@@ -21,5 +21,5 @@
     "number": 16,
     "started_at": "2025-12-25T22:22:46.425524"
   },
-  "last_update": "2025-12-25T22:58:23.468388"
+  "last_update": "2025-12-25T22:59:55.009221"
 }

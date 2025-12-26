@@ -59,11 +59,83 @@
         }
       ],
       "status": "completed"
+    },
+    "2.2": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2025-12-25T22:35:01.782256",
+          "approach": "Implemented: Load reads conversations from a directory, unmarshaling each JSON file and merging into store.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.1": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2025-12-25T22:37:29.388790",
+          "approach": "Implemented: Test Add, Get, List, Count, Clear, ClearAll operations including edge cases.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.2": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2025-12-25T22:40:41.036134",
+          "approach": "Implemented: Test round-trip persistence with temporary directories.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.3": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2025-12-25T22:43:27.729234",
+          "approach": "Implemented: Test thread-safety with concurrent reads and writes.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "4.1": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2025-12-25T22:45:53.733869",
+          "approach": "Implemented: Ensure all exported types and methods have godoc comments matching project style.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "4.2": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2025-12-25T22:48:23.938259",
+          "approach": "Implemented: Run all tests including race detector to verify correctness.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-25T22:22:45.443144",
-    "last_updated": "2025-12-25T22:33:39.842274"
+    "last_updated": "2025-12-25T22:48:23.938262"
   }
 }

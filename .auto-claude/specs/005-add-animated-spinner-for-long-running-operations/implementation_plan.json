@@ -3,8 +3,8 @@
   "description": "Replace static 'thinking...' text with an animated spinner that shows progress and can display elapsed time. This provides better visual feedback during agent responses, concept extraction, and analysis operations.",
   "created_at": "2025-12-26T04:18:04.536Z",
   "updated_at": "2025-12-26T04:26:00.000Z",
-  "status": "in_progress",
-  "planStatus": "ready",
+  "status": "human_review",
+  "planStatus": "review",
   "workflow_type": "development",
   "spec_file": "spec.md",
   "estimated_total_hours": 4,
@@ -260,5 +260,17 @@
     "passed": false,
     "issues": []
   },
-  "last_updated": "2025-12-26T04:52:10.476869+00:00"
+  "last_updated": "2025-12-26T04:58:01.998110+00:00",
+  "qa_signoff": {
+    "status": "approved",
+    "qa_session": 0,
+    "issues_found": [
+      {
+        "description": "None - manual test verification required by user (go command blocked in sandbox)"
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2025-12-26T04:58:01.998099+00:00",
+    "ready_for_qa_revalidation": false
+  }
 }

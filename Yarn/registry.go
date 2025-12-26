@@ -129,3 +129,18 @@ func (r *SessionRegistry) Create(name, description string) (*Session, error) {
 	r.sessions[name] = session
 	return session, nil
 }
+
+// GetOrCreate returns an existing session or creates a new one.
+// Returns the session and a bool indicating if it was created (true) or already existed (false).
+func (r *SessionRegistry) GetOrCreate(name, description string) (*Session, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if session, exists := r.sessions[name]; exists {
+		return session, false
+	}
+
+	session := NewSession(name, description)
+	r.sessions[name] = session
+	return session, true
+}

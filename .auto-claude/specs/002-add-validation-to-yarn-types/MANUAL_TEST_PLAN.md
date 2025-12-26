@@ -1,12 +1,12 @@
 # Manual Test Plan - 002-add-validation-to-yarn-types
 
 **Generated**: 2025-12-26T04:59:55.010408+00:00
-**Reason**: No automated test framework detected
+**Purpose**: Manual verification checklist to supplement automated tests
 
 ## Overview
 
-This project does not have automated testing infrastructure. Please perform
-manual verification of the implementation using the checklist below.
+This checklist supplements the automated Go test suite with manual verification
+steps. Run automated tests first with `go test ./Yarn/...` or `make test`.
 
 ## Pre-Test Setup
 

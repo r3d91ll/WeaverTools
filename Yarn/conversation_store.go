@@ -59,3 +59,44 @@ func (s *ConversationStore) Get(id string) (*Conversation, bool) {
 	}
 	return cpy, true
 }
+
+// List returns all conversation IDs with message counts.
+func (s *ConversationStore) List() map[string]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string]int)
+	for id, conversation := range s.conversations {
+		result[id] = len(conversation.Messages)
+	}
+	return result
+}
+
+// Count returns the number of conversations.
+func (s *ConversationStore) Count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.conversations)
+}
+
+// Clear removes a conversation by ID.
+func (s *ConversationStore) Clear(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.conversations[id]; ok {
+		delete(s.conversations, id)
+		return true
+	}
+	return false
+}
+
+// ClearAll removes all conversations.
+func (s *ConversationStore) ClearAll() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := len(s.conversations)
+	s.conversations = make(map[string]*Conversation)
+	return count
+}

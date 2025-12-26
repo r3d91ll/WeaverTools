@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:52.453018+00:00"
     },
     "Weaver/pkg/spinner/spinner.go": {
-      "description": "Elapsed time display is controlled by Config.ShowElapsed (defaults to true). formatElapsed() formats durations as \"(1.2s)\" for < 1 minute or \"(1m 30s)\" for longer durations. Integrated into render() which builds output as \"char message (elapsed)\".",
-      "category": "implementation",
-      "discovered_at": "2025-12-26T04:30:32.774959+00:00"
+      "description": "Success(message) and Fail(message) methods stop spinner and display colored status indicators. Success shows green \u2713, Fail shows red \u2717. Both include elapsed time if ShowElapsed is true. Empty message parameter uses current spinner message. Uses internal complete() method for shared logic.",
+      "category": "api",
+      "discovered_at": "2025-12-26T04:35:02.285212+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:30:32.774969+00:00"
+  "last_updated": "2025-12-26T04:35:02.285222+00:00"
 }

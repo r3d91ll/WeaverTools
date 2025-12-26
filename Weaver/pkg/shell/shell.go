@@ -342,19 +342,22 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\033[33mExtracting %d samples for '%s' using %s...\033[0m\n", count, concept, extractAgent.Name())
-
-	// Create extractor and run
+	// Create extractor and run with spinner feedback
 	extractor := concepts.NewExtractor(extractAgent.Backend, s.conceptStore)
 	cfg := concepts.DefaultExtractionConfig(concept, count)
 
+	// Start extraction spinner
+	spin := spinner.New(fmt.Sprintf("Extracting %d samples for '%s'...", count, concept))
+	spin.Start()
+
 	result, err := extractor.Extract(ctx, cfg)
 	if err != nil {
+		spin.Fail(fmt.Sprintf("Extraction failed for '%s'", concept))
 		return err
 	}
 
-	// Display results
-	fmt.Printf("\033[32m✓ Extracted %d samples\033[0m\n", result.SamplesAdded)
+	// Show success with sample count
+	spin.Success(fmt.Sprintf("Extracted %d samples for '%s'", result.SamplesAdded, concept))
 	fmt.Printf("  Concept: %s\n", result.Concept)
 	fmt.Printf("  Total samples: %d\n", result.TotalSamples)
 	fmt.Printf("  Dimension: %d\n", result.Dimension)

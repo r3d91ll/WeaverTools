@@ -16,6 +16,16 @@ const (
 	RoleTool      MessageRole = "tool"
 )
 
+// IsValid returns true if this is a valid message role.
+func (r MessageRole) IsValid() bool {
+	switch r {
+	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
+		return true
+	default:
+		return false
+	}
+}
+
 // Message is the atomic unit of communication between agents.
 type Message struct {
 	ID          string         `json:"id"`
@@ -82,6 +92,34 @@ func (m *Message) HasHiddenState() bool {
 	return m.HiddenState != nil && len(m.HiddenState.Vector) > 0
 }
 
+// Validate checks if the message is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (m *Message) Validate() *ValidationError {
+	if m.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if !m.Role.IsValid() {
+		return &ValidationError{Field: "role", Message: "invalid role"}
+	}
+	if m.Timestamp.IsZero() {
+		return &ValidationError{Field: "timestamp", Message: "timestamp is required"}
+	}
+
+	// Tool messages require ToolCallID
+	if m.Role == RoleTool {
+		if m.ToolCallID == "" {
+			return &ValidationError{Field: "tool_call_id", Message: "tool_call_id is required for tool messages"}
+		}
+	} else {
+		// Non-tool messages require content
+		if m.Content == "" {
+			return &ValidationError{Field: "content", Message: "content is required for non-tool messages"}
+		}
+	}
+
+	return nil
+}
+
 // Dimension returns the hidden dimension size.
 // Returns 0 if the HiddenState is nil.
 func (h *HiddenState) Dimension() int {
@@ -92,4 +130,53 @@ func (h *HiddenState) Dimension() int {
 		return len(h.Vector)
 	}
 	return h.Shape[len(h.Shape)-1]
+}
+
+// ValidDTypes defines the allowed data type values for hidden states.
+var ValidDTypes = []string{"float32", "float16"}
+
+// Validate checks if the hidden state is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (h *HiddenState) Validate() *ValidationError {
+	if h == nil {
+		return nil
+	}
+
+	if len(h.Vector) == 0 {
+		return &ValidationError{Field: "vector", Message: "vector is required"}
+	}
+
+	if h.Layer < 0 {
+		return &ValidationError{Field: "layer", Message: "layer must be non-negative"}
+	}
+
+	// Validate Shape is consistent with Vector length if Shape is provided
+	if len(h.Shape) > 0 {
+		product := 1
+		for _, dim := range h.Shape {
+			if dim <= 0 {
+				return &ValidationError{Field: "shape", Message: "shape dimensions must be positive"}
+			}
+			product *= dim
+		}
+		if product != len(h.Vector) {
+			return &ValidationError{Field: "shape", Message: "shape is inconsistent with vector length"}
+		}
+	}
+
+	// Validate DType if specified
+	if h.DType != "" {
+		validDType := false
+		for _, dt := range ValidDTypes {
+			if h.DType == dt {
+				validDType = true
+				break
+			}
+		}
+		if !validDType {
+			return &ValidationError{Field: "dtype", Message: "dtype must be 'float32' or 'float16'"}
+		}
+	}
+
+	return nil
 }

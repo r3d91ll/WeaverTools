@@ -1,6 +1,7 @@
 package yarn
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -176,4 +177,54 @@ func (c *Conversation) MessagesWithMetadata(key string) []*Message {
 		}
 	}
 	return result
+}
+
+// Validate checks if the conversation is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (c *Conversation) Validate() *ValidationError {
+	if c.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if c.Name == "" {
+		return &ValidationError{Field: "name", Message: "name is required"}
+	}
+	if c.CreatedAt.IsZero() {
+		return &ValidationError{Field: "created_at", Message: "created_at is required"}
+	}
+	if c.UpdatedAt.Before(c.CreatedAt) {
+		return &ValidationError{Field: "updated_at", Message: "updated_at must not be before created_at"}
+	}
+
+	// Cascade validation: validate all messages
+	for i, msg := range c.Messages {
+		if msg == nil {
+			return &ValidationError{
+				Field:   "messages",
+				Message: "message at index " + strconv.Itoa(i) + " is nil",
+			}
+		}
+		if err := msg.Validate(); err != nil {
+			return &ValidationError{
+				Field:   "messages[" + strconv.Itoa(i) + "]." + err.Field,
+				Message: err.Message,
+			}
+		}
+	}
+
+	return nil
+}
+
+// Validate checks if the participant is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (p *Participant) Validate() *ValidationError {
+	if p.AgentID == "" {
+		return &ValidationError{Field: "agent_id", Message: "agent_id is required"}
+	}
+	if p.Role == "" {
+		return &ValidationError{Field: "role", Message: "role is required"}
+	}
+	if p.JoinedAt.IsZero() {
+		return &ValidationError{Field: "joined_at", Message: "joined_at is required"}
+	}
+	return nil
 }

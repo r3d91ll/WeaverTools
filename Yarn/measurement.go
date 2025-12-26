@@ -68,6 +68,8 @@ func (s BetaStatus) IsValid() bool {
 }
 
 // NewMeasurement creates a new Measurement with a generated ID.
+// Note: A SenderID or ReceiverID must be set before the measurement is valid.
+// Use SetSender() or SetReceiver() to configure participants after creation.
 func NewMeasurement() *Measurement {
 	return &Measurement{
 		ID:        uuid.New().String(),

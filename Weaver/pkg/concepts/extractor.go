@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/r3d91ll/weaver/pkg/backend"
-	"github.com/r3d91ll/yarn"
 )
 
 // Extractor generates concept examples and extracts hidden states.

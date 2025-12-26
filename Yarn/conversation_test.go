@@ -735,7 +735,7 @@ func TestMessagesByRole_EmptyConversation(t *testing.T) {
 
 	result := conv.MessagesByRole(RoleUser)
 	if result == nil {
-		t.Error("MessagesByRole on empty conversation should return nil, not panic")
+		t.Error("MessagesByRole on empty conversation should return empty slice, not nil")
 	}
 	if len(result) != 0 {
 		t.Errorf("MessagesByRole on empty conversation: expected 0, got %d", len(result))
@@ -795,7 +795,7 @@ func TestMessagesByAgent_EmptyConversation(t *testing.T) {
 
 	result := conv.MessagesByAgent("any-agent")
 	if result == nil {
-		t.Error("MessagesByAgent on empty conversation should return nil, not panic")
+		t.Error("MessagesByAgent on empty conversation should return empty slice, not nil")
 	}
 	if len(result) != 0 {
 		t.Errorf("MessagesByAgent on empty conversation: expected 0, got %d", len(result))
@@ -878,7 +878,7 @@ func TestMessagesSince_EmptyConversation(t *testing.T) {
 
 	result := conv.MessagesSince(time.Now())
 	if result == nil {
-		t.Error("MessagesSince on empty conversation should return nil, not panic")
+		t.Error("MessagesSince on empty conversation should return empty slice, not nil")
 	}
 	if len(result) != 0 {
 		t.Errorf("MessagesSince on empty conversation: expected 0, got %d", len(result))
@@ -971,7 +971,7 @@ func TestMessagesWithMetadata_EmptyConversation(t *testing.T) {
 
 	result := conv.MessagesWithMetadata("any_key")
 	if result == nil {
-		t.Error("MessagesWithMetadata on empty conversation should return nil, not panic")
+		t.Error("MessagesWithMetadata on empty conversation should return empty slice, not nil")
 	}
 	if len(result) != 0 {
 		t.Errorf("MessagesWithMetadata on empty conversation: expected 0, got %d", len(result))

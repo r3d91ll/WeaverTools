@@ -125,6 +125,7 @@ func TestSessionValidate(t *testing.T) {
 	validMeasurement := &Measurement{
 		ID:        "meas-1",
 		Timestamp: now,
+		SenderID:  "sender-1",
 	}
 
 	tests := []struct {
@@ -457,6 +458,7 @@ func TestSessionValidate(t *testing.T) {
 					{
 						ID:        "meas-invalid",
 						Timestamp: time.Time{},
+						SenderID:  "sender-1",
 					},
 				},
 			},
@@ -476,10 +478,12 @@ func TestSessionValidate(t *testing.T) {
 					{
 						ID:        "meas-2",
 						Timestamp: now,
+						SenderID:  "sender-2",
 					},
 					{
 						ID:        "",
 						Timestamp: now,
+						SenderID:  "sender-3",
 					},
 				},
 			},
@@ -746,14 +750,17 @@ func TestSessionValidateWithMultipleMeasurements(t *testing.T) {
 				{
 					ID:        "meas-1",
 					Timestamp: now,
+					SenderID:  "sender-1",
 				},
 				{
 					ID:        "meas-2",
 					Timestamp: now.Add(time.Second),
+					SenderID:  "sender-2",
 				},
 				{
 					ID:        "meas-3",
 					Timestamp: now.Add(2 * time.Second),
+					SenderID:  "sender-3",
 				},
 			},
 		}
@@ -773,14 +780,17 @@ func TestSessionValidateWithMultipleMeasurements(t *testing.T) {
 				{
 					ID:        "meas-1",
 					Timestamp: now,
+					SenderID:  "sender-1",
 				},
 				{
 					ID:        "meas-2",
 					Timestamp: time.Time{}, // Invalid: zero timestamp
+					SenderID:  "sender-2",
 				},
 				{
 					ID:        "meas-3",
 					Timestamp: now,
+					SenderID:  "sender-3",
 				},
 			},
 		}
@@ -921,8 +931,9 @@ func TestSessionAddMeasurementThenValidate(t *testing.T) {
 		t.Fatalf("NewSession() created invalid session: %v", err)
 	}
 
-	// Add a valid measurement
+	// Add a valid measurement (must have sender or receiver)
 	meas := NewMeasurement()
+	meas.SenderID = "agent-1"
 	session.AddMeasurement(meas)
 
 	// Should still be valid
@@ -932,6 +943,7 @@ func TestSessionAddMeasurementThenValidate(t *testing.T) {
 
 	// Add another measurement
 	meas2 := NewMeasurement()
+	meas2.SenderID = "agent-2"
 	session.AddMeasurement(meas2)
 
 	// Should still be valid
@@ -1087,6 +1099,7 @@ func TestSessionValidateWithConversationMessages(t *testing.T) {
 				{
 					ID:        "meas-1",
 					Timestamp: now,
+					SenderID:  "sender-1",
 				},
 			},
 		}

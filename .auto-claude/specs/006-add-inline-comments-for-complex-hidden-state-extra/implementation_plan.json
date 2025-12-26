@@ -1,0 +1,240 @@
+{
+  "feature": "Add inline comments for complex hidden state extraction logic",
+  "description": "The hidden state extraction in TheLoom loaders (transformers_loader.py, qwen_loader.py, mistral_loader.py) involves complex logic for extracting tensors from different model architectures. Key algorithms lack inline comments explaining: tensor indexing, layer selection, bfloat16 handling, and batch dimension squeezing.",
+  "created_at": "2025-12-25T18:33:26.864Z",
+  "updated_at": "2025-12-25T18:33:26.864Z",
+  "status": "human_review",
+  "planStatus": "review",
+  "workflow_type": "documentation",
+  "services_involved": [
+    "TheLoom/the-loom/src/loaders/transformers_loader.py",
+    "TheLoom/the-loom/src/loaders/qwen_loader.py",
+    "TheLoom/the-loom/src/loaders/mistral_loader.py"
+  ],
+  "spec_file": "spec.md",
+  "phases": [
+    {
+      "phase_id": "phase-1",
+      "name": "Document transformers_loader.py hidden state extraction",
+      "description": "Add inline comments to the primary TransformersLoader which is the reference implementation for hidden state extraction patterns",
+      "subtasks": [
+        {
+          "subtask_id": "1.1",
+          "title": "Comment _extract_hidden_states() in transformers_loader.py",
+          "description": "Add comments explaining: (1) hidden_states tuple structure (step->layer->tensor), (2) negative index resolution with num_layers+1 for embedding layer, (3) tensor slicing [:,-1,:] to get last token, (4) .cpu() call for GPU->CPU transfer",
+          "file_path": "TheLoom/the-loom/src/loaders/transformers_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comment explains hidden_states tuple is (generation_step, layer) structure",
+            "Comment explains why num_layers+1 is used for negative index (embedding layer at index 0)",
+            "Comment explains [:, -1, :] extracts the last sequence position",
+            "Comment explains .cpu() moves tensor from GPU to CPU for serialization"
+          ]
+        },
+        {
+          "subtask_id": "1.2",
+          "title": "Comment _extract_attention() in transformers_loader.py",
+          "description": "Add comments explaining: (1) difference from hidden_states (no embedding layer, so num_layers not num_layers+1), (2) attention tensor shape [batch, heads, query_seq, key_seq], (3) why [:,:,-1,:] extracts last query position",
+          "file_path": "TheLoom/the-loom/src/loaders/transformers_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comment explains attention tuple lacks embedding layer (differs from hidden_states)",
+            "Comment explains negative index uses num_layers (not num_layers+1)",
+            "Comment explains [:,:,-1,:] gets attention from last query to all keys"
+          ]
+        },
+        {
+          "subtask_id": "1.3",
+          "title": "Comment _extract_sequence_hidden_states() in transformers_loader.py",
+          "description": "Add comments explaining: (1) manifold construction purpose, (2) iterating over all generation steps, (3) collecting last-token vectors from each step, (4) stacking into [num_tokens, hidden_size] matrix",
+          "file_path": "TheLoom/the-loom/src/loaders/transformers_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comment explains purpose: building geometric manifold from all tokens",
+            "Comment explains each step represents one generated token",
+            "Comment explains [0,-1,:] gets first batch, last position (newly generated token)",
+            "Comment explains final tensor shape is [num_tokens, hidden_size]"
+          ]
+        },
+        {
+          "subtask_id": "1.4",
+          "title": "Comment embed() pooling strategies in transformers_loader.py",
+          "description": "Add comments explaining: (1) why last_token pooling is default for decoder-only models, (2) attention_mask usage for variable-length sequences, (3) squeeze(0) removing batch dimension for single input",
+          "file_path": "TheLoom/the-loom/src/loaders/transformers_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comment explains last_token uses attention_mask to find actual last non-padding token",
+            "Comment explains mean pooling excludes padding tokens via mask",
+            "Comment explains squeeze(0) removes batch dimension for API consistency"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": "phase-2",
+      "name": "Document qwen_loader.py hidden state extraction",
+      "description": "Add inline comments to QwenLoader following the same patterns established in TransformersLoader",
+      "subtasks": [
+        {
+          "subtask_id": "2.1",
+          "title": "Comment _extract_hidden_states() in qwen_loader.py",
+          "description": "Add comments explaining the hidden state extraction logic, noting any Qwen-specific differences from the base TransformersLoader pattern",
+          "file_path": "TheLoom/the-loom/src/loaders/qwen_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain tuple structure and indexing (matching transformers_loader pattern)",
+            "Comments note that Qwen follows standard HuggingFace hidden_states format"
+          ]
+        },
+        {
+          "subtask_id": "2.2",
+          "title": "Comment _extract_attention() in qwen_loader.py",
+          "description": "Enhance existing comments in _extract_attention() explaining the difference between attention and hidden_state indexing",
+          "file_path": "TheLoom/the-loom/src/loaders/qwen_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Existing comments are enhanced with specific tensor shape examples",
+            "Comment clearly distinguishes why attention uses num_layers vs num_layers+1"
+          ]
+        },
+        {
+          "subtask_id": "2.3",
+          "title": "Comment _extract_sequence_hidden_states() in qwen_loader.py",
+          "description": "Add comments explaining manifold construction from full generation sequence",
+          "file_path": "TheLoom/the-loom/src/loaders/qwen_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain step-by-step collection of token representations",
+            "Comments explain final tensor shape and purpose"
+          ]
+        },
+        {
+          "subtask_id": "2.4",
+          "title": "Comment embed() pooling in qwen_loader.py",
+          "description": "Add comments explaining pooling strategies and tensor operations",
+          "file_path": "TheLoom/the-loom/src/loaders/qwen_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain each pooling strategy",
+            "Comments explain mask operations and dimension squeezing"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": "phase-3",
+      "name": "Document mistral_loader.py hidden state extraction",
+      "description": "Add inline comments to MistralLoader following the established patterns",
+      "subtasks": [
+        {
+          "subtask_id": "3.1",
+          "title": "Comment _extract_hidden_states() in mistral_loader.py",
+          "description": "Add comments explaining hidden state extraction with any Mistral-specific considerations",
+          "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain tuple structure and tensor indexing",
+            "Comments note standard pattern matching other loaders"
+          ]
+        },
+        {
+          "subtask_id": "3.2",
+          "title": "Comment _extract_attention() in mistral_loader.py",
+          "description": "Add comments explaining attention extraction with indexing differences",
+          "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain attention tuple structure (no embedding layer)",
+            "Comments explain negative index calculation difference"
+          ]
+        },
+        {
+          "subtask_id": "3.3",
+          "title": "Comment _extract_sequence_hidden_states() in mistral_loader.py",
+          "description": "Add comments explaining sequence-wide hidden state collection",
+          "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain manifold construction purpose",
+            "Comments explain tensor stacking and final shape"
+          ]
+        },
+        {
+          "subtask_id": "3.4",
+          "title": "Comment embed() pooling in mistral_loader.py",
+          "description": "Add comments explaining pooling strategies with dict-style input handling",
+          "file_path": "TheLoom/the-loom/src/loaders/mistral_loader.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "Comments explain pooling strategies",
+            "Comments note dict-style input handling for MistralTokenizerWrapper"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": "phase-4",
+      "name": "Verify and finalize documentation",
+      "description": "Ensure all comments are consistent across loaders and verify code still functions correctly",
+      "subtasks": [
+        {
+          "subtask_id": "4.1",
+          "title": "Verify comment consistency across all three loaders",
+          "description": "Review all added comments to ensure consistent terminology and explanation patterns across transformers_loader.py, qwen_loader.py, and mistral_loader.py",
+          "file_path": "TheLoom/the-loom/src/loaders/",
+          "status": "completed",
+          "acceptance_criteria": [
+            "All three loaders use consistent terminology for tensor shapes",
+            "All loaders explain the same concepts the same way",
+            "No conflicting or contradictory comments"
+          ]
+        },
+        {
+          "subtask_id": "4.2",
+          "title": "Run existing tests to verify no regressions",
+          "description": "Execute test_loaders.py and any related tests to confirm comments-only changes have not broken functionality",
+          "file_path": "TheLoom/the-loom/tests/test_loaders.py",
+          "status": "completed",
+          "acceptance_criteria": [
+            "All existing loader tests pass",
+            "No syntax errors from comment additions"
+          ]
+        }
+      ]
+    }
+  ],
+  "final_acceptance": [
+    "All three loader files have comprehensive inline comments explaining hidden state extraction",
+    "Comments explain tensor indexing, layer selection, and batch dimension handling",
+    "Comments use consistent terminology across all loaders",
+    "All existing tests pass without modification"
+  ],
+  "qa_signoff": {
+    "status": "approved",
+    "qa_session": 0,
+    "issues_found": [
+      {
+        "description": "None"
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2025-12-26T00:55:56.407217+00:00",
+    "ready_for_qa_revalidation": false
+  },
+  "last_updated": "2025-12-26T00:55:56.407226+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2025-12-26T00:56:17.781122+00:00",
+      "issues": [],
+      "duration_seconds": 260.6
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
+}

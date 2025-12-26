@@ -1,0 +1,12 @@
+{
+  "sourceType": "ideation",
+  "ideationType": "code_improvements",
+  "ideaId": "ci-003",
+  "rationale": "The Loom backend's ChatStream() currently calls Chat() and returns the response as a single chunk. The ClaudeCode backend shows the proper streaming implementation pattern using bufio.Scanner and JSON event parsing. Loom's HTTP client infrastructure supports streaming.",
+  "category": "feature",
+  "estimatedEffort": "small",
+  "complexity": "small",
+  "affectedFiles": [
+    "Weaver/pkg/backend/loom.go"
+  ]
+}

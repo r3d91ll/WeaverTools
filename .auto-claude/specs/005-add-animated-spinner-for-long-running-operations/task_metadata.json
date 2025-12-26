@@ -1,0 +1,12 @@
+{
+  "sourceType": "ideation",
+  "ideationType": "ui_ux_improvements",
+  "ideaId": "uiux-001",
+  "rationale": "Static text like 'thinking...' provides no feedback about operation progress. An animated spinner (similar to tools like npm, git, or docker) shows that the application is still working and hasn't frozen, improving perceived responsiveness and user confidence.",
+  "category": "ui_ux",
+  "uiuxCategory": "interaction",
+  "affectedFiles": [
+    "Weaver/pkg/shell/shell.go"
+  ],
+  "problemSolved": "When waiting for agent responses, the shell displays '[agent] thinking...' as static text (line 212). During extraction (/extract), it shows 'Extracting N samples for concept...' without progress updates. Users have no visual indication that operations are progressing."
+}

@@ -342,5 +342,20 @@
     "tests_passed": {},
     "timestamp": "2025-12-26T05:04:01.411682+00:00",
     "ready_for_qa_revalidation": false
+  },
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2025-12-26T05:04:33.686244+00:00",
+      "issues": [],
+      "duration_seconds": 278.67
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
   }
 }

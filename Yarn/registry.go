@@ -84,3 +84,22 @@ func (r *SessionRegistry) Status() map[string]SessionStatus {
 	}
 	return result
 }
+
+// Active returns all sessions that have not ended.
+func (r *SessionRegistry) Active() []*Session {
+	// Copy sessions to avoid holding lock during filtering
+	r.mu.RLock()
+	sessions := make([]*Session, 0, len(r.sessions))
+	for _, s := range r.sessions {
+		sessions = append(sessions, s)
+	}
+	r.mu.RUnlock()
+
+	var result []*Session
+	for _, session := range sessions {
+		if session.EndedAt == nil {
+			result = append(result, session)
+		}
+	}
+	return result
+}

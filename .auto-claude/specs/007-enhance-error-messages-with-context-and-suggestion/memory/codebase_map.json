@@ -1,0 +1,45 @@
+{
+  "discovered_files": {
+    "Weaver/pkg/shell/shell.go": {
+      "description": "Main error display point - uses fmt.Printf(\"Error: %v\\n\", err) pattern. All shell commands return errors here.",
+      "category": "error_handling",
+      "discovered_at": "2025-12-26T04:25:43.647309+00:00"
+    },
+    "Wool/agent.go": {
+      "description": "Contains existing ValidationError type (lines 125-133) with Field and Message. This will be enhanced, not replaced.",
+      "category": "error_handling",
+      "discovered_at": "2025-12-26T04:25:43.657705+00:00"
+    },
+    "Weaver/pkg/errors/errors.go": {
+      "description": "New structured error package with WeaverError type. Contains Code, Message, Context (map), Cause (wrapped error), and Suggestions fields. Categories: config, agent, backend, command, validation, network, io, internal. Builder pattern: WithContext(), WithCause(), WithSuggestion(). Utility functions: New(), Wrap(), AsWeaverError(), IsCategory(), IsCode().",
+      "category": "architecture",
+      "discovered_at": "2025-12-26T04:28:01.794329+00:00"
+    },
+    "Weaver/pkg/errors/display.go": {
+      "description": "Error display formatting with color support. Format() renders WeaverErrors with structured output: red for error code, yellow for context, cyan for suggestions. IsTTY() detects terminal for auto color. Sprint() for no-color, Sprintc() for forced color. Display() writes to stderr.",
+      "category": "error-handling",
+      "discovered_at": "2025-12-26T04:30:15.840175+00:00"
+    },
+    "Weaver/pkg/errors/codes.go": {
+      "description": "Error code constants organized by category. Contains 60+ codes like ErrConfigNotFound, ErrBackendUnavailable, ErrAgentNotFound, etc. Includes CodeCategory() lookup function and category helpers (IsConfigCode, IsBackendCode, etc.) for programmatic categorization. All codes follow UPPER_SNAKE_CASE format.",
+      "category": "error-handling",
+      "discovered_at": "2025-12-26T04:42:15.886282+00:00"
+    },
+    "Weaver/pkg/errors/suggestions.go": {
+      "description": "Suggestion registry with context-aware remediation. Maps error codes to suggestions with conditional matching (OS, backend, etc). Built-in suggestions for all 60+ error codes. Key types: Suggestion (Text, Conditions, Priority), Registry with Get(code, ctx). Helper functions: AttachSuggestions(), GetSuggestions(), NewWithSuggestions().",
+      "category": "error-handling",
+      "discovered_at": "2025-12-26T04:48:05.208692+00:00"
+    },
+    "Weaver/pkg/errors/constructors.go": {
+      "description": "Smart error constructors that auto-attach suggestions from the registry. Contains 32 basic constructors (8 categories \u00d7 4 variants: base, formatted, wrap, wrap-formatted), 8 context-aware constructors for conditional suggestions, and 17+ quick constructors for common error patterns like ConfigNotFound(), BackendNotInstalledError(), etc. All constructors call AttachSuggestions() to automatically add remediation guidance.",
+      "category": "error_handling",
+      "discovered_at": "2025-12-26T04:52:53.014997+00:00"
+    },
+    "Weaver/cmd/weaver/main.go": {
+      "description": "Added createBackendUnavailableError() helper function that creates structured WeaverErrors for backend unavailability. Provides context-aware suggestions for Claude Code (CLI installation, authentication) and Loom (server status, health check URL). Replaces simple fmt.Println-based error output with color-coded structured error display via werrors.Display().",
+      "category": "error_handling",
+      "discovered_at": "2025-12-26T04:58:19.558323+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:58:19.558330+00:00"
+}

@@ -1,0 +1,63 @@
+# Build Progress: Enhance Error Messages with Context and Suggestions
+
+## Overview
+Transform generic 'Error: %v' messages into structured, actionable error displays that include:
+- What went wrong
+- Why it happened
+- How to fix it
+
+Uses consistent color coding and formatting inspired by CLI tools like rustc, gh, and kubectl.
+
+## Current Status: Planning Complete
+
+### Phases Summary
+
+| Phase | Name | Subtasks | Status |
+|-------|------|----------|--------|
+| 1 | Core Error Framework | 4 | Pending |
+| 2 | Error Catalog and Suggestions | 3 | Pending |
+| 3 | Integrate with Main Entry Point | 4 | Pending |
+| 4 | Integrate with Shell Commands | 5 | Pending |
+| 5 | Backend and Runtime Errors | 4 | Pending |
+| 6 | Config and Validation Errors | 2 | Pending |
+| 7 | Concepts and Analysis Errors | 3 | Pending |
+| 8 | Testing and Documentation | 3 | Pending |
+
+**Total Subtasks:** 28
+**Estimated Time:** ~9 hours (545 minutes)
+
+## Key Implementation Decisions
+
+### Error Structure
+```go
+type WeaverError struct {
+    Code        ErrorCode
+    Message     string
+    Context     map[string]string
+    Cause       error
+    Suggestions []string
+}
+```
+
+### Color Scheme
+- Red (#E74C3C) - Error type/code
+- Yellow (#F39C12) - Context information
+- Cyan (#3498DB) - Suggestions
+- Green (#27AE60) - Success hints
+
+### Output Format
+```
+ERROR [ConfigNotFound]: Configuration file not found
+  Path: ~/.config/weaver/config.yaml
+  Suggestion: Run 'weaver --init' to create a default configuration
+```
+
+## Progress Log
+
+### 2025-12-26
+- Created implementation plan with 8 phases and 28 subtasks
+- Analyzed existing codebase error patterns
+- Identified all files requiring updates
+
+---
+Next: Begin Phase 1 - Core Error Framework

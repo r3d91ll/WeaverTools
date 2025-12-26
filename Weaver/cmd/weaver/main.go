@@ -184,7 +184,7 @@ func main() {
 
 		agent, err := agentMgr.Create(def)
 		if err != nil {
-			fmt.Printf("  ✗ %-10s - failed: %v\n", name, err)
+			werrors.Display(createAgentCreationError(name, agentCfg, err))
 			continue
 		}
 
@@ -373,4 +373,124 @@ func createBackendUnavailableError(cfg *config.Config, status map[string]backend
 	}
 
 	return err
+}
+
+// createAgentCreationError creates a structured error for agent creation failures.
+// It analyzes the underlying error to provide specific guidance on invalid fields,
+// valid options, and example configurations.
+func createAgentCreationError(name string, agentCfg config.AgentConfig, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Valid options for reference
+	validRoles := []string{"senior", "junior", "conversant", "subject", "observer"}
+	validBackends := []string{"loom", "claudecode"}
+
+	// Check for "agent already exists" error
+	if strings.Contains(errStr, "already exists") {
+		return werrors.Agent(werrors.ErrAgentAlreadyExists, fmt.Sprintf("agent '%s' already exists", name)).
+			WithContext("agent", name).
+			WithSuggestion("Each agent must have a unique name in the configuration").
+			WithSuggestion("Rename the duplicate agent or remove one of the definitions")
+	}
+
+	// Check for "backend not found" error
+	if strings.Contains(errStr, "not found") && strings.Contains(errStr, "backend") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid backend '%s' for agent '%s'", agentCfg.Backend, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "backend").
+			WithContext("invalid_value", agentCfg.Backend).
+			WithContext("valid_options", strings.Join(validBackends, ", ")).
+			WithSuggestion(fmt.Sprintf("Valid backends are: %s", strings.Join(validBackends, ", "))).
+			WithSuggestion("Update your config.yaml with a valid backend value").
+			WithSuggestion("Example: backend: claudecode  # for Claude Code CLI").
+			WithSuggestion("Example: backend: loom       # for The Loom server")
+	}
+
+	// Check for role validation errors
+	if strings.Contains(errStr, "role") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid role '%s' for agent '%s'", agentCfg.Role, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "role").
+			WithContext("invalid_value", agentCfg.Role).
+			WithContext("valid_options", strings.Join(validRoles, ", ")).
+			WithSuggestion(fmt.Sprintf("Valid roles are: %s", strings.Join(validRoles, ", "))).
+			WithSuggestion("senior: high-level reasoning and orchestration (uses Claude Code)").
+			WithSuggestion("junior: implementation tasks and tool execution (uses Loom)").
+			WithSuggestion("subject: experiment participant for conveyance measurement").
+			WithSuggestion("Example configuration:").
+			WithSuggestion("  myagent:").
+			WithSuggestion("    role: junior").
+			WithSuggestion("    backend: loom").
+			WithSuggestion("    model: Qwen/Qwen2.5-Coder-7B-Instruct")
+	}
+
+	// Check for tools_enabled with incompatible role
+	if strings.Contains(errStr, "tools") && strings.Contains(errStr, "role") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("tools_enabled not supported for role '%s' on agent '%s'", agentCfg.Role, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "tools_enabled").
+			WithContext("role", agentCfg.Role).
+			WithSuggestion("Only 'senior' and 'junior' roles support tools").
+			WithSuggestion("Either change the role to senior/junior or set tools_enabled: false").
+			WithSuggestion("For measurement experiments, use role: subject with tools_enabled: false")
+	}
+
+	// Check for temperature out of range
+	if strings.Contains(errStr, "temperature") {
+		temp := float64(0)
+		if agentCfg.Temperature != nil {
+			temp = *agentCfg.Temperature
+		}
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid temperature %.2f for agent '%s'", temp, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "temperature").
+			WithContext("invalid_value", fmt.Sprintf("%.2f", temp)).
+			WithContext("valid_range", "0.0 - 2.0").
+			WithSuggestion("Temperature must be between 0.0 and 2.0").
+			WithSuggestion("Lower values (0.0-0.5): more deterministic output").
+			WithSuggestion("Higher values (0.8-1.2): more creative/varied output").
+			WithSuggestion("Example: temperature: 0.7  # balanced default")
+	}
+
+	// Check for top_p out of range
+	if strings.Contains(errStr, "top_p") {
+		topP := float64(0)
+		if agentCfg.TopP != nil {
+			topP = *agentCfg.TopP
+		}
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid top_p %.2f for agent '%s'", topP, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "top_p").
+			WithContext("invalid_value", fmt.Sprintf("%.2f", topP)).
+			WithContext("valid_range", "0.0 - 1.0").
+			WithSuggestion("top_p must be between 0.0 and 1.0").
+			WithSuggestion("Example: top_p: 0.9  # common default for balanced sampling")
+	}
+
+	// Check for missing required fields
+	if strings.Contains(errStr, "required") || strings.Contains(errStr, "missing") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("missing required field for agent '%s'", name)).
+			WithContext("agent", name).
+			WithSuggestion("Required fields for each agent: name, role, backend").
+			WithSuggestion("For Loom backend, also specify 'model'").
+			WithSuggestion("Example minimal configuration:").
+			WithSuggestion("  agents:").
+			WithSuggestion("    myagent:").
+			WithSuggestion("      role: junior").
+			WithSuggestion("      backend: loom").
+			WithSuggestion("      model: Qwen/Qwen2.5-Coder-7B-Instruct").
+			WithSuggestion("      active: true")
+	}
+
+	// Generic agent creation error with helpful context
+	return werrors.AgentWrap(err, werrors.ErrAgentCreationFailed, fmt.Sprintf("failed to create agent '%s'", name)).
+		WithContext("agent", name).
+		WithContext("role", agentCfg.Role).
+		WithContext("backend", agentCfg.Backend).
+		WithContext("model", agentCfg.Model).
+		WithSuggestion("Check your config.yaml for agent configuration errors").
+		WithSuggestion(fmt.Sprintf("Valid roles: %s", strings.Join(validRoles, ", "))).
+		WithSuggestion(fmt.Sprintf("Valid backends: %s", strings.Join(validBackends, ", "))).
+		WithSuggestion("Ensure the specified backend is enabled in the backends section").
+		WithSuggestion("Run 'weaver --init' to see an example configuration")
 }

@@ -469,6 +469,10 @@ class ChatCompletionRequest(BaseModel):
     This endpoint is designed for WeaverCode integration, providing the
     messages-based API that WeaverCode expects while exposing hidden states
     for conveyance measurement.
+
+    Supports both streaming and non-streaming responses:
+    - stream=false (default): Returns ChatCompletionResponse
+    - stream=true: Returns SSE stream with content_block_delta and message_delta events
     """
 
     model: str = Field(..., description="Model ID (HuggingFace or local path)")
@@ -487,12 +491,82 @@ class ChatCompletionRequest(BaseModel):
     return_hidden_states: bool = Field(
         default=True, description="Return hidden states for conveyance measurement"
     )
-    stream: bool = Field(default=False, description="Stream responses (not yet implemented)")
+    stream: bool = Field(
+        default=False,
+        description="Enable streaming responses via Server-Sent Events (SSE). "
+        "When true, returns content_block_delta events for each token and "
+        "message_delta event at completion.",
+    )
     loader: str | None = Field(default=None, description="Force specific loader")
     device: str | None = Field(
         default=None,
         description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
     )
+
+
+class StreamingChatCompletionRequest(BaseModel):
+    """Request model for streaming chat completions via SSE.
+
+    This is a convenience model that explicitly requires streaming.
+    It contains the same fields as ChatCompletionRequest but with
+    stream always set to True.
+
+    Use this model when you want to explicitly type a streaming request,
+    or use ChatCompletionRequest with stream=true for flexibility.
+
+    SSE Event Types:
+    - content_block_delta: Emitted for each generated token
+      {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
+    - message_delta: Emitted at completion with usage stats
+      {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {...}}
+    - error: Emitted if an error occurs during streaming
+      {"type": "error", "error": {"message": "..."}}
+    """
+
+    model: str = Field(..., description="Model ID (HuggingFace or local path)")
+    messages: list[ChatMessage] = Field(
+        ..., description="List of chat messages", min_length=1
+    )
+    max_tokens: int = Field(
+        default=256, ge=1, le=8192, description="Max tokens to generate"
+    )
+    temperature: float = Field(
+        default=0.7, ge=0.0, le=2.0, description="Sampling temperature"
+    )
+    top_p: float = Field(
+        default=0.9, ge=0.0, le=1.0, description="Nucleus sampling probability"
+    )
+    return_hidden_states: bool = Field(
+        default=True,
+        description="Return hidden states in final message_delta event",
+    )
+    stream: bool = Field(
+        default=True,
+        description="Always True for streaming requests",
+    )
+    loader: str | None = Field(default=None, description="Force specific loader")
+    device: str | None = Field(
+        default=None,
+        description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
+    )
+
+    @classmethod
+    def from_chat_request(cls, request: ChatCompletionRequest) -> "StreamingChatCompletionRequest":
+        """Convert a ChatCompletionRequest to StreamingChatCompletionRequest.
+
+        Useful when you need to ensure streaming is enabled.
+        """
+        return cls(
+            model=request.model,
+            messages=request.messages,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            return_hidden_states=request.return_hidden_states,
+            stream=True,
+            loader=request.loader,
+            device=request.device,
+        )
 
 
 class ChatCompletionUsage(BaseModel):

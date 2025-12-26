@@ -14,7 +14,12 @@ from src.loaders.base import (
     StreamingOutput,
     StreamingToken,
 )
-from src.transport.http import create_http_app
+from src.transport.http import (
+    create_http_app,
+    ChatCompletionRequest,
+    StreamingChatCompletionRequest,
+    ChatMessage,
+)
 
 
 @pytest.fixture
@@ -761,3 +766,107 @@ class TestGeometryAnalysisEndpoints:
             assert response.status_code == 200
             data = response.json()
             assert 0 <= data["overall_alignment"] <= 1
+
+
+class TestStreamingChatCompletionRequest:
+    """Tests for StreamingChatCompletionRequest model validation."""
+
+    def test_streaming_request_default_stream_is_true(self):
+        """Test that StreamingChatCompletionRequest defaults to stream=True."""
+        request = StreamingChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+        )
+        assert request.stream is True
+
+    def test_streaming_request_validation_fields(self):
+        """Test that StreamingChatCompletionRequest validates all required fields."""
+        # Valid minimal request
+        request = StreamingChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+        )
+        assert request.model == "test-model"
+        assert len(request.messages) == 1
+        assert request.max_tokens == 256  # default
+        assert request.temperature == 0.7  # default
+        assert request.top_p == 0.9  # default
+        assert request.return_hidden_states is True  # default
+
+    def test_streaming_request_temperature_validation(self):
+        """Test that StreamingChatCompletionRequest validates temperature range."""
+        # Valid temperature
+        request = StreamingChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+            temperature=1.5,
+        )
+        assert request.temperature == 1.5
+
+        # Invalid temperature (too high) - should raise ValidationError
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            StreamingChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")],
+                temperature=3.0,  # Out of range (max 2.0)
+            )
+
+    def test_streaming_request_from_chat_request(self):
+        """Test conversion from ChatCompletionRequest to StreamingChatCompletionRequest."""
+        chat_request = ChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+            max_tokens=100,
+            temperature=0.5,
+            top_p=0.8,
+            return_hidden_states=False,
+            stream=False,  # Original is not streaming
+            loader="transformers",
+            device="cuda:0",
+        )
+
+        streaming_request = StreamingChatCompletionRequest.from_chat_request(chat_request)
+
+        # All fields should be copied
+        assert streaming_request.model == "test-model"
+        assert len(streaming_request.messages) == 1
+        assert streaming_request.max_tokens == 100
+        assert streaming_request.temperature == 0.5
+        assert streaming_request.top_p == 0.8
+        assert streaming_request.return_hidden_states is False
+        assert streaming_request.loader == "transformers"
+        assert streaming_request.device == "cuda:0"
+        # stream should be True regardless of original
+        assert streaming_request.stream is True
+
+    def test_streaming_request_empty_messages_invalid(self):
+        """Test that empty messages list is invalid."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            StreamingChatCompletionRequest(
+                model="test-model",
+                messages=[],
+            )
+
+    def test_streaming_request_invalid_max_tokens(self):
+        """Test that max_tokens outside valid range is rejected."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            StreamingChatCompletionRequest(
+                model="test-model",
+                messages=[ChatMessage(role="user", content="Hello")],
+                max_tokens=10000,  # Out of range (max 8192)
+            )
+
+    def test_chat_completion_request_stream_field(self):
+        """Test that ChatCompletionRequest stream field defaults correctly."""
+        request = ChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+        )
+        assert request.stream is False  # default
+
+        streaming = ChatCompletionRequest(
+            model="test-model",
+            messages=[ChatMessage(role="user", content="Hello")],
+            stream=True,
+        )
+        assert streaming.stream is True

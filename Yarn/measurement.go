@@ -97,6 +97,19 @@ func (m *Measurement) IsBilateral() bool {
 	return hasSender && hasReceiver
 }
 
+// Validate checks if the measurement is valid.
+// Returns a ValidationError if invalid, nil if valid.
+// Note: This is a stub that will be enhanced in subtask 5.1.
+func (m *Measurement) Validate() *ValidationError {
+	if m.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if m.Timestamp.IsZero() {
+		return &ValidationError{Field: "timestamp", Message: "timestamp is required"}
+	}
+	return nil
+}
+
 // ComputeBetaStatus determines the status based on β value.
 func ComputeBetaStatus(beta float64) BetaStatus {
 	switch {

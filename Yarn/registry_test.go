@@ -594,3 +594,388 @@ func TestUnregister(t *testing.T) {
 		}
 	})
 }
+
+// TestCreate verifies the Create method functionality.
+func TestCreate(t *testing.T) {
+	t.Run("successful creation", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, err := registry.Create("test", "test description")
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+		if session == nil {
+			t.Fatal("expected non-nil session")
+		}
+
+		// Verify session properties
+		if session.Name != "test" {
+			t.Errorf("expected Name 'test', got %q", session.Name)
+		}
+		if session.Description != "test description" {
+			t.Errorf("expected Description 'test description', got %q", session.Description)
+		}
+
+		// Verify session was registered
+		got, ok := registry.Get("test")
+		if !ok {
+			t.Error("session not found in registry after creation")
+		}
+		if got != session {
+			t.Error("registered session does not match created session")
+		}
+	})
+
+	t.Run("duplicate name returns error", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		// First creation should succeed
+		_, err := registry.Create("dup", "first session")
+		if err != nil {
+			t.Fatalf("first creation failed: %v", err)
+		}
+
+		// Second creation with same name should fail
+		session, err := registry.Create("dup", "second session")
+		if err == nil {
+			t.Error("expected error for duplicate name, got nil")
+		}
+		if session != nil {
+			t.Error("expected nil session on error")
+		}
+	})
+
+	t.Run("different names allowed", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		s1, err := registry.Create("name1", "first session")
+		if err != nil {
+			t.Errorf("first creation failed: %v", err)
+		}
+		s2, err := registry.Create("name2", "second session")
+		if err != nil {
+			t.Errorf("second creation failed: %v", err)
+		}
+
+		if registry.Count() != 2 {
+			t.Errorf("expected 2 sessions, got %d", registry.Count())
+		}
+		if s1 == s2 {
+			t.Error("expected different session instances")
+		}
+	})
+
+	t.Run("empty name allowed", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, err := registry.Create("", "empty name session")
+		if err != nil {
+			t.Errorf("expected empty name to be allowed, got error: %v", err)
+		}
+		if session == nil {
+			t.Error("expected non-nil session for empty name")
+		}
+
+		// Verify can be retrieved with empty name
+		got, ok := registry.Get("")
+		if !ok {
+			t.Error("empty name session not found")
+		}
+		if got != session {
+			t.Error("retrieved session does not match created session")
+		}
+	})
+
+	t.Run("created session is active", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, _ := registry.Create("test", "description")
+
+		if session.EndedAt != nil {
+			t.Error("expected new session to have nil EndedAt")
+		}
+
+		// Verify shows up in Active list
+		active := registry.Active()
+		if len(active) != 1 {
+			t.Fatalf("expected 1 active session, got %d", len(active))
+		}
+		if active[0] != session {
+			t.Error("created session not found in active list")
+		}
+	})
+
+	t.Run("create increments count", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		if registry.Count() != 0 {
+			t.Fatalf("expected 0 count initially, got %d", registry.Count())
+		}
+
+		_, _ = registry.Create("s1", "d1")
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 after first create, got %d", registry.Count())
+		}
+
+		_, _ = registry.Create("s2", "d2")
+		if registry.Count() != 2 {
+			t.Errorf("expected 2 after second create, got %d", registry.Count())
+		}
+	})
+}
+
+// TestGetOrCreate verifies the GetOrCreate method functionality.
+func TestGetOrCreate(t *testing.T) {
+	t.Run("creates new session when not found", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, created := registry.GetOrCreate("new", "new session")
+		if !created {
+			t.Error("expected created to be true for new session")
+		}
+		if session == nil {
+			t.Fatal("expected non-nil session")
+		}
+
+		// Verify session properties
+		if session.Name != "new" {
+			t.Errorf("expected Name 'new', got %q", session.Name)
+		}
+		if session.Description != "new session" {
+			t.Errorf("expected Description 'new session', got %q", session.Description)
+		}
+	})
+
+	t.Run("returns existing session when found", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		// Create first
+		original, _ := registry.Create("existing", "original description")
+
+		// GetOrCreate should return existing
+		session, created := registry.GetOrCreate("existing", "different description")
+		if created {
+			t.Error("expected created to be false for existing session")
+		}
+		if session != original {
+			t.Error("expected to return the same session instance")
+		}
+		// Original description should be preserved
+		if session.Description != "original description" {
+			t.Errorf("expected original description, got %q", session.Description)
+		}
+	})
+
+	t.Run("registers created session", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, _ := registry.GetOrCreate("test", "description")
+
+		// Should be retrievable via Get
+		got, ok := registry.Get("test")
+		if !ok {
+			t.Error("GetOrCreate did not register the session")
+		}
+		if got != session {
+			t.Error("retrieved session does not match created session")
+		}
+	})
+
+	t.Run("empty name works", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		s1, created1 := registry.GetOrCreate("", "first empty")
+		if !created1 {
+			t.Error("expected first GetOrCreate with empty name to create")
+		}
+
+		s2, created2 := registry.GetOrCreate("", "second empty")
+		if created2 {
+			t.Error("expected second GetOrCreate with empty name to return existing")
+		}
+
+		if s1 != s2 {
+			t.Error("expected same session instance for repeated empty name")
+		}
+	})
+
+	t.Run("multiple GetOrCreate calls", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		// First call creates
+		s1, created1 := registry.GetOrCreate("test", "description")
+		if !created1 {
+			t.Error("expected first call to create")
+		}
+
+		// Second call returns existing
+		s2, created2 := registry.GetOrCreate("test", "description")
+		if created2 {
+			t.Error("expected second call to return existing")
+		}
+
+		// Third call also returns existing
+		s3, created3 := registry.GetOrCreate("test", "description")
+		if created3 {
+			t.Error("expected third call to return existing")
+		}
+
+		// All should be the same instance
+		if s1 != s2 || s2 != s3 {
+			t.Error("expected all calls to return same session instance")
+		}
+
+		// Count should be 1
+		if registry.Count() != 1 {
+			t.Errorf("expected count of 1, got %d", registry.Count())
+		}
+	})
+
+	t.Run("different names create different sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		s1, created1 := registry.GetOrCreate("name1", "first")
+		s2, created2 := registry.GetOrCreate("name2", "second")
+
+		if !created1 || !created2 {
+			t.Error("expected both calls to create new sessions")
+		}
+		if s1 == s2 {
+			t.Error("expected different session instances for different names")
+		}
+		if registry.Count() != 2 {
+			t.Errorf("expected count of 2, got %d", registry.Count())
+		}
+	})
+
+	t.Run("created session is active", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, _ := registry.GetOrCreate("test", "description")
+
+		if session.EndedAt != nil {
+			t.Error("expected new session to have nil EndedAt")
+		}
+
+		active := registry.Active()
+		if len(active) != 1 {
+			t.Fatalf("expected 1 active session, got %d", len(active))
+		}
+		if active[0] != session {
+			t.Error("created session not found in active list")
+		}
+	})
+}
+
+// TestCount verifies the Count method functionality.
+func TestCount(t *testing.T) {
+	t.Run("empty registry returns zero", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		count := registry.Count()
+		if count != 0 {
+			t.Errorf("expected 0 for empty registry, got %d", count)
+		}
+	})
+
+	t.Run("single session", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("test", NewSession("test", "d"))
+
+		count := registry.Count()
+		if count != 1 {
+			t.Errorf("expected 1, got %d", count)
+		}
+	})
+
+	t.Run("multiple sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("s1", NewSession("s1", "d1"))
+		_ = registry.Register("s2", NewSession("s2", "d2"))
+		_ = registry.Register("s3", NewSession("s3", "d3"))
+
+		count := registry.Count()
+		if count != 3 {
+			t.Errorf("expected 3, got %d", count)
+		}
+	})
+
+	t.Run("count after unregister", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("s1", NewSession("s1", "d1"))
+		_ = registry.Register("s2", NewSession("s2", "d2"))
+
+		if registry.Count() != 2 {
+			t.Fatalf("expected 2 before unregister, got %d", registry.Count())
+		}
+
+		_ = registry.Unregister("s1")
+
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 after unregister, got %d", registry.Count())
+		}
+	})
+
+	t.Run("count with Create method", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		if registry.Count() != 0 {
+			t.Fatalf("expected 0 initially, got %d", registry.Count())
+		}
+
+		_, _ = registry.Create("test1", "d1")
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 after first Create, got %d", registry.Count())
+		}
+
+		_, _ = registry.Create("test2", "d2")
+		if registry.Count() != 2 {
+			t.Errorf("expected 2 after second Create, got %d", registry.Count())
+		}
+	})
+
+	t.Run("count with GetOrCreate method", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		_, _ = registry.GetOrCreate("test", "d")
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 after first GetOrCreate, got %d", registry.Count())
+		}
+
+		// Same name should not increase count
+		_, _ = registry.GetOrCreate("test", "d")
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 after duplicate GetOrCreate, got %d", registry.Count())
+		}
+
+		// Different name should increase count
+		_, _ = registry.GetOrCreate("test2", "d")
+		if registry.Count() != 2 {
+			t.Errorf("expected 2 after new name GetOrCreate, got %d", registry.Count())
+		}
+	})
+
+	t.Run("count includes nil sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("nil-session", nil)
+		_ = registry.Register("real-session", NewSession("real", "d"))
+
+		if registry.Count() != 2 {
+			t.Errorf("expected 2 (including nil session), got %d", registry.Count())
+		}
+	})
+
+	t.Run("count includes ended sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		active := NewSession("active", "d")
+		ended := NewSession("ended", "d")
+		ended.End()
+
+		_ = registry.Register("active", active)
+		_ = registry.Register("ended", ended)
+
+		if registry.Count() != 2 {
+			t.Errorf("expected 2 (including ended session), got %d", registry.Count())
+		}
+	})
+}

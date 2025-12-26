@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:42.351747+00:00"
     },
     "Yarn/registry.go": {
-      "description": "GetOrCreate() method returns existing session (bool=false) or creates new one (bool=true). Uses write lock for atomic check-and-create operation. Common pattern for idempotent session retrieval.",
+      "description": "Count() method returns number of registered sessions using read lock (RLock/RUnlock) and len(r.sessions). Simple read-only pattern consistent with Get() method.",
       "category": "pattern",
-      "discovered_at": "2025-12-26T04:39:07.864062+00:00"
+      "discovered_at": "2025-12-26T04:40:37.506647+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:39:07.864070+00:00"
+  "last_updated": "2025-12-26T04:40:37.506656+00:00"
 }

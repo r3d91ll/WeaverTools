@@ -205,7 +205,7 @@
           "id": "3.3",
           "title": "Implement Count method",
           "description": "Add Count() int method to return the number of registered sessions.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -213,7 +213,9 @@
           "acceptance_criteria": [
             "Returns accurate count of registered sessions",
             "Uses read lock for thread safety"
-          ]
+          ],
+          "notes": "Implemented Count() int method following existing Get method pattern exactly. Uses read lock (RLock/defer RUnlock) for thread-safe access, returns len(r.sessions) for accurate count of registered sessions. Committed as 4ba0569.",
+          "updated_at": "2025-12-26T04:40:32.566559+00:00"
         }
       ]
     },
@@ -352,5 +354,5 @@
     "target_package": "github.com/r3d91ll/yarn",
     "pattern_reference": "Weaver/pkg/backend/registry.go"
   },
-  "last_updated": "2025-12-26T04:39:02.513045+00:00"
+  "last_updated": "2025-12-26T04:40:32.566567+00:00"
 }

@@ -1,9 +1,9 @@
 {
   "discovered_files": {
     "Weaver/pkg/shell/shell.go": {
-      "description": "handleCompare() now uses spinner.New() + Start() before CompareBilateral, spin.Fail() on error, and spin.Success() to show completion. Pattern: create spinner with both concept names and vector counts, start, run CompareBilateral, call Success/Fail based on result.",
-      "category": "shell-spinner-integration",
-      "discovered_at": "2025-12-26T04:41:43.258956+00:00"
+      "description": "handleValidate() now uses two spinners per iteration: extractSpin for extraction step showing \"Iteration N/M: Extracting 'concept'...\" and analyzeSpin for analysis step showing \"Iteration N/M: Analyzing N vectors...\". Pattern: create spinner with iteration info, start, run operation, call Success/Fail based on result. Uses continue on failures to allow remaining iterations to proceed.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:43:51.773990+00:00"
     },
     "Weaver/pkg": {
       "description": "Package structure follows pattern of separate directories per feature (analysis, backend, concepts, config, runtime, shell). New spinner package should be at Weaver/pkg/spinner/.",
@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:52.453018+00:00"
     },
     "Weaver/pkg/spinner/spinner.go": {
-      "description": "Success(message) and Fail(message) methods stop spinner and display colored status indicators. Success shows green \u2713, Fail shows red \u2717. Both include elapsed time if ShowElapsed is true. Empty message parameter uses current spinner message. Uses internal complete() method for shared logic.",
-      "category": "api",
-      "discovered_at": "2025-12-26T04:35:02.285212+00:00"
+      "description": "Spinner supports non-TTY fallback mode. When output is not a terminal (piped/redirected), it prints static messages without animation or ANSI codes. TTY detection uses golang.org/x/term.IsTerminal(). Config.IsTTY (pointer to bool) allows explicit override; nil means auto-detect. In non-TTY mode: Start() prints \"message...\" once, Stop() is a no-op, Success/Fail print plain text like \"\u2713 message (elapsed)\" without colors.",
+      "category": "feature",
+      "discovered_at": "2025-12-26T04:50:34.762401+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:41:43.258964+00:00"
+  "last_updated": "2025-12-26T04:50:34.762410+00:00"
 }

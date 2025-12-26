@@ -3,23 +3,23 @@
   "spec": "005-add-animated-spinner-for-long-running-operations",
   "state": "building",
   "subtasks": {
-    "completed": 9,
+    "completed": 12,
     "total": 13,
     "in_progress": 1,
     "failed": 0
   },
   "phase": {
-    "current": "Shell Integration",
+    "current": "Testing and Polish",
     "id": null,
-    "total": 5
+    "total": 3
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 11,
+    "number": 14,
     "started_at": "2025-12-25T22:22:19.433335"
   },
-  "last_update": "2025-12-25T22:42:04.043392"
+  "last_update": "2025-12-25T22:51:01.933288"
 }

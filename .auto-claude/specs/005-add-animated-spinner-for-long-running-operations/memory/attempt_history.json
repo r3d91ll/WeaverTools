@@ -107,11 +107,47 @@
         }
       ],
       "status": "completed"
+    },
+    "2.5": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2025-12-25T22:44:00.801022",
+          "approach": "Implemented: Wrap each iteration in handleValidate() with a spinner for the extraction and analysis steps, replac",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.1": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2025-12-25T22:46:40.760041",
+          "approach": "Implemented: Create Weaver/pkg/spinner/spinner_test.go with tests for: basic start/stop, elapsed time formatting,",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "3.2": {
+      "attempts": [
+        {
+          "session": 13,
+          "timestamp": "2025-12-25T22:50:47.496631",
+          "approach": "Implemented: Detect when stdout is not a TTY (piped output) and fall back to static messages without animation to",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-25T22:22:19.433123",
-    "last_updated": "2025-12-25T22:41:52.465388"
+    "last_updated": "2025-12-25T22:50:47.496635"
   }
 }

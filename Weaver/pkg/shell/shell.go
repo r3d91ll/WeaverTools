@@ -13,6 +13,7 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/r3d91ll/weaver/pkg/analysis"
 	"github.com/r3d91ll/weaver/pkg/concepts"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/yarn"
 )
@@ -106,14 +107,14 @@ func (s *Shell) Run(ctx context.Context) error {
 				if err == errQuit {
 					return nil
 				}
-				fmt.Printf("Error: %v\n", err)
+				werrors.Display(err)
 			}
 			continue
 		}
 
 		// Handle message
 		if err := s.handleMessage(ctx, line); err != nil {
-			fmt.Printf("Error: %v\n", err)
+			werrors.Display(err)
 		}
 	}
 }

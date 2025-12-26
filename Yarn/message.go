@@ -1,5 +1,3 @@
-// Package yarn manages conversations, measurements, and data storage.
-// Yarn is the thread that connects everything - tracking WHAT HAPPENED.
 package yarn
 
 import (

@@ -133,3 +133,52 @@ func (h *HiddenState) Dimension() int {
 	}
 	return h.Shape[len(h.Shape)-1]
 }
+
+// ValidDTypes defines the allowed data type values for hidden states.
+var ValidDTypes = []string{"float32", "float16"}
+
+// Validate checks if the hidden state is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (h *HiddenState) Validate() *ValidationError {
+	if h == nil {
+		return nil
+	}
+
+	if len(h.Vector) == 0 {
+		return &ValidationError{Field: "vector", Message: "vector is required"}
+	}
+
+	if h.Layer < 0 {
+		return &ValidationError{Field: "layer", Message: "layer must be non-negative"}
+	}
+
+	// Validate Shape is consistent with Vector length if Shape is provided
+	if len(h.Shape) > 0 {
+		product := 1
+		for _, dim := range h.Shape {
+			if dim <= 0 {
+				return &ValidationError{Field: "shape", Message: "shape dimensions must be positive"}
+			}
+			product *= dim
+		}
+		if product != len(h.Vector) {
+			return &ValidationError{Field: "shape", Message: "shape is inconsistent with vector length"}
+		}
+	}
+
+	// Validate DType if specified
+	if h.DType != "" {
+		validDType := false
+		for _, dt := range ValidDTypes {
+			if h.DType == dt {
+				validDType = true
+				break
+			}
+		}
+		if !validDType {
+			return &ValidationError{Field: "dtype", Message: "dtype must be 'float32' or 'float16'"}
+		}
+	}
+
+	return nil
+}

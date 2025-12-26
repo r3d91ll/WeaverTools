@@ -136,3 +136,47 @@ func (s *ConversationStore) Save(dir string) error {
 
 	return nil
 }
+
+// Load loads conversations from a directory.
+// Each JSON file in the directory is read and unmarshaled into a conversation.
+// I/O is performed outside the lock, with only the map update under lock.
+func (s *ConversationStore) Load(dir string) error {
+	// Perform I/O outside the lock
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No saved conversations
+		}
+		return err
+	}
+
+	// Read and unmarshal files outside the lock
+	loaded := make(map[string]*Conversation)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", entry.Name(), err)
+		}
+
+		var conversation Conversation
+		if err := json.Unmarshal(data, &conversation); err != nil {
+			return fmt.Errorf("unmarshal %s: %w", entry.Name(), err)
+		}
+
+		loaded[conversation.ID] = &conversation
+	}
+
+	// Acquire lock only for map update
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, conversation := range loaded {
+		s.conversations[id] = conversation
+	}
+
+	return nil
+}

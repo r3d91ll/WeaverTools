@@ -248,3 +248,73 @@ func (s *Spinner) showCursorIfEnabled() {
 		fmt.Fprint(s.config.Writer, showCursor)
 	}
 }
+
+// Start begins the spinner animation.
+// It is safe to call Start on an already running spinner (no-op).
+// Thread-safe: uses mutex to protect state changes.
+func (s *Spinner) Start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Guard against double-start: if already active, do nothing
+	if s.active {
+		return
+	}
+
+	// Initialize state
+	s.active = true
+	s.startTime = time.Now()
+	s.frame = 0
+	s.stopCh = make(chan struct{})
+	s.doneCh = make(chan struct{})
+
+	// Hide cursor for cleaner appearance
+	s.hideCursorIfEnabled()
+
+	// Start the animation goroutine
+	go s.spin()
+}
+
+// Stop halts the spinner animation and cleans up.
+// It is safe to call Stop on an already stopped or never-started spinner (no-op).
+// Stop blocks until the animation goroutine has fully terminated.
+// Thread-safe: uses mutex to protect state changes.
+func (s *Spinner) Stop() {
+	s.mu.Lock()
+
+	// Guard against stop-before-start or double-stop: if not active, do nothing
+	if !s.active {
+		s.mu.Unlock()
+		return
+	}
+
+	// Mark as inactive first to prevent render() from writing
+	s.active = false
+
+	// Get references to channels before unlocking
+	stopCh := s.stopCh
+	doneCh := s.doneCh
+
+	s.mu.Unlock()
+
+	// Signal the goroutine to stop (non-blocking)
+	close(stopCh)
+
+	// Wait for the goroutine to acknowledge and exit
+	<-doneCh
+
+	// Clean up the terminal output
+	s.mu.Lock()
+	s.clearLine()
+	s.showCursorIfEnabled()
+	s.mu.Unlock()
+}
+
+// Update changes the spinner message while it is running.
+// If the spinner is not active, it updates the message for the next Start().
+// Thread-safe: uses mutex to protect state changes.
+func (s *Spinner) Update(message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config.Message = message
+}

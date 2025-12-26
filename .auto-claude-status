@@ -3,14 +3,14 @@
   "spec": "006-add-inline-comments-for-complex-hidden-state-extra",
   "state": "complete",
   "subtasks": {
-    "completed": 0,
+    "completed": 14,
     "total": 14,
-    "in_progress": 1,
+    "in_progress": 0,
     "failed": 0
   },
   "phase": {
-    "current": "Document transformers_loader.py hidden state extraction",
-    "id": null,
+    "current": "Verify and finalize documentation",
+    "id": "phase-4",
     "total": 4
   },
   "workers": {

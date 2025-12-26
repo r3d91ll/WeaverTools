@@ -3,8 +3,8 @@
   "description": "The HiddenState struct is defined in two packages with identical fields: yarn.HiddenState and backend.HiddenState. A convertHiddenState function exists in concepts/extractor.go to convert between them. This duplication creates maintenance burden and risks the types drifting apart.",
   "created_at": "2025-12-26T04:21:23.444Z",
   "updated_at": "2025-12-26T05:00:00.000Z",
-  "status": "planning",
-  "planStatus": "ready",
+  "status": "human_review",
+  "planStatus": "review",
   "phases": [
     {
       "id": "phase-1",
@@ -133,5 +133,17 @@
       "Is the semantic owner of the type (yarn tracks measurements)"
     ]
   },
-  "last_updated": "2025-12-26T04:33:34.494324+00:00"
+  "last_updated": "2025-12-26T04:38:38.298454+00:00",
+  "qa_signoff": {
+    "status": "approved",
+    "qa_session": 0,
+    "issues_found": [
+      {
+        "description": "None"
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2025-12-26T04:38:38.298443+00:00",
+    "ready_for_qa_revalidation": false
+  }
 }

@@ -30,8 +30,9 @@
           "title": "Implement MessagesByAgent method",
           "description": "Add MessagesByAgent(agentID string) []*Message method to filter messages by agent ID. Handle empty agentID gracefully - match only messages with matching agentID.",
           "file": "Yarn/conversation.go",
-          "status": "pending",
-          "notes": ""
+          "status": "completed",
+          "notes": "Implemented MessagesByAgent(agentID string) []*Message method following the thread-safe pattern (RLock, iterate, append matches, return copy). Handles empty agentID by literal matching (returns messages with empty AgentID). Committed as 77e79b2.",
+          "updated_at": "2025-12-26T04:26:39.483984+00:00"
         },
         {
           "id": "1.3",
@@ -109,5 +110,5 @@
     "issues": "",
     "tests_passed": ""
   },
-  "last_updated": "2025-12-26T04:25:24.145796+00:00"
+  "last_updated": "2025-12-26T04:26:39.483989+00:00"
 }

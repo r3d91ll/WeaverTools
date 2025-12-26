@@ -145,3 +145,18 @@ func (c *Conversation) MessagesByAgent(agentID string) []*Message {
 	}
 	return result
 }
+
+// MessagesSince returns only messages with Timestamp strictly after the given time.
+// Messages are returned in chronological order (as stored).
+func (c *Conversation) MessagesSince(since time.Time) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Timestamp.After(since) {
+			result = append(result, msg)
+		}
+	}
+	return result
+}

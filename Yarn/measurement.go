@@ -57,6 +57,16 @@ const (
 	BetaUnknown    BetaStatus = "unknown"    // β ≤ 0 or β ∈ (0, 1.5) - invalid or uncategorized
 )
 
+// IsValid returns true if this is a valid beta status.
+func (s BetaStatus) IsValid() bool {
+	switch s {
+	case BetaOptimal, BetaMonitor, BetaConcerning, BetaCritical, BetaUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // NewMeasurement creates a new Measurement with a generated ID.
 func NewMeasurement() *Measurement {
 	return &Measurement{
@@ -99,14 +109,49 @@ func (m *Measurement) IsBilateral() bool {
 
 // Validate checks if the measurement is valid.
 // Returns a ValidationError if invalid, nil if valid.
-// Note: This is a stub that will be enhanced in subtask 5.1.
 func (m *Measurement) Validate() *ValidationError {
+	// Required fields
 	if m.ID == "" {
 		return &ValidationError{Field: "id", Message: "id is required"}
 	}
 	if m.Timestamp.IsZero() {
 		return &ValidationError{Field: "timestamp", Message: "timestamp is required"}
 	}
+
+	// TurnNumber must be non-negative
+	if m.TurnNumber < 0 {
+		return &ValidationError{Field: "turn_number", Message: "turn_number must be non-negative"}
+	}
+
+	// At least one participant is required
+	if m.SenderID == "" && m.ReceiverID == "" {
+		return &ValidationError{Field: "sender_id", Message: "at least one of sender_id or receiver_id is required"}
+	}
+
+	// Metric validations
+	if m.DEff < 0 {
+		return &ValidationError{Field: "d_eff", Message: "d_eff must be non-negative"}
+	}
+	if m.Beta < 0 {
+		return &ValidationError{Field: "beta", Message: "beta must be non-negative"}
+	}
+	if m.Alignment < -1 || m.Alignment > 1 {
+		return &ValidationError{Field: "alignment", Message: "alignment must be in range [-1, 1]"}
+	}
+
+	// BetaStatus validation (empty is allowed as default)
+	if m.BetaStatus != "" && !m.BetaStatus.IsValid() {
+		return &ValidationError{Field: "beta_status", Message: "invalid beta_status"}
+	}
+
+	// Validate hidden states if present
+	if err := m.SenderHidden.Validate(); err != nil {
+		return &ValidationError{Field: "sender_hidden." + err.Field, Message: err.Message}
+	}
+	if err := m.ReceiverHidden.Validate(); err != nil {
+		return &ValidationError{Field: "receiver_hidden." + err.Field, Message: err.Message}
+	}
+
 	return nil
 }
 

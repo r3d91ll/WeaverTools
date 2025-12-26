@@ -7,7 +7,13 @@ import torch
 from fastapi.testclient import TestClient
 
 from src.config import Config
-from src.loaders.base import EmbeddingOutput, GenerationOutput, LoadedModel
+from src.loaders.base import (
+    EmbeddingOutput,
+    GenerationOutput,
+    LoadedModel,
+    StreamingOutput,
+    StreamingToken,
+)
 from src.transport.http import create_http_app
 
 
@@ -458,9 +464,30 @@ class TestChatCompletionsEndpoint:
                 assert "User: Hello" in prompt
                 assert "Assistant:" in prompt
 
-    def test_chat_completion_streaming_not_implemented(self, mock_config):
-        """Test streaming returns 501 Not Implemented."""
-        with patch("src.transport.http.GPUManager"):
+    def test_chat_completion_streaming(self, mock_config, mock_loaded_model):
+        """Test streaming chat completions via SSE."""
+        with (
+            patch("src.transport.http.GPUManager"),
+            patch("src.transport.http.LoaderRegistry") as mock_registry,
+        ):
+            # Setup mock model manager and registry
+            mock_registry.return_value.load.return_value = mock_loaded_model
+
+            # Mock generate_stream to yield streaming events
+            def mock_generate_stream(**kwargs):
+                yield StreamingToken(token="Hello", token_id=1, is_finished=False)
+                yield StreamingToken(token=" world", token_id=2, is_finished=False)
+                yield StreamingToken(token="!", token_id=3, is_finished=True, finish_reason="stop")
+                yield StreamingOutput(
+                    text="Hello world!",
+                    token_ids=[1, 2, 3],
+                    token_count=3,
+                    hidden_states={-1: torch.randn(1, 768)},
+                    metadata={"input_tokens": 10},
+                )
+
+            mock_registry.return_value.generate_stream.side_effect = mock_generate_stream
+
             app = create_http_app(mock_config)
             client = TestClient(app)
 
@@ -470,11 +497,22 @@ class TestChatCompletionsEndpoint:
                     "model": "test-model",
                     "messages": [{"role": "user", "content": "Hello"}],
                     "stream": True,
+                    "return_hidden_states": True,
                 },
             )
 
-            assert response.status_code == 501
-            assert "not yet implemented" in response.json()["detail"].lower()
+            # Should return 200 with SSE content
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("text/event-stream")
+
+            # Parse SSE events
+            content = response.text
+            assert "event: content_block_delta" in content
+            assert "event: message_delta" in content
+            assert '"text": "Hello"' in content
+            assert '"text": " world"' in content
+            assert '"stop_reason": "end_turn"' in content
+            assert '"hidden_state"' in content
 
     def test_chat_completion_missing_messages(self, mock_config):
         """Test validation error when messages missing."""

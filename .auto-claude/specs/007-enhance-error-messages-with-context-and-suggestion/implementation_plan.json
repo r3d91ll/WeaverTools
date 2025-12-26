@@ -197,34 +197,37 @@
           "id": "4.3",
           "title": "Enhance /extract command errors",
           "description": "Update handleExtract() with rich errors for invalid count, no hidden state agent, extraction failures. Include example usage and valid ranges.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 20,
           "files": [
             "Weaver/pkg/shell/shell.go"
           ],
-          "notes": ""
+          "notes": "Updated handleExtract() in Weaver/pkg/shell/shell.go with structured WeaverErrors for all error cases:\n\n1. createInvalidCountError(): For non-numeric count argument\n   - Uses ErrCommandInvalidArg code\n   - Context: command, argument, invalid_value, concept, valid_range\n   - Suggestions: valid range, example usage, default behavior\n\n2. createCountOutOfRangeError(): For count <= 0 or > 100\n   - Uses ErrValidationOutOfRange code\n   - Context: command, argument, value, concept, valid_range\n   - Suggestions: valid range, example, recommended sample counts\n\n3. createNoHiddenStateAgentError(): When no agent supports hidden states\n   - Uses ErrAgentNoHiddenState code\n   - Context: available_agents, command, required_capability\n   - Suggestions: Loom backend, /agents command, hidden state requirements\n\n4. createExtractionError(): For extraction failures with 5 specific detection cases:\n   - Connection refused \u2192 backend running suggestions\n   - Timeout \u2192 smaller sample count suggestions\n   - Hidden state unavailable \u2192 backend capability suggestions\n   - Context canceled \u2192 retry suggestions\n   - Default \u2192 generic troubleshooting\n\nAll errors display with color-coded formatting via werrors.Display(). Committed as a973957.",
+          "updated_at": "2025-12-26T05:13:11.262248+00:00"
         },
         {
           "id": "4.4",
           "title": "Enhance /analyze and /compare errors",
           "description": "Update handleAnalyze() and handleCompare() with helpful errors for missing concepts, insufficient samples, and analysis server failures.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 20,
           "files": [
             "Weaver/pkg/shell/shell.go"
           ],
-          "notes": ""
+          "notes": "Updated handleAnalyze() and handleCompare() in Weaver/pkg/shell/shell.go with structured WeaverErrors for all error cases:\n\n1. createConceptNotFoundError(): When concept is not in store\n   - Uses ErrConceptsNotFound code\n   - Context: command, concept, available_concepts\n   - Suggestions: list of available concepts, /extract usage, /concepts command\n\n2. createInsufficientSamplesError(): When concept has < 3 samples\n   - Uses ErrConceptsInsufficientSamples code\n   - Context: command, concept, current_samples, required_samples\n   - Suggestions: sample count guidance, /extract more samples, /concepts command\n\n3. createAnalysisError(): For /analyze server failures (6 detection cases)\n   - Connection refused \u2192 ErrAnalysisServerUnavailable with TheLoom guidance\n   - Timeout \u2192 ErrAnalysisFailed with smaller sample suggestions\n   - EOF/incomplete \u2192 ErrAnalysisInvalidResponse with server crash guidance\n   - Invalid/parse \u2192 ErrAnalysisInvalidResponse with version mismatch check\n   - Context canceled \u2192 ErrAnalysisFailed with retry suggestion\n   - Default \u2192 ErrAnalysisFailed with generic troubleshooting\n\n4. createComparisonError(): For /compare server failures (6 detection cases)\n   - Connection refused \u2192 ErrAnalysisServerUnavailable\n   - Timeout \u2192 ErrAnalysisFailed with smaller samples suggestion\n   - Dimension mismatch \u2192 ErrAnalysisFailed with re-extract guidance\n   - EOF/incomplete \u2192 ErrAnalysisInvalidResponse\n   - Context canceled \u2192 ErrAnalysisFailed with retry\n   - Default \u2192 ErrAnalysisFailed with generic troubleshooting\n\nAll errors display with color-coded formatting via werrors.Display(). Committed as d08bc1e.",
+          "updated_at": "2025-12-26T05:17:18.470033+00:00"
         },
         {
           "id": "4.5",
           "title": "Enhance /validate and /metrics errors",
           "description": "Update handleValidate() and handleMetrics() with structured errors including iteration limits, sample requirements, and API status.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 15,
           "files": [
             "Weaver/pkg/shell/shell.go"
           ],
-          "notes": ""
+          "notes": "Updated handleValidate() and handleMetrics() in Weaver/pkg/shell/shell.go with structured WeaverErrors:\n\nhandleValidate() now uses structured errors for:\n- Invalid iterations value (non-numeric) \u2192 createInvalidIterationsError()\n- Iterations out of range (<=0 or >20) \u2192 createIterationsOutOfRangeError()\n- No hidden state agent \u2192 createNoHiddenStateAgentError() (reused from /extract)\n- Insufficient successful iterations (<2) \u2192 createInsufficientIterationsError()\n\nhandleMetrics() now uses structured errors for:\n- Concept not found \u2192 createConceptNotFoundError() (reused from /analyze)\n- Insufficient samples (<3) \u2192 createInsufficientSamplesError() (reused)\n- Analysis failure \u2192 createMetricsAnalysisError() (new)\n\nAdded 4 new error helper functions with context and suggestions:\n- createInvalidIterationsError(): Command, argument, value, valid_range (1-20)\n- createIterationsOutOfRangeError(): Command, argument, value, valid_range\n- createInsufficientIterationsError(): successful_iterations, requested_iterations, required_iterations\n- createMetricsAnalysisError(): Detects 6 error types (connection, timeout, EOF, parse, canceled, generic)\n\nAll errors display with color-coded formatting via werrors.Display(). Committed as bf2614f.",
+          "updated_at": "2025-12-26T05:20:40.544764+00:00"
         }
       ]
     },
@@ -510,5 +513,5 @@
     "issues": "",
     "tests_passed": ""
   },
-  "last_updated": "2025-12-26T05:10:12.597893+00:00"
+  "last_updated": "2025-12-26T05:20:40.544771+00:00"
 }

@@ -60,12 +60,8 @@ run:
   # language features and don't flag valid Go 1.23 code as errors.
   go: "1.23"
 
-  # Directories to skip during analysis.
-  # vendor: Dependencies are not our code - vendor their own quality
-  # .git:   Git internals should never be analyzed
-  skip-dirs:
-    - vendor
-    - .git
+  # NOTE: Directory exclusions moved to issues.exclude-dirs (v1.57+ format)
+  # The deprecated run.skip-dirs was removed in golangci-lint v1.57
 
 # =============================================================================
 # LINTERS
@@ -609,6 +605,13 @@ linters-settings:
 # (tests, generated code, mocks) where full strictness isn't needed.
 # =============================================================================
 issues:
+  # Directories to exclude from analysis (v1.57+ format, replaces run.skip-dirs)
+  # vendor: Dependencies are not our code - vendor their own quality
+  # .git:   Git internals should never be analyzed
+  exclude-dirs:
+    - vendor
+    - .git
+
   # Report all issues (no limit)
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -4,8 +4,8 @@
   "description": "Add golangci-lint configuration and a Makefile to enforce code quality, catch bugs early, and standardize build/test/lint commands across the multi-module Go monorepo (Weaver, Wool, Yarn).",
   "created_at": "2025-12-25T18:33:59.333Z",
   "updated_at": "2025-12-26T02:40:14.998Z",
-  "status": "in_progress",
-  "planStatus": "in_progress",
+  "status": "complete",
+  "planStatus": "complete",
   "workflow_type": "development",
   "spec_file": "spec.md",
   "phases": [

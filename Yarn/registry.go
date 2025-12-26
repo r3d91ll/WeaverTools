@@ -115,3 +115,17 @@ func (r *SessionRegistry) Unregister(name string) error {
 	delete(r.sessions, name)
 	return nil
 }
+
+// Create creates a new session and registers it in one operation.
+func (r *SessionRegistry) Create(name, description string) (*Session, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.sessions[name]; exists {
+		return nil, fmt.Errorf("session %q already registered", name)
+	}
+
+	session := NewSession(name, description)
+	r.sessions[name] = session
+	return session, nil
+}

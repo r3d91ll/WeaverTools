@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -810,5 +811,336 @@ func TestSaveLoad(t *testing.T) {
 		if len(loaded.Messages) != 0 {
 			t.Errorf("expected 0 messages, got %d", len(loaded.Messages))
 		}
+	})
+}
+
+// TestConcurrentAccess tests thread-safety with concurrent operations.
+func TestConcurrentAccess(t *testing.T) {
+	t.Run("concurrent adds", func(t *testing.T) {
+		store := NewConversationStore()
+		const numGoroutines = 100
+
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				conv := NewConversation("conversation-" + string(rune('A'+id%26)))
+				conv.Add(NewMessage(RoleUser, "Hello from goroutine"))
+				store.Add(conv)
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Note: Some conversations may overwrite others if they have the same name
+		// but the store should not have any data races
+		if store.Count() == 0 {
+			t.Error("expected some conversations to be stored")
+		}
+	})
+
+	t.Run("concurrent reads", func(t *testing.T) {
+		store := NewConversationStore()
+
+		// Pre-populate the store
+		for i := 0; i < 10; i++ {
+			conv := NewConversation("conversation-" + string(rune('A'+i)))
+			conv.Add(NewMessage(RoleUser, "Message"))
+			store.Add(conv)
+		}
+
+		const numGoroutines = 100
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		list := store.List()
+		ids := make([]string, 0, len(list))
+		for id := range list {
+			ids = append(ids, id)
+		}
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				// Read various conversations
+				convID := ids[id%len(ids)]
+				if conv, ok := store.Get(convID); ok {
+					// Access the returned data to ensure no race on the copy
+					_ = conv.Name
+					_ = len(conv.Messages)
+				}
+				// Also call List and Count
+				_ = store.List()
+				_ = store.Count()
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Store should still be intact
+		if store.Count() != 10 {
+			t.Errorf("expected 10 conversations, got %d", store.Count())
+		}
+	})
+
+	t.Run("concurrent reads and writes", func(t *testing.T) {
+		store := NewConversationStore()
+		const numGoroutines = 100
+		const numOps = 10
+
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+
+				for j := 0; j < numOps; j++ {
+					// Mix of operations
+					switch j % 5 {
+					case 0:
+						// Add
+						conv := NewConversation("conversation-" + string(rune('A'+id%26)))
+						conv.Add(NewMessage(RoleUser, "Message"))
+						store.Add(conv)
+					case 1:
+						// Get (may or may not find)
+						convID := "conversation-" + string(rune('A'+id%26))
+						if conv, ok := store.Get(convID); ok {
+							_ = conv.Name // Access data
+						}
+					case 2:
+						// List
+						_ = store.List()
+					case 3:
+						// Count
+						_ = store.Count()
+					case 4:
+						// Clear (may or may not succeed)
+						convID := "conversation-" + string(rune('A'+(id+1)%26))
+						store.Clear(convID)
+					}
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// No race conditions should have occurred
+		// Final count is indeterminate due to mix of adds and clears
+		t.Logf("Final count after concurrent ops: %d", store.Count())
+	})
+
+	t.Run("concurrent add and get same conversation", func(t *testing.T) {
+		store := NewConversationStore()
+		conv := NewConversation("shared-conversation")
+		store.Add(conv)
+
+		const numGoroutines = 50
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines * 2)
+
+		// Half the goroutines do reads
+		for i := 0; i < numGoroutines; i++ {
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					if retrieved, ok := store.Get(conv.ID); ok {
+						// Access the copy
+						_ = retrieved.Name
+						_ = retrieved.CreatedAt
+						_ = len(retrieved.Messages)
+						_ = len(retrieved.Participants)
+						_ = len(retrieved.Metadata)
+					}
+				}
+			}()
+		}
+
+		// Half the goroutines do writes (updates to same conversation)
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					// Get, modify, and re-add
+					if retrieved, ok := store.Get(conv.ID); ok {
+						retrieved.Metadata["update_"+string(rune('A'+id%26))] = j
+						store.Add(retrieved)
+					}
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Conversation should still exist
+		if _, ok := store.Get(conv.ID); !ok {
+			t.Error("conversation should still exist after concurrent access")
+		}
+	})
+
+	t.Run("concurrent ClearAll with adds", func(t *testing.T) {
+		store := NewConversationStore()
+		const numGoroutines = 20
+
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines + 1)
+
+		// Goroutines adding conversations
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 50; j++ {
+					conv := NewConversation("conversation-" + string(rune('A'+id%26)))
+					store.Add(conv)
+				}
+			}(i)
+		}
+
+		// One goroutine doing ClearAll periodically
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				store.ClearAll()
+			}
+		}()
+
+		wg.Wait()
+
+		// No assertion on final count - just verify no race
+		t.Logf("Final count after concurrent ClearAll: %d", store.Count())
+	})
+}
+
+// TestConcurrentSaveLoad tests thread-safety of Save and Load operations.
+func TestConcurrentSaveLoad(t *testing.T) {
+	t.Run("concurrent saves", func(t *testing.T) {
+		store := NewConversationStore()
+
+		// Pre-populate the store
+		for i := 0; i < 5; i++ {
+			conv := NewConversation("conversation-" + string(rune('A'+i)))
+			conv.Add(NewMessage(RoleUser, "Message"))
+			store.Add(conv)
+		}
+
+		const numGoroutines = 10
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines)
+
+		dirs := make([]string, numGoroutines)
+		for i := 0; i < numGoroutines; i++ {
+			dirs[i] = t.TempDir()
+		}
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				if err := store.Save(dirs[id]); err != nil {
+					t.Errorf("Save failed in goroutine %d: %v", id, err)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Verify each save produced valid output
+		for i := 0; i < numGoroutines; i++ {
+			entries, err := os.ReadDir(dirs[i])
+			if err != nil {
+				t.Errorf("failed to read dir %d: %v", i, err)
+				continue
+			}
+			if len(entries) != 5 {
+				t.Errorf("expected 5 files in dir %d, got %d", i, len(entries))
+			}
+		}
+	})
+
+	t.Run("concurrent load and read", func(t *testing.T) {
+		// Create a directory with saved conversations
+		dir := t.TempDir()
+		originalStore := NewConversationStore()
+		for i := 0; i < 5; i++ {
+			conv := NewConversation("conversation-" + string(rune('A'+i)))
+			conv.Add(NewMessage(RoleUser, "Message"))
+			originalStore.Add(conv)
+		}
+		if err := originalStore.Save(dir); err != nil {
+			t.Fatalf("initial save failed: %v", err)
+		}
+
+		// Now test concurrent load and read
+		store := NewConversationStore()
+
+		const numGoroutines = 20
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines + 1)
+
+		// One goroutine loading
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				if err := store.Load(dir); err != nil {
+					t.Errorf("Load failed: %v", err)
+				}
+			}
+		}()
+
+		// Other goroutines reading
+		for i := 0; i < numGoroutines; i++ {
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 50; j++ {
+					_ = store.Count()
+					_ = store.List()
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		// Should have loaded conversations
+		if store.Count() != 5 {
+			t.Errorf("expected 5 conversations after load, got %d", store.Count())
+		}
+	})
+
+	t.Run("concurrent save and add", func(t *testing.T) {
+		store := NewConversationStore()
+		dir := t.TempDir()
+
+		const numGoroutines = 10
+		var wg sync.WaitGroup
+		wg.Add(numGoroutines + 1)
+
+		// Goroutines adding conversations
+		for i := 0; i < numGoroutines; i++ {
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 10; j++ {
+					conv := NewConversation("conversation-" + string(rune('A'+id)))
+					conv.Add(NewMessage(RoleUser, "Message"))
+					store.Add(conv)
+				}
+			}(i)
+		}
+
+		// One goroutine saving repeatedly
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 5; i++ {
+				if err := store.Save(dir); err != nil {
+					t.Errorf("Save failed: %v", err)
+				}
+			}
+		}()
+
+		wg.Wait()
+
+		// No race conditions should have occurred
+		t.Logf("Final count after concurrent save/add: %d", store.Count())
 	})
 }

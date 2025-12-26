@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "006-add-inline-comments-for-complex-hidden-state-extra",
+  "state": "complete",
+  "subtasks": {
+    "completed": 0,
+    "total": 14,
+    "in_progress": 1,
+    "failed": 0
+  },
+  "phase": {
+    "current": "Document transformers_loader.py hidden state extraction",
+    "id": null,
+    "total": 4
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 1,
+    "started_at": "2025-12-25T18:48:32.921046"
+  },
+  "last_update": "2025-12-25T18:51:57.179896"
+}

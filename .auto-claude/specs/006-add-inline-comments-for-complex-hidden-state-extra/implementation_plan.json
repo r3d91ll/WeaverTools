@@ -221,5 +221,20 @@
     "timestamp": "2025-12-26T00:55:56.407217+00:00",
     "ready_for_qa_revalidation": false
   },
-  "last_updated": "2025-12-26T00:55:56.407226+00:00"
+  "last_updated": "2025-12-26T00:55:56.407226+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2025-12-26T00:56:17.781122+00:00",
+      "issues": [],
+      "duration_seconds": 260.6
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
 }

@@ -3,23 +3,23 @@
   "spec": "002-add-validation-to-yarn-types",
   "state": "building",
   "subtasks": {
-    "completed": 5,
+    "completed": 14,
     "total": 15,
     "in_progress": 1,
     "failed": 0
   },
   "phase": {
-    "current": "Conversation Validation",
+    "current": "Integration and Documentation",
     "id": null,
-    "total": 3
+    "total": 2
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 7,
+    "number": 16,
     "started_at": "2025-12-25T22:22:46.425524"
   },
-  "last_update": "2025-12-25T22:35:38.185625"
+  "last_update": "2025-12-25T22:58:23.468388"
 }

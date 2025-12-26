@@ -116,3 +116,17 @@ func (c *Conversation) MessagesWithHiddenStates() []*Message {
 	}
 	return result
 }
+
+// MessagesByRole returns only messages that match the specified role.
+func (c *Conversation) MessagesByRole(role MessageRole) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Role == role {
+			result = append(result, msg)
+		}
+	}
+	return result
+}

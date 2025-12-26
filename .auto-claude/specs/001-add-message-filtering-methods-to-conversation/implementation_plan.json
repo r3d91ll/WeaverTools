@@ -1,0 +1,109 @@
+{
+  "feature": "Add Message Filtering Methods to Conversation",
+  "description": "Extend Conversation with additional filter methods beyond MessagesWithHiddenStates: MessagesByRole(role), MessagesByAgent(agentID), MessagesSince(time), MessagesWithMetadata(key). These enable richer conversation analysis.",
+  "created_at": "2025-12-26T04:17:34.086Z",
+  "updated_at": "2025-12-26T04:17:34.086Z",
+  "status": "in_progress",
+  "planStatus": "complete",
+  "workflow_type": "development",
+  "services_involved": ["Yarn"],
+  "spec_file": "spec.md",
+  "phases": [
+    {
+      "phase": 1,
+      "name": "Core Filter Methods",
+      "description": "Implement the four new filtering methods on Conversation following the existing thread-safe pattern",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Implement MessagesByRole method",
+          "description": "Add MessagesByRole(role MessageRole) []*Message method to filter messages by their role (system, user, assistant, tool). Follow the thread-safe pattern: RLock, iterate, append matches, return copy.",
+          "file": "Yarn/conversation.go",
+          "status": "pending",
+          "notes": ""
+        },
+        {
+          "id": "1.2",
+          "title": "Implement MessagesByAgent method",
+          "description": "Add MessagesByAgent(agentID string) []*Message method to filter messages by agent ID. Handle empty agentID gracefully - match only messages with matching agentID.",
+          "file": "Yarn/conversation.go",
+          "status": "pending",
+          "notes": ""
+        },
+        {
+          "id": "1.3",
+          "title": "Implement MessagesSince method",
+          "description": "Add MessagesSince(since time.Time) []*Message method to filter messages with Timestamp strictly after the given time. Return messages in chronological order (as stored).",
+          "file": "Yarn/conversation.go",
+          "status": "pending",
+          "notes": ""
+        },
+        {
+          "id": "1.4",
+          "title": "Implement MessagesWithMetadata method",
+          "description": "Add MessagesWithMetadata(key string) []*Message method to filter messages that have the specified key present in their Metadata map (regardless of value).",
+          "file": "Yarn/conversation.go",
+          "status": "pending",
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Testing",
+      "description": "Add comprehensive unit tests for all new filter methods",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Create conversation_test.go with filter method tests",
+          "description": "Create Yarn/conversation_test.go with tests for all four new methods. Include edge cases: empty conversations, no matches, all matches, nil Metadata maps, concurrent access patterns.",
+          "file": "Yarn/conversation_test.go",
+          "status": "pending",
+          "notes": ""
+        },
+        {
+          "id": "2.2",
+          "title": "Run tests and verify all pass",
+          "description": "Run go test ./Yarn/... to ensure all tests pass and methods work correctly.",
+          "file": "",
+          "status": "pending",
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Verification",
+      "description": "Ensure code quality and thread safety",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Run go vet and ensure no issues",
+          "description": "Run go vet ./Yarn/... to check for code issues",
+          "file": "",
+          "status": "pending",
+          "notes": ""
+        },
+        {
+          "id": "3.2",
+          "title": "Verify thread safety with race detector",
+          "description": "Run go test -race ./Yarn/... to verify thread safety of new methods",
+          "file": "",
+          "status": "pending",
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "final_acceptance": [
+    "All four filter methods implemented following existing pattern",
+    "Unit tests pass for all methods",
+    "go vet reports no issues",
+    "Race detector finds no issues"
+  ],
+  "qa_signoff": {
+    "status": "pending",
+    "issues": "",
+    "tests_passed": ""
+  }
+}

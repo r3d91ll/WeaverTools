@@ -1,0 +1,35 @@
+# Build Progress: Add Message Filtering Methods to Conversation
+
+## Session Log
+
+### 2025-12-26 - Initial Planning
+
+**Status:** Implementation plan created
+
+**Completed:**
+- [x] Read and analyzed spec.md
+- [x] Analyzed existing Conversation implementation in Yarn/conversation.go
+- [x] Analyzed Message struct in Yarn/message.go
+- [x] Created implementation_plan.json with 3 phases and 8 subtasks
+
+**Key Discoveries:**
+1. Conversation uses sync.RWMutex (mu) for thread safety
+2. MessagesWithHiddenStates() demonstrates the exact pattern to follow:
+   - Acquire RLock
+   - Iterate over c.Messages
+   - Append matches to result slice
+   - Return the slice (copy of pointers, not deep copy)
+
+3. Message struct has all fields needed:
+   - Role (MessageRole) - for MessagesByRole
+   - AgentID (string) - for MessagesByAgent  
+   - Timestamp (time.Time) - for MessagesSince
+   - Metadata (map[string]any) - for MessagesWithMetadata
+
+**Implementation Plan Summary:**
+- Phase 1: Implement 4 filter methods in Yarn/conversation.go
+- Phase 2: Create comprehensive tests in Yarn/conversation_test.go
+- Phase 3: Verification (go vet, race detector)
+
+**Next Steps:**
+- Begin Phase 1.1: Implement MessagesByRole method

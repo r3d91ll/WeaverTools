@@ -1,25 +1,25 @@
 {
   "active": true,
   "spec": "012-add-real-streaming-to-loom-backend",
-  "state": "building",
+  "state": "complete",
   "subtasks": {
-    "completed": 5,
+    "completed": 9,
     "total": 9,
-    "in_progress": 1,
+    "in_progress": 0,
     "failed": 0
   },
   "phase": {
-    "current": "Client-side Streaming Implementation",
-    "id": null,
-    "total": 4
+    "current": "",
+    "id": 0,
+    "total": 0
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 5,
-    "started_at": "2025-12-25T20:09:44.796122"
+    "number": 0,
+    "started_at": "2025-12-25T20:40:32.842578"
   },
-  "last_update": "2025-12-25T20:21:58.025317"
+  "last_update": "2025-12-25T20:40:32.843219"
 }

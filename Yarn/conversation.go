@@ -130,3 +130,18 @@ func (c *Conversation) MessagesByRole(role MessageRole) []*Message {
 	}
 	return result
 }
+
+// MessagesByAgent returns only messages that match the specified agent ID.
+// If agentID is empty, returns messages with empty AgentID (literal match).
+func (c *Conversation) MessagesByAgent(agentID string) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.AgentID == agentID {
+			result = append(result, msg)
+		}
+	}
+	return result
+}

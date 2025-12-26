@@ -6,7 +6,9 @@
   "status": "in_progress",
   "planStatus": "complete",
   "workflow_type": "development",
-  "services_involved": ["Yarn"],
+  "services_involved": [
+    "Yarn"
+  ],
   "spec_file": "spec.md",
   "phases": [
     {
@@ -19,8 +21,9 @@
           "title": "Implement MessagesByRole method",
           "description": "Add MessagesByRole(role MessageRole) []*Message method to filter messages by their role (system, user, assistant, tool). Follow the thread-safe pattern: RLock, iterate, append matches, return copy.",
           "file": "Yarn/conversation.go",
-          "status": "pending",
-          "notes": ""
+          "status": "completed",
+          "notes": "Implemented MessagesByRole(role MessageRole) []*Message method following the thread-safe pattern (RLock, iterate, append matches, return copy). Committed as 84d6acd.",
+          "updated_at": "2025-12-26T04:25:24.145790+00:00"
         },
         {
           "id": "1.2",
@@ -105,5 +108,6 @@
     "status": "pending",
     "issues": "",
     "tests_passed": ""
-  }
+  },
+  "last_updated": "2025-12-26T04:25:24.145796+00:00"
 }

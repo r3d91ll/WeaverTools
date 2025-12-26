@@ -595,3 +595,248 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("expected default HideCursor to be true")
 	}
 }
+
+// boolPtr is a helper to get a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+// TestNonTTYDetection verifies that non-TTY is detected when using bytes.Buffer.
+func TestNonTTYDetection(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message: "test",
+		Writer:  &buf,
+	})
+
+	// bytes.Buffer is not a TTY
+	if s.IsTTY() {
+		t.Error("bytes.Buffer should not be detected as TTY")
+	}
+}
+
+// TestNonTTYExplicitConfig verifies that IsTTY can be explicitly configured.
+func TestNonTTYExplicitConfig(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Force IsTTY to true even though Writer is not a TTY
+	s := NewWithConfig(Config{
+		Message: "test",
+		Writer:  &buf,
+		IsTTY:   boolPtr(true),
+	})
+
+	if !s.IsTTY() {
+		t.Error("IsTTY should be true when explicitly set")
+	}
+
+	// Force IsTTY to false
+	s2 := NewWithConfig(Config{
+		Message: "test",
+		Writer:  &buf,
+		IsTTY:   boolPtr(false),
+	})
+
+	if s2.IsTTY() {
+		t.Error("IsTTY should be false when explicitly set")
+	}
+}
+
+// TestNonTTYStaticOutput verifies that non-TTY mode produces static output.
+func TestNonTTYStaticOutput(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message:    "processing",
+		Writer:     &buf,
+		HideCursor: false,
+		IsTTY:      boolPtr(false),
+	})
+
+	s.Start()
+	time.Sleep(50 * time.Millisecond)
+	s.Stop()
+
+	output := buf.String()
+
+	// Should contain the message with "..."
+	if !strings.Contains(output, "processing...") {
+		t.Errorf("non-TTY output should contain static message, got: %q", output)
+	}
+
+	// Should NOT contain ANSI escape sequences
+	if strings.Contains(output, "\033[") {
+		t.Errorf("non-TTY output should not contain ANSI escape sequences, got: %q", output)
+	}
+
+	// Should NOT contain spinner characters
+	for _, char := range Braille {
+		if strings.Contains(output, char) {
+			t.Errorf("non-TTY output should not contain spinner characters, got: %q", output)
+		}
+	}
+}
+
+// TestNonTTYSuccessOutput verifies Success output in non-TTY mode.
+func TestNonTTYSuccessOutput(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message:     "processing",
+		Writer:      &buf,
+		HideCursor:  false,
+		ShowElapsed: true,
+		IsTTY:       boolPtr(false),
+	})
+
+	s.Start()
+	time.Sleep(50 * time.Millisecond)
+	s.Success("completed")
+
+	output := buf.String()
+
+	// Should contain the success symbol and message
+	if !strings.Contains(output, symbolSuccess) {
+		t.Errorf("non-TTY success output should contain success symbol, got: %q", output)
+	}
+	if !strings.Contains(output, "completed") {
+		t.Errorf("non-TTY success output should contain message, got: %q", output)
+	}
+
+	// Should NOT contain color codes
+	if strings.Contains(output, colorGreen) || strings.Contains(output, colorReset) {
+		t.Errorf("non-TTY success output should not contain color codes, got: %q", output)
+	}
+}
+
+// TestNonTTYFailOutput verifies Fail output in non-TTY mode.
+func TestNonTTYFailOutput(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message:     "processing",
+		Writer:      &buf,
+		HideCursor:  false,
+		ShowElapsed: true,
+		IsTTY:       boolPtr(false),
+	})
+
+	s.Start()
+	time.Sleep(50 * time.Millisecond)
+	s.Fail("error occurred")
+
+	output := buf.String()
+
+	// Should contain the failure symbol and message
+	if !strings.Contains(output, symbolFailure) {
+		t.Errorf("non-TTY fail output should contain failure symbol, got: %q", output)
+	}
+	if !strings.Contains(output, "error occurred") {
+		t.Errorf("non-TTY fail output should contain message, got: %q", output)
+	}
+
+	// Should NOT contain color codes
+	if strings.Contains(output, colorRed) || strings.Contains(output, colorReset) {
+		t.Errorf("non-TTY fail output should not contain color codes, got: %q", output)
+	}
+}
+
+// TestNonTTYNoAnimation verifies that non-TTY mode doesn't animate.
+func TestNonTTYNoAnimation(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message:     "loading",
+		Writer:      &buf,
+		HideCursor:  false,
+		RefreshRate: 20 * time.Millisecond,
+		IsTTY:       boolPtr(false),
+	})
+
+	s.Start()
+	initialOutput := buf.String()
+
+	// Wait for what would be multiple animation frames
+	time.Sleep(100 * time.Millisecond)
+
+	finalOutput := buf.String()
+
+	// Output should not change (no animation)
+	if initialOutput != finalOutput {
+		t.Errorf("non-TTY output should not animate, initial: %q, final: %q", initialOutput, finalOutput)
+	}
+
+	s.Stop()
+}
+
+// TestNonTTYDoubleStartStop verifies start/stop edge cases in non-TTY mode.
+func TestNonTTYDoubleStartStop(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message: "test",
+		Writer:  &buf,
+		IsTTY:   boolPtr(false),
+	})
+
+	// Double start should be safe
+	s.Start()
+	s.Start()
+
+	// Double stop should be safe
+	s.Stop()
+	s.Stop()
+
+	if s.IsActive() {
+		t.Error("spinner should not be active after stop")
+	}
+}
+
+// TestNonTTYSuccessWithoutStart verifies Success works in non-TTY mode without Start.
+func TestNonTTYSuccessWithoutStart(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message:     "test",
+		Writer:      &buf,
+		ShowElapsed: false,
+		IsTTY:       boolPtr(false),
+	})
+
+	// Should not panic
+	s.Success("done")
+
+	output := buf.String()
+	if !strings.Contains(output, symbolSuccess) {
+		t.Error("Success output should contain success symbol")
+	}
+	if !strings.Contains(output, "done") {
+		t.Error("Success output should contain the message")
+	}
+
+	// Should NOT contain color codes in non-TTY mode
+	if strings.Contains(output, colorGreen) {
+		t.Error("non-TTY Success should not contain color codes")
+	}
+}
+
+// TestNonTTYFailWithoutStart verifies Fail works in non-TTY mode without Start.
+func TestNonTTYFailWithoutStart(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewWithConfig(Config{
+		Message:     "test",
+		Writer:      &buf,
+		ShowElapsed: false,
+		IsTTY:       boolPtr(false),
+	})
+
+	// Should not panic
+	s.Fail("error")
+
+	output := buf.String()
+	if !strings.Contains(output, symbolFailure) {
+		t.Error("Fail output should contain failure symbol")
+	}
+	if !strings.Contains(output, "error") {
+		t.Error("Fail output should contain the message")
+	}
+
+	// Should NOT contain color codes in non-TTY mode
+	if strings.Contains(output, colorRed) {
+		t.Error("non-TTY Fail should not contain color codes")
+	}
+}

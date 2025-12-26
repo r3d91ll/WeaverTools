@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // ANSI escape sequences for terminal control.
@@ -78,6 +80,11 @@ type Config struct {
 	// HideCursor hides the terminal cursor while spinning.
 	// Defaults to true for cleaner visual appearance.
 	HideCursor bool
+
+	// IsTTY indicates whether the output is a terminal.
+	// When false, spinner falls back to static messages without animation.
+	// If not explicitly set, it is auto-detected from the Writer.
+	IsTTY *bool
 }
 
 // DefaultConfig returns a configuration with sensible defaults.
@@ -102,6 +109,7 @@ type Spinner struct {
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	frame     int
+	isTTY     bool // resolved TTY status (from config or auto-detected)
 
 	// lastOutput stores the length of last printed line for clearing.
 	lastOutput int
@@ -128,9 +136,25 @@ func NewWithConfig(config Config) *Spinner {
 		config.Writer = os.Stderr
 	}
 
+	// Determine TTY status: use explicit config or auto-detect
+	isTTY := isTerminalWriter(config.Writer)
+	if config.IsTTY != nil {
+		isTTY = *config.IsTTY
+	}
+
 	return &Spinner{
 		config: config,
+		isTTY:  isTTY,
 	}
+}
+
+// isTerminalWriter checks if the given writer is a terminal.
+// Returns true if the writer is an *os.File pointing to a terminal.
+func isTerminalWriter(w io.Writer) bool {
+	if f, ok := w.(*os.File); ok {
+		return term.IsTerminal(int(f.Fd()))
+	}
+	return false
 }
 
 // Message returns the current spinner message.
@@ -156,6 +180,14 @@ func (s *Spinner) Elapsed() time.Duration {
 		return 0
 	}
 	return time.Since(s.startTime)
+}
+
+// IsTTY returns whether the spinner is outputting to a terminal.
+// When false, the spinner uses static messages without animation.
+func (s *Spinner) IsTTY() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isTTY
 }
 
 // spin is the core animation loop that runs in a goroutine.
@@ -260,6 +292,7 @@ func (s *Spinner) showCursorIfEnabled() {
 
 // Start begins the spinner animation.
 // It is safe to call Start on an already running spinner (no-op).
+// In non-TTY mode, prints a static message without animation.
 // Thread-safe: uses mutex to protect state changes.
 func (s *Spinner) Start() {
 	s.mu.Lock()
@@ -277,6 +310,13 @@ func (s *Spinner) Start() {
 	s.stopCh = make(chan struct{})
 	s.doneCh = make(chan struct{})
 
+	// Non-TTY mode: print a static message and return
+	if !s.isTTY {
+		// Print static message without animation
+		fmt.Fprintf(s.config.Writer, "%s...\n", s.config.Message)
+		return
+	}
+
 	// Hide cursor for cleaner appearance
 	s.hideCursorIfEnabled()
 
@@ -287,6 +327,7 @@ func (s *Spinner) Start() {
 // Stop halts the spinner animation and cleans up.
 // It is safe to call Stop on an already stopped or never-started spinner (no-op).
 // Stop blocks until the animation goroutine has fully terminated.
+// In non-TTY mode, just marks the spinner as inactive.
 // Thread-safe: uses mutex to protect state changes.
 func (s *Spinner) Stop() {
 	s.mu.Lock()
@@ -299,6 +340,12 @@ func (s *Spinner) Stop() {
 
 	// Mark as inactive first to prevent render() from writing
 	s.active = false
+
+	// Non-TTY mode: no goroutine was started, just mark as inactive
+	if !s.isTTY {
+		s.mu.Unlock()
+		return
+	}
 
 	// Get references to channels before unlocking
 	stopCh := s.stopCh
@@ -346,6 +393,7 @@ func (s *Spinner) Fail(message string) {
 
 // complete is the internal implementation for Success and Fail.
 // It stops the spinner and displays a final status with the given symbol and color.
+// In non-TTY mode, displays a simple status message without ANSI codes.
 func (s *Spinner) complete(message, symbol, color string) {
 	s.mu.Lock()
 
@@ -354,10 +402,25 @@ func (s *Spinner) complete(message, symbol, color string) {
 		if message == "" {
 			message = s.config.Message
 		}
+		isTTY := s.isTTY
+		showElapsed := s.config.ShowElapsed
+		startTime := s.startTime
 		s.mu.Unlock()
+
 		// Display final status even if spinner wasn't running
 		s.mu.Lock()
-		output := fmt.Sprintf("%s%s%s %s\n", color, symbol, colorReset, message)
+		var output string
+		if isTTY {
+			// TTY mode: use colors
+			output = fmt.Sprintf("%s%s%s %s\n", color, symbol, colorReset, message)
+		} else {
+			// Non-TTY mode: plain text without colors
+			if showElapsed && !startTime.IsZero() {
+				output = fmt.Sprintf("%s %s %s\n", symbol, message, s.formatElapsed(time.Since(startTime)))
+			} else {
+				output = fmt.Sprintf("%s %s\n", symbol, message)
+			}
+		}
 		fmt.Fprint(s.config.Writer, output)
 		s.mu.Unlock()
 		return
@@ -369,9 +432,27 @@ func (s *Spinner) complete(message, symbol, color string) {
 		message = s.config.Message
 	}
 	showElapsed := s.config.ShowElapsed
+	isTTY := s.isTTY
 
 	// Mark as inactive to prevent render() from writing
 	s.active = false
+
+	// Non-TTY mode: no goroutine was started, just display final status
+	if !isTTY {
+		s.mu.Unlock()
+
+		// Display final status (plain text without ANSI codes)
+		s.mu.Lock()
+		var output string
+		if showElapsed {
+			output = fmt.Sprintf("%s %s %s\n", symbol, message, s.formatElapsed(elapsed))
+		} else {
+			output = fmt.Sprintf("%s %s\n", symbol, message)
+		}
+		fmt.Fprint(s.config.Writer, output)
+		s.mu.Unlock()
+		return
+	}
 
 	// Get references to channels before unlocking
 	stopCh := s.stopCh

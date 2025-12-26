@@ -58,6 +58,7 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring GPU/models",
+    "gpu: marks tests requiring GPU hardware (deselect with '-m \"not gpu\"')",
 ]
 
 [tool.mypy]

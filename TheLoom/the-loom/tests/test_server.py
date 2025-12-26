@@ -128,6 +128,7 @@ class TestModelsEndpoints:
             data = response.json()
             assert data["loaded_models"] == []
 
+    @pytest.mark.gpu
     def test_load_model(self, mock_config, mock_loaded_model):
         with patch("src.transport.http.GPUManager"):
             with patch("src.transport.http.LoaderRegistry") as mock_registry:
@@ -151,6 +152,7 @@ class TestModelsEndpoints:
 class TestGenerateEndpoint:
     """Tests for /generate endpoint."""
 
+    @pytest.mark.gpu
     def test_generate_with_hidden_states(
         self,
         mock_config,
@@ -183,6 +185,7 @@ class TestGenerateEndpoint:
                 assert "hidden_states" in data
                 assert "-1" in data["hidden_states"]
 
+    @pytest.mark.gpu
     def test_generate_without_hidden_states(
         self,
         mock_config,
@@ -222,6 +225,7 @@ class TestGenerateEndpoint:
 class TestEmbedEndpoint:
     """Tests for /embed endpoint."""
 
+    @pytest.mark.gpu
     def test_embed_basic(
         self,
         mock_config,
@@ -251,6 +255,7 @@ class TestEmbedEndpoint:
                 assert len(data["embedding"]) == 768
                 assert data["shape"] == [768]
 
+    @pytest.mark.gpu
     def test_embed_with_normalization(
         self,
         mock_config,
@@ -336,6 +341,7 @@ class TestRequestValidation:
 class TestChatCompletionsEndpoint:
     """Tests for /v1/chat/completions endpoint (WeaverCode integration)."""
 
+    @pytest.mark.gpu
     def test_chat_completion_basic(
         self,
         mock_config,

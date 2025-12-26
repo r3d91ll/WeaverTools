@@ -1,6 +1,10 @@
 package yarn
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -99,4 +103,36 @@ func (s *ConversationStore) ClearAll() int {
 	count := len(s.conversations)
 	s.conversations = make(map[string]*Conversation)
 	return count
+}
+
+// Save persists all conversations to a directory.
+// Each conversation is saved as a separate JSON file named by ID.
+// Data is marshaled under the lock, but I/O is performed outside the lock.
+func (s *ConversationStore) Save(dir string) error {
+	// Copy data under lock, then release before I/O
+	s.mu.RLock()
+	toSave := make(map[string][]byte)
+	for id, conversation := range s.conversations {
+		data, err := json.MarshalIndent(conversation, "", "  ")
+		if err != nil {
+			s.mu.RUnlock()
+			return fmt.Errorf("marshal %s: %w", id, err)
+		}
+		toSave[id] = data
+	}
+	s.mu.RUnlock()
+
+	// Perform I/O without holding the lock
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	for id, data := range toSave {
+		path := filepath.Join(dir, id+".json")
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			return fmt.Errorf("write %s: %w", id, err)
+		}
+	}
+
+	return nil
 }

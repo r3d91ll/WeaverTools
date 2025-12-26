@@ -9,14 +9,20 @@ import (
 	"time"
 )
 
-// ConversationStore manages conversations in memory with optional persistence.
-// It provides thread-safe storage for conversations with JSON file persistence.
+// ConversationStore provides thread-safe storage for conversations with JSON file persistence.
+// It mirrors the Concept Store pattern from Weaver/pkg/concepts/store.go.
+//
+// All methods are safe for concurrent use. Read operations use a read lock (RLock),
+// while write operations use an exclusive lock (Lock).
+//
+// The Save and Load methods implement a lock-minimizing pattern: data is copied or prepared
+// outside the lock, and I/O operations are performed without holding the lock.
 type ConversationStore struct {
 	mu            sync.RWMutex
 	conversations map[string]*Conversation
 }
 
-// NewConversationStore creates a new conversation store.
+// NewConversationStore creates and returns a new, empty conversation store.
 func NewConversationStore() *ConversationStore {
 	return &ConversationStore{
 		conversations: make(map[string]*Conversation),
@@ -24,7 +30,8 @@ func NewConversationStore() *ConversationStore {
 }
 
 // Add stores a conversation by ID, creating or updating as needed.
-// Updates the UpdatedAt timestamp on the conversation.
+// It updates the conversation's UpdatedAt timestamp to the current time.
+// This method is safe for concurrent use.
 func (s *ConversationStore) Add(conversation *Conversation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -34,7 +41,9 @@ func (s *ConversationStore) Add(conversation *Conversation) {
 }
 
 // Get retrieves a conversation by ID.
-// The returned Conversation is a copy to prevent external mutation of internal state.
+// Returns the conversation and true if found, or nil and false if not found.
+// The returned Conversation is a shallow copy to prevent external mutation of internal state.
+// This method is safe for concurrent use.
 func (s *ConversationStore) Get(id string) (*Conversation, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -64,7 +73,8 @@ func (s *ConversationStore) Get(id string) (*Conversation, bool) {
 	return cpy, true
 }
 
-// List returns all conversation IDs with message counts.
+// List returns a map of all conversation IDs to their message counts.
+// This method is safe for concurrent use.
 func (s *ConversationStore) List() map[string]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -76,7 +86,8 @@ func (s *ConversationStore) List() map[string]int {
 	return result
 }
 
-// Count returns the number of conversations.
+// Count returns the number of conversations in the store.
+// This method is safe for concurrent use.
 func (s *ConversationStore) Count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -84,6 +95,8 @@ func (s *ConversationStore) Count() int {
 }
 
 // Clear removes a conversation by ID.
+// Returns true if the conversation was found and removed, false otherwise.
+// This method is safe for concurrent use.
 func (s *ConversationStore) Clear(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -95,7 +108,9 @@ func (s *ConversationStore) Clear(id string) bool {
 	return false
 }
 
-// ClearAll removes all conversations.
+// ClearAll removes all conversations from the store.
+// Returns the number of conversations that were removed.
+// This method is safe for concurrent use.
 func (s *ConversationStore) ClearAll() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -105,9 +120,12 @@ func (s *ConversationStore) ClearAll() int {
 	return count
 }
 
-// Save persists all conversations to a directory.
-// Each conversation is saved as a separate JSON file named by ID.
-// Data is marshaled under the lock, but I/O is performed outside the lock.
+// Save persists all conversations to a directory as JSON files.
+// Each conversation is saved as a separate file named {id}.json.
+// Creates the directory if it doesn't exist.
+//
+// This method is safe for concurrent use. Data is marshaled under the read lock,
+// but file I/O is performed outside the lock to minimize lock contention.
 func (s *ConversationStore) Save(dir string) error {
 	// Copy data under lock, then release before I/O
 	s.mu.RLock()
@@ -137,9 +155,13 @@ func (s *ConversationStore) Save(dir string) error {
 	return nil
 }
 
-// Load loads conversations from a directory.
-// Each JSON file in the directory is read and unmarshaled into a conversation.
-// I/O is performed outside the lock, with only the map update under lock.
+// Load reads conversations from a directory of JSON files.
+// Each .json file in the directory is read and unmarshaled into a conversation.
+// Non-JSON files and subdirectories are skipped.
+// Returns nil if the directory doesn't exist (graceful handling of no saved data).
+//
+// This method is safe for concurrent use. File I/O is performed outside the lock,
+// with only the final map update acquiring the write lock.
 func (s *ConversationStore) Load(dir string) error {
 	// Perform I/O outside the lock
 	entries, err := os.ReadDir(dir)

@@ -71,7 +71,7 @@
           "id": "1.4",
           "title": "Implement List method",
           "description": "Add List() []string method to return all registered session names.",
-          "status": "pending",
+          "status": "completed",
           "file_paths": [
             "Yarn/registry.go"
           ],
@@ -80,7 +80,9 @@
             "Returns slice of all registered session names",
             "Uses read lock for concurrent access",
             "Returns empty slice when no sessions registered"
-          ]
+          ],
+          "notes": "Implemented List() []string method following Backend Registry pattern exactly. Uses read lock (RLock/RUnlock) for thread-safe concurrent access, pre-allocates result slice with correct capacity, returns all registered session names. Returns empty slice when no sessions registered. Committed as 684fc6d.",
+          "updated_at": "2025-12-26T04:30:09.967405+00:00"
         }
       ]
     },
@@ -338,5 +340,5 @@
     "target_package": "github.com/r3d91ll/yarn",
     "pattern_reference": "Weaver/pkg/backend/registry.go"
   },
-  "last_updated": "2025-12-26T04:28:55.375239+00:00"
+  "last_updated": "2025-12-26T04:30:09.967411+00:00"
 }

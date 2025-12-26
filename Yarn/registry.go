@@ -3,6 +3,7 @@ package yarn
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 // SessionRegistry manages multiple research sessions with thread-safe access.
@@ -48,4 +49,14 @@ func (r *SessionRegistry) List() []string {
 		result = append(result, name)
 	}
 	return result
+}
+
+// SessionStatus represents session status.
+type SessionStatus struct {
+	Name      string        `json:"name"`
+	ID        string        `json:"id"`
+	IsActive  bool          `json:"is_active"`
+	StartedAt time.Time     `json:"started_at"`
+	EndedAt   *time.Time    `json:"ended_at,omitempty"`
+	Stats     SessionStats  `json:"stats"`
 }

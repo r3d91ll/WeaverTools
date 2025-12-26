@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:42.351747+00:00"
     },
     "Yarn/registry.go": {
-      "description": "SessionRegistry.Get method implemented with read lock protection (RLock/RUnlock), returning (*Session, bool) following Backend Registry pattern",
+      "description": "SessionRegistry.List() method implemented with read lock protection (RLock/RUnlock), returning []string of all registered session names. Pre-allocates slice with capacity for efficiency.",
       "category": "pattern",
-      "discovered_at": "2025-12-26T04:29:00.373113+00:00"
+      "discovered_at": "2025-12-26T04:30:14.957134+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:29:00.373123+00:00"
+  "last_updated": "2025-12-26T04:30:14.957144+00:00"
 }

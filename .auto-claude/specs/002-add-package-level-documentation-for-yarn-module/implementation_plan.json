@@ -174,5 +174,20 @@
   "spec_file": "spec.md",
   "notes": "The Yarn package currently has a minimal 2-line package comment in message.go. Creating a dedicated doc.go is the Go convention for comprehensive package documentation. The documentation should explain the research session data model and conveyance measurement framework without duplicating the individual type/function godoc comments.",
   "last_updated": "2025-12-26T00:30:47.081536+00:00",
-  "recoveryNote": "Task recovered from stuck state at 2025-12-26T00:27:42.851Z"
+  "recoveryNote": "Task recovered from stuck state at 2025-12-26T00:27:42.851Z",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2025-12-26T00:32:45.262147+00:00",
+      "issues": [],
+      "duration_seconds": 301.92
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
 }

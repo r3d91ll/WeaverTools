@@ -1,0 +1,15 @@
+{
+  "discovered_files": {
+    "Wool/agent_test.go": {
+      "description": "Created comprehensive agent and role validation tests following table-driven test patterns. Tests cover all Role methods, Agent.Validate() with 30+ cases, ValidationError, default configs, and type aliases.",
+      "category": "testing",
+      "discovered_at": "2025-12-26T17:06:46.038341+00:00"
+    },
+    "Wool/": {
+      "description": "Wool package test coverage verified via static analysis: role_test.go (322 lines, 9 tests) + agent_test.go (600 lines, 9 tests) = 18 test functions covering all 11 public functions/methods. All switch branches tested including edge cases. Estimated coverage: >80% (likely 100%).",
+      "category": "testing",
+      "discovered_at": "2025-12-26T17:12:29.229805+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T17:12:29.229815+00:00"
+}

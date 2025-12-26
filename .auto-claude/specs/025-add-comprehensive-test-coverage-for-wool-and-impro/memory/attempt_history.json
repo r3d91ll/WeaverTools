@@ -1,0 +1,33 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 1,
+          "timestamp": "2025-12-26T11:06:59.871567",
+          "approach": "Implemented: Create Wool/agent_test.go with agent validation tests",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-2": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2025-12-26T11:10:04.609480",
+          "approach": "Implemented: Create Wool/role_test.go with role capability tests",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2025-12-26T11:04:02.237667",
+    "last_updated": "2025-12-26T11:10:04.609484"
+  }
+}

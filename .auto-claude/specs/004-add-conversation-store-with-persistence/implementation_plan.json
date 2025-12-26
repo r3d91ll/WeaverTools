@@ -6,7 +6,9 @@
   "status": "in_progress",
   "planStatus": "approved",
   "workflow_type": "development",
-  "services_involved": ["Yarn"],
+  "services_involved": [
+    "Yarn"
+  ],
   "spec_file": "spec.md",
   "phases": [
     {
@@ -19,14 +21,18 @@
           "id": "1.1",
           "title": "Create conversation_store.go with Store struct",
           "description": "Create the ConversationStore struct with sync.RWMutex and map[string]*Conversation. Include NewConversationStore() constructor.",
-          "status": "pending",
+          "status": "completed",
           "estimated_effort": "small",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "ConversationStore struct with RWMutex and map",
             "NewConversationStore() returns initialized store",
             "Package properly imports sync and other required packages"
-          ]
+          ],
+          "notes": "Created Yarn/conversation_store.go with ConversationStore struct (sync.RWMutex + map[string]*Conversation) and NewConversationStore() constructor. Follows pattern from concepts/store.go.",
+          "updated_at": "2025-12-26T04:26:47.785998+00:00"
         },
         {
           "id": "1.2",
@@ -34,7 +40,9 @@
           "description": "Add method to store a conversation by ID, creating or updating as needed. Should set UpdatedAt timestamp.",
           "status": "pending",
           "estimated_effort": "small",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "Add(conversation *Conversation) stores conversation by ID",
             "Properly acquires write lock",
@@ -47,7 +55,9 @@
           "description": "Get retrieves a conversation by ID, returning a copy to protect internal state (mirroring Concept Store pattern).",
           "status": "pending",
           "estimated_effort": "small",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "Get(id string) (*Conversation, bool) returns conversation copy",
             "Returns false if not found",
@@ -61,7 +71,9 @@
           "description": "Implement remaining CRUD operations matching Concept Store pattern.",
           "status": "pending",
           "estimated_effort": "small",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "List() returns map[string]int with conversation IDs and message counts",
             "Count() returns number of conversations",
@@ -83,7 +95,9 @@
           "description": "Save persists all conversations to a directory, each as a separate JSON file named by ID. Marshal under lock, write outside lock (like Concept Store).",
           "status": "pending",
           "estimated_effort": "medium",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "Save(dir string) error persists conversations",
             "Each conversation saved as {id}.json",
@@ -98,7 +112,9 @@
           "description": "Load reads conversations from a directory, unmarshaling each JSON file and merging into store.",
           "status": "pending",
           "estimated_effort": "medium",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "Load(dir string) error loads conversations from directory",
             "Gracefully handles non-existent directory",
@@ -121,7 +137,9 @@
           "description": "Test Add, Get, List, Count, Clear, ClearAll operations including edge cases.",
           "status": "pending",
           "estimated_effort": "medium",
-          "files": ["Yarn/conversation_store_test.go"],
+          "files": [
+            "Yarn/conversation_store_test.go"
+          ],
           "acceptance_criteria": [
             "TestNewConversationStore verifies initialization",
             "TestAdd tests adding single and multiple conversations",
@@ -136,7 +154,9 @@
           "description": "Test round-trip persistence with temporary directories.",
           "status": "pending",
           "estimated_effort": "medium",
-          "files": ["Yarn/conversation_store_test.go"],
+          "files": [
+            "Yarn/conversation_store_test.go"
+          ],
           "acceptance_criteria": [
             "TestSave verifies JSON file creation",
             "TestLoad verifies loading saved conversations",
@@ -151,7 +171,9 @@
           "description": "Test thread-safety with concurrent reads and writes.",
           "status": "pending",
           "estimated_effort": "small",
-          "files": ["Yarn/conversation_store_test.go"],
+          "files": [
+            "Yarn/conversation_store_test.go"
+          ],
           "acceptance_criteria": [
             "TestConcurrentAccess uses goroutines for parallel operations",
             "Verifies no data races with -race flag",
@@ -172,7 +194,9 @@
           "description": "Ensure all exported types and methods have godoc comments matching project style.",
           "status": "pending",
           "estimated_effort": "small",
-          "files": ["Yarn/conversation_store.go"],
+          "files": [
+            "Yarn/conversation_store.go"
+          ],
           "acceptance_criteria": [
             "Package-level documentation for Store purpose",
             "All exported methods have doc comments",
@@ -197,16 +221,39 @@
     }
   ],
   "dependencies": {
-    "1.2": ["1.1"],
-    "1.3": ["1.1"],
-    "1.4": ["1.1"],
-    "2.1": ["1.4"],
-    "2.2": ["1.4"],
-    "3.1": ["1.4"],
-    "3.2": ["2.2"],
-    "3.3": ["1.4"],
-    "4.1": ["2.2"],
-    "4.2": ["3.1", "3.2", "3.3", "4.1"]
+    "1.2": [
+      "1.1"
+    ],
+    "1.3": [
+      "1.1"
+    ],
+    "1.4": [
+      "1.1"
+    ],
+    "2.1": [
+      "1.4"
+    ],
+    "2.2": [
+      "1.4"
+    ],
+    "3.1": [
+      "1.4"
+    ],
+    "3.2": [
+      "2.2"
+    ],
+    "3.3": [
+      "1.4"
+    ],
+    "4.1": [
+      "2.2"
+    ],
+    "4.2": [
+      "3.1",
+      "3.2",
+      "3.3",
+      "4.1"
+    ]
   },
   "final_acceptance": [
     "ConversationStore is thread-safe for concurrent access",
@@ -218,5 +265,6 @@
     "status": "pending",
     "tests_passed": "",
     "issues": ""
-  }
+  },
+  "last_updated": "2025-12-26T04:26:47.786003+00:00"
 }

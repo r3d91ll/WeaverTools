@@ -28,3 +28,34 @@ func (s *ConversationStore) Add(conversation *Conversation) {
 	conversation.UpdatedAt = time.Now()
 	s.conversations[conversation.ID] = conversation
 }
+
+// Get retrieves a conversation by ID.
+// The returned Conversation is a copy to prevent external mutation of internal state.
+func (s *ConversationStore) Get(id string) (*Conversation, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	conversation, ok := s.conversations[id]
+	if !ok {
+		return nil, false
+	}
+
+	// Return a shallow copy to protect internal state
+	cpy := &Conversation{
+		ID:           conversation.ID,
+		Name:         conversation.Name,
+		Messages:     make([]*Message, len(conversation.Messages)),
+		Participants: make(map[string]Participant, len(conversation.Participants)),
+		CreatedAt:    conversation.CreatedAt,
+		UpdatedAt:    conversation.UpdatedAt,
+		Metadata:     make(map[string]any, len(conversation.Metadata)),
+	}
+	copy(cpy.Messages, conversation.Messages)
+	for k, v := range conversation.Participants {
+		cpy.Participants[k] = v
+	}
+	for k, v := range conversation.Metadata {
+		cpy.Metadata[k] = v
+	}
+	return cpy, true
+}

@@ -38,7 +38,7 @@
           "id": "1.2",
           "title": "Implement Add method",
           "description": "Add method to store a conversation by ID, creating or updating as needed. Should set UpdatedAt timestamp.",
-          "status": "pending",
+          "status": "completed",
           "estimated_effort": "small",
           "files": [
             "Yarn/conversation_store.go"
@@ -47,7 +47,9 @@
             "Add(conversation *Conversation) stores conversation by ID",
             "Properly acquires write lock",
             "Updates the UpdatedAt timestamp on the conversation"
-          ]
+          ],
+          "notes": "Implemented Add(conversation *Conversation) method that stores conversations by ID. Uses write lock (mu.Lock/defer mu.Unlock) and updates UpdatedAt timestamp to time.Now(). Follows pattern from concepts/store.go.",
+          "updated_at": "2025-12-26T04:28:10.205430+00:00"
         },
         {
           "id": "1.3",
@@ -266,5 +268,5 @@
     "tests_passed": "",
     "issues": ""
   },
-  "last_updated": "2025-12-26T04:26:47.786003+00:00"
+  "last_updated": "2025-12-26T04:28:10.205440+00:00"
 }

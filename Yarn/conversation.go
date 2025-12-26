@@ -152,3 +152,18 @@ func (c *Conversation) Validate() *ValidationError {
 
 	return nil
 }
+
+// Validate checks if the participant is valid.
+// Returns a ValidationError if invalid, nil if valid.
+func (p *Participant) Validate() *ValidationError {
+	if p.AgentID == "" {
+		return &ValidationError{Field: "agent_id", Message: "agent_id is required"}
+	}
+	if p.Role == "" {
+		return &ValidationError{Field: "role", Message: "role is required"}
+	}
+	if p.JoinedAt.IsZero() {
+		return &ValidationError{Field: "joined_at", Message: "joined_at is required"}
+	}
+	return nil
+}

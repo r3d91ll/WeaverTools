@@ -19,7 +19,12 @@
       "description": "Test file for Message and HiddenState validation. Uses Go table-driven tests pattern with t.Run() for subtests. Tests are comprehensive covering all validation rules for Message.Validate() and HiddenState.Validate(). Note: go test command not available in sandboxed environment - manual verification required.",
       "category": "testing",
       "discovered_at": "2025-12-26T04:33:41.795390+00:00"
+    },
+    "Yarn/conversation.go": {
+      "description": "Conversation.Validate() validates ID, Name, CreatedAt (not zero), UpdatedAt (not before CreatedAt), and cascades validation to all Messages. Uses strconv.Itoa() for index formatting in error messages. Nested message errors use \"messages[i].field\" format.",
+      "category": "validation",
+      "discovered_at": "2025-12-26T04:35:16.998321+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:33:41.795394+00:00"
+  "last_updated": "2025-12-26T04:35:16.998327+00:00"
 }

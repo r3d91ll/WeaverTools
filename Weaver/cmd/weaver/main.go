@@ -18,10 +18,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/r3d91ll/weaver/pkg/backend"
 	"github.com/r3d91ll/weaver/pkg/config"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/weaver/pkg/shell"
 	"github.com/r3d91ll/wool"
@@ -52,7 +54,7 @@ func main() {
 	// Initialize config if requested
 	if *initConfig {
 		if err := config.InitConfig(cfgPath); err != nil {
-			fmt.Printf("Failed to initialize config: %v\n", err)
+			werrors.Display(createConfigInitError(cfgPath, err))
 			os.Exit(1)
 		}
 		fmt.Printf("Config initialized at: %s\n", cfgPath)
@@ -63,7 +65,7 @@ func main() {
 	// Load config
 	cfg, err := config.LoadOrDefault(cfgPath)
 	if err != nil {
-		fmt.Printf("Failed to load config: %v\n", err)
+		werrors.Display(createConfigLoadError(cfgPath, err))
 		os.Exit(1)
 	}
 
@@ -259,4 +261,63 @@ func main() {
 	}
 
 	fmt.Println("Goodbye!")
+}
+
+// createConfigLoadError creates a structured error for config loading failures.
+// It analyzes the underlying error to provide specific guidance on how to fix it.
+func createConfigLoadError(path string, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for file not found
+	if os.IsNotExist(err) || strings.Contains(errStr, "no such file") {
+		return werrors.ConfigNotFound(path)
+	}
+
+	// Check for YAML parse errors
+	if strings.Contains(errStr, "yaml") || strings.Contains(errStr, "unmarshal") ||
+		strings.Contains(errStr, "parse") {
+		return werrors.ConfigParseError(path, err)
+	}
+
+	// Check for permission errors
+	if os.IsPermission(err) || strings.Contains(errStr, "permission denied") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigReadFailed, "permission denied reading config file").
+			WithContext("path", path)
+	}
+
+	// Generic config read failure
+	return werrors.ConfigWrap(err, werrors.ErrConfigReadFailed, "failed to read configuration").
+		WithContext("path", path)
+}
+
+// createConfigInitError creates a structured error for config initialization failures.
+// It provides guidance on directory creation and permissions.
+func createConfigInitError(path string, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for permission errors
+	if os.IsPermission(err) || strings.Contains(errStr, "permission denied") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "permission denied creating config file").
+			WithContext("path", path).
+			WithContext("directory", filepath.Dir(path))
+	}
+
+	// Check for directory not found
+	if strings.Contains(errStr, "no such file or directory") ||
+		strings.Contains(errStr, "directory") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "config directory does not exist").
+			WithContext("path", path).
+			WithContext("directory", filepath.Dir(path)).
+			WithSuggestion("Create the directory first: mkdir -p " + filepath.Dir(path))
+	}
+
+	// Check for disk full or write errors
+	if strings.Contains(errStr, "no space") || strings.Contains(errStr, "disk full") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigWriteFailed, "disk is full").
+			WithContext("path", path)
+	}
+
+	// Generic init failure
+	return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "failed to initialize configuration").
+		WithContext("path", path)
 }

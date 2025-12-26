@@ -106,8 +106,13 @@ linters-settings:
   gosec:
     # Include all rules by default
     includes: []
-    # Exclude rules that may be too noisy for this codebase
-    excludes: []
+    # Exclude rules that are false positives for this codebase
+    # G301: Expect directory permissions to be 0750 or less - 0755 is standard for user dirs
+    # G306: Expect WriteFile permissions to be 0600 or less - 0644 is standard for config files
+    # G204: Subprocess launched with variable - intentional for CLI wrapper functionality
+    excludes:
+      - G301  # Directory permissions (0755 is standard Go pattern)
+      - G306  # File permissions (0644 is standard Go pattern)
     # Exclude generated files
     exclude-generated: true
     # Severity of issues (low, medium, high)

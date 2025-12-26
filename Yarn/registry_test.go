@@ -667,24 +667,37 @@ func TestCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("empty name allowed", func(t *testing.T) {
+	t.Run("empty name returns error", func(t *testing.T) {
 		registry := NewSessionRegistry()
 
 		session, err := registry.Create("", "empty name session")
-		if err != nil {
-			t.Errorf("expected empty name to be allowed, got error: %v", err)
+		if err != ErrEmptySessionName {
+			t.Errorf("expected ErrEmptySessionName, got %v", err)
 		}
-		if session == nil {
-			t.Error("expected non-nil session for empty name")
+		if session != nil {
+			t.Error("expected nil session for empty name")
 		}
 
-		// Verify can be retrieved with empty name
-		got, ok := registry.Get("")
-		if !ok {
-			t.Error("empty name session not found")
+		// Verify nothing was registered
+		if registry.Count() != 0 {
+			t.Errorf("expected 0 sessions, got %d", registry.Count())
 		}
-		if got != session {
-			t.Error("retrieved session does not match created session")
+	})
+
+	t.Run("whitespace-only name returns error", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, err := registry.Create("   ", "whitespace name session")
+		if err != ErrEmptySessionName {
+			t.Errorf("expected ErrEmptySessionName for whitespace name, got %v", err)
+		}
+		if session != nil {
+			t.Error("expected nil session for whitespace name")
+		}
+
+		// Verify nothing was registered
+		if registry.Count() != 0 {
+			t.Errorf("expected 0 sessions, got %d", registry.Count())
 		}
 	})
 

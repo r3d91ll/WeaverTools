@@ -2,10 +2,15 @@
 package yarn
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
+
+// ErrEmptySessionName is returned when a session name is empty or whitespace-only.
+var ErrEmptySessionName = errors.New("session name cannot be empty")
 
 // SessionRegistry manages multiple research sessions with thread-safe access.
 // It provides a registry pattern for storing, retrieving, and managing sessions
@@ -137,7 +142,7 @@ func (r *SessionRegistry) Active() []*Session {
 	}
 	r.mu.RUnlock()
 
-	var result []*Session
+	result := make([]*Session, 0)
 	for _, session := range sessions {
 		if session.EndedAt == nil {
 			result = append(result, session)
@@ -174,6 +179,12 @@ func (r *SessionRegistry) Unregister(name string) error {
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) Create(name, description string) (*Session, error) {
+	// Validate input: name cannot be empty or whitespace-only
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ErrEmptySessionName
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -196,6 +207,8 @@ func (r *SessionRegistry) Create(name, description string) (*Session, error) {
 //
 // Returns the session and a bool indicating whether a new session was created
 // (true) or an existing session was returned (false).
+//
+// Note: For input validation (rejecting empty names), use Create() instead.
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) GetOrCreate(name, description string) (*Session, bool) {

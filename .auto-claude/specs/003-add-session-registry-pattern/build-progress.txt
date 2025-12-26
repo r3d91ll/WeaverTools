@@ -85,7 +85,7 @@ go build ./...
 - `Yarn/registry.go` - SessionRegistry implementation (223 lines)
 - `Yarn/registry_test.go` - Comprehensive test suite (1472 lines)
 
-## Commits (14 implementation commits)
+## Commits (14 implementation + 2 verification commits)
 
 1. b9258f3 - 1.1: SessionRegistry struct and constructor
 2. 543f362 - 1.2: Register method

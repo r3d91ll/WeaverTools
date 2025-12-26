@@ -7,7 +7,8 @@
   "estimatedEffort": "small",
   "complexity": "small",
   "affectedFiles": [
-    "Yarn/session_registry.go (new)",
+    "Yarn/registry.go (new)",
+    "Yarn/registry_test.go (new)",
     "Yarn/session.go"
   ]
 }

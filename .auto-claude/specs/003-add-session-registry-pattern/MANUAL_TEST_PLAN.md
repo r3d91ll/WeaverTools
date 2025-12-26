@@ -1,12 +1,12 @@
 # Manual Test Plan - 003-add-session-registry-pattern
 
 **Generated**: 2025-12-26T04:56:41.457346+00:00
-**Reason**: No automated test framework detected
+**Purpose**: Manual verification checklist to supplement automated tests
 
 ## Overview
 
-This project does not have automated testing infrastructure. Please perform
-manual verification of the implementation using the checklist below.
+This checklist supplements the automated Go test suite with manual verification
+steps. Run automated tests first with `go test -race ./Yarn/...` or `make test`.
 
 ## Pre-Test Setup
 

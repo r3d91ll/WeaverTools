@@ -1,0 +1,20 @@
+{
+  "discovered_files": {
+    "Weaver/pkg/shell/shell.go": {
+      "description": "handleValidate() now uses two spinners per iteration: extractSpin for extraction step showing \"Iteration N/M: Extracting 'concept'...\" and analyzeSpin for analysis step showing \"Iteration N/M: Analyzing N vectors...\". Pattern: create spinner with iteration info, start, run operation, call Success/Fail based on result. Uses continue on failures to allow remaining iterations to proceed.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:43:51.773990+00:00"
+    },
+    "Weaver/pkg": {
+      "description": "Package structure follows pattern of separate directories per feature (analysis, backend, concepts, config, runtime, shell). New spinner package should be at Weaver/pkg/spinner/.",
+      "category": "architecture",
+      "discovered_at": "2025-12-26T04:24:52.453018+00:00"
+    },
+    "Weaver/pkg/spinner/spinner.go": {
+      "description": "Spinner supports non-TTY fallback mode. When output is not a terminal (piped/redirected), it prints static messages without animation or ANSI codes. TTY detection uses golang.org/x/term.IsTerminal(). Config.IsTTY (pointer to bool) allows explicit override; nil means auto-detect. In non-TTY mode: Start() prints \"message...\" once, Stop() is a no-op, Success/Fail print plain text like \"\u2713 message (elapsed)\" without colors.",
+      "category": "feature",
+      "discovered_at": "2025-12-26T04:50:34.762401+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:50:34.762410+00:00"
+}

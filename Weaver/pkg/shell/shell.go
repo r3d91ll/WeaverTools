@@ -14,6 +14,7 @@ import (
 	"github.com/r3d91ll/weaver/pkg/analysis"
 	"github.com/r3d91ll/weaver/pkg/concepts"
 	"github.com/r3d91ll/weaver/pkg/runtime"
+	"github.com/r3d91ll/weaver/pkg/spinner"
 	"github.com/r3d91ll/yarn"
 )
 
@@ -208,11 +209,13 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 	userMsg := yarn.NewAgentMessage(yarn.RoleUser, message, "user", "user")
 	s.conv.Add(userMsg)
 
-	// Show thinking indicator
-	fmt.Printf("\033[33m[%s]\033[0m thinking...\n", agent.Name())
+	// Show thinking spinner with elapsed time
+	spin := spinner.New(fmt.Sprintf("\033[33m[%s]\033[0m thinking...", agent.Name()))
+	spin.Start()
 
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
+	spin.Stop()
 	if err != nil {
 		return err
 	}
@@ -339,19 +342,22 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\033[33mExtracting %d samples for '%s' using %s...\033[0m\n", count, concept, extractAgent.Name())
-
-	// Create extractor and run
+	// Create extractor and run with spinner feedback
 	extractor := concepts.NewExtractor(extractAgent.Backend, s.conceptStore)
 	cfg := concepts.DefaultExtractionConfig(concept, count)
 
+	// Start extraction spinner
+	spin := spinner.New(fmt.Sprintf("Extracting %d samples for '%s'...", count, concept))
+	spin.Start()
+
 	result, err := extractor.Extract(ctx, cfg)
 	if err != nil {
+		spin.Fail(fmt.Sprintf("Extraction failed for '%s'", concept))
 		return err
 	}
 
-	// Display results
-	fmt.Printf("\033[32m✓ Extracted %d samples\033[0m\n", result.SamplesAdded)
+	// Show success with sample count
+	spin.Success(fmt.Sprintf("Extracted %d samples for '%s'", result.SamplesAdded, concept))
 	fmt.Printf("  Concept: %s\n", result.Concept)
 	fmt.Printf("  Total samples: %d\n", result.TotalSamples)
 	fmt.Printf("  Dimension: %d\n", result.Dimension)
@@ -386,13 +392,18 @@ func (s *Shell) handleAnalyze(ctx context.Context, args []string) error {
 		return fmt.Errorf("need at least 3 samples, have %d", len(vectors))
 	}
 
-	fmt.Printf("\033[33mAnalyzing '%s' (%d vectors, %d dimensions)...\033[0m\n",
-		conceptName, len(vectors), concept.Dimension())
+	// Start analysis spinner
+	spin := spinner.New(fmt.Sprintf("Analyzing '%s' (%d vectors, %d dimensions)...",
+		conceptName, len(vectors), concept.Dimension()))
+	spin.Start()
 
 	result, err := s.analysisClient.AnalyzeGeometry(ctx, vectors)
 	if err != nil {
+		spin.Fail(fmt.Sprintf("Analysis failed for '%s'", conceptName))
 		return err
 	}
+
+	spin.Success(fmt.Sprintf("Analyzed '%s'", conceptName))
 
 	// Display results
 	fmt.Printf("\n\033[36m=== Kakeya Geometry Analysis: %s ===\033[0m\n", conceptName)
@@ -454,13 +465,18 @@ func (s *Shell) handleCompare(ctx context.Context, args []string) error {
 		return fmt.Errorf("%q needs at least 3 samples, has %d", name2, len(vectors2))
 	}
 
-	fmt.Printf("\033[33mComparing '%s' (%d) vs '%s' (%d)...\033[0m\n",
-		name1, len(vectors1), name2, len(vectors2))
+	// Start comparison spinner
+	spin := spinner.New(fmt.Sprintf("Comparing '%s' (%d) vs '%s' (%d)...",
+		name1, len(vectors1), name2, len(vectors2)))
+	spin.Start()
 
 	result, err := s.analysisClient.CompareBilateral(ctx, vectors1, vectors2)
 	if err != nil {
+		spin.Fail(fmt.Sprintf("Comparison failed for '%s' vs '%s'", name1, name2))
 		return err
 	}
+
+	spin.Success(fmt.Sprintf("Compared '%s' vs '%s'", name1, name2))
 
 	// Display results
 	fmt.Printf("\n\033[36m=== Bilateral Comparison: %s ↔ %s ===\033[0m\n", name1, name2)
@@ -516,31 +532,40 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 		extractor := concepts.NewExtractor(extractAgent.Backend, tempStore)
 		cfg := concepts.DefaultExtractionConfig(concept, 10) // 10 samples per iteration
 
-		fmt.Printf("Iteration %d: extracting...", i+1)
+		// Start extraction spinner
+		extractSpin := spinner.New(fmt.Sprintf("Iteration %d/%d: Extracting '%s'...", i+1, iterations, concept))
+		extractSpin.Start()
+
 		_, err := extractor.Extract(ctx, cfg)
 		if err != nil {
-			fmt.Printf(" \033[31mfailed: %v\033[0m\n", err)
+			extractSpin.Fail(fmt.Sprintf("Iteration %d: Extraction failed: %v", i+1, err))
 			continue
 		}
 
 		tempConcept, ok := tempStore.Get(concept)
 		if !ok {
-			fmt.Printf(" \033[31mfailed: concept not found after extraction\033[0m\n")
+			extractSpin.Fail(fmt.Sprintf("Iteration %d: Concept not found after extraction", i+1))
 			continue
 		}
+		extractSpin.Success(fmt.Sprintf("Iteration %d: Extracted '%s'", i+1, concept))
+
 		vectors := tempConcept.VectorsAsFloat64()
 
-		fmt.Printf(" analyzing...")
+		// Start analysis spinner
+		analyzeSpin := spinner.New(fmt.Sprintf("Iteration %d/%d: Analyzing %d vectors...", i+1, iterations, len(vectors)))
+		analyzeSpin.Start()
+
 		result, err := s.analysisClient.AnalyzeGeometry(ctx, vectors)
 		if err != nil {
-			fmt.Printf(" \033[31mfailed: %v\033[0m\n", err)
+			analyzeSpin.Fail(fmt.Sprintf("Iteration %d: Analysis failed: %v", i+1, err))
 			continue
 		}
 
 		results = append(results, result)
-		fmt.Printf(" \033[32mdone\033[0m (D_eff=%d, coverage=%.2f)\n",
+		analyzeSpin.Success(fmt.Sprintf("Iteration %d: D_eff=%d, coverage=%.2f",
+			i+1,
 			result.DirectionalCoverage.EffectiveDim,
-			result.DirectionalCoverage.CoverageRatio)
+			result.DirectionalCoverage.CoverageRatio))
 	}
 
 	if len(results) < 2 {

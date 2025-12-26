@@ -118,6 +118,67 @@ func (c *Conversation) MessagesWithHiddenStates() []*Message {
 	return result
 }
 
+// MessagesByRole returns only messages that match the specified role.
+func (c *Conversation) MessagesByRole(role MessageRole) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Role == role {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// MessagesByAgent returns only messages that match the specified agent ID.
+// If agentID is empty, returns messages with empty AgentID (literal match).
+func (c *Conversation) MessagesByAgent(agentID string) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.AgentID == agentID {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// MessagesSince returns only messages with Timestamp strictly after the given time.
+// Messages are returned in chronological order (as stored).
+func (c *Conversation) MessagesSince(since time.Time) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Timestamp.After(since) {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// MessagesWithMetadata returns only messages that have the specified key present
+// in their Metadata map (regardless of value). Messages with nil Metadata are skipped.
+func (c *Conversation) MessagesWithMetadata(key string) []*Message {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []*Message
+	for _, msg := range c.Messages {
+		if msg.Metadata != nil {
+			if _, exists := msg.Metadata[key]; exists {
+				result = append(result, msg)
+			}
+		}
+	}
+	return result
+}
+
 // Validate checks if the conversation is valid.
 // Returns a ValidationError if invalid, nil if valid.
 func (c *Conversation) Validate() *ValidationError {

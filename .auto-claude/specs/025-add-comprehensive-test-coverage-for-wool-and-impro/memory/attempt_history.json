@@ -23,11 +23,155 @@
         }
       ],
       "status": "completed"
+    },
+    "subtask-1-3": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2025-12-26T11:13:19.757675",
+          "approach": "Implemented: Verify Wool test coverage exceeds 80%",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2025-12-26T11:15:36.676447",
+          "approach": "Implemented: Fix TestSuccess and TestFail color detection",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2025-12-26T11:16:58.703675",
+          "approach": "Implemented: Fix TestRenderWithElapsedTime timing verification",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-3": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2025-12-26T11:19:48.962102",
+          "approach": "Implemented: Run full Weaver spinner test suite",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2025-12-26T11:21:58.639851",
+          "approach": "Implemented: Add pytest GPU marker configuration to pyproject.toml",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2025-12-26T11:25:29.691834",
+          "approach": "Implemented: Mark GPU-dependent tests in test_server.py",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2025-12-26T11:29:18.994829",
+          "approach": "Implemented: Mark GPU-dependent tests in test_analysis.py",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-4": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2025-12-26T11:31:29.412118",
+          "approach": "Implemented: Mark or mock GPU-dependent integration tests",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-5": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2025-12-26T11:35:54.577217",
+          "approach": "Implemented: Verify all non-GPU tests pass",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2025-12-26T11:40:33.056840",
+          "approach": "Implemented: Create E2E test directory and delegation tests",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-2": {
+      "attempts": [
+        {
+          "session": 13,
+          "timestamp": "2025-12-26T11:44:48.474969",
+          "approach": "Implemented: Create E2E measurement workflow tests",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-3": {
+      "attempts": [
+        {
+          "session": 14,
+          "timestamp": "2025-12-26T11:49:33.825695",
+          "approach": "Implemented: Run full E2E test suite without manual intervention",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-26T11:04:02.237667",
-    "last_updated": "2025-12-26T11:10:04.609484"
+    "last_updated": "2025-12-26T11:49:33.825699"
   }
 }

@@ -9,7 +9,17 @@
       "description": "Wool package test coverage verified via static analysis: role_test.go (322 lines, 9 tests) + agent_test.go (600 lines, 9 tests) = 18 test functions covering all 11 public functions/methods. All switch branches tested including edge cases. Estimated coverage: >80% (likely 100%).",
       "category": "testing",
       "discovered_at": "2025-12-26T17:12:29.229805+00:00"
+    },
+    "tests/e2e/test_delegation.go": {
+      "description": "E2E test suite created with 15 test functions. Uses httptest.Server to mock TheLoom backend responses including hidden states. Tests message routing (@junior/@senior prefix parsing), agent creation/lifecycle, chat with hidden state extraction, conversation flows, and session integration. Module path: github.com/r3d91ll/weavertools/tests/e2e",
+      "category": "testing",
+      "discovered_at": "2025-12-26T17:40:19.284148+00:00"
+    },
+    "tests/e2e/harness_test.go": {
+      "description": "Created E2E test harness that manages TheLoom server as subprocess. Features: auto-port selection, health endpoint polling, graceful degradation to mocks, environment variable overrides (E2E_LOOM_PORT, E2E_THELOOM_PATH, E2E_SKIP_SERVER), TestMain entry point for setup/teardown, thread-safe singleton pattern.",
+      "category": "testing",
+      "discovered_at": "2025-12-26T17:48:45.410149+00:00"
     }
   },
-  "last_updated": "2025-12-26T17:12:29.229815+00:00"
+  "last_updated": "2025-12-26T17:48:45.410154+00:00"
 }

@@ -78,3 +78,5 @@ credentials.json
 
 # Local workspace for testing
 weaver-testing/
+session_*.json
+.auto-claude-status

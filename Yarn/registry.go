@@ -1,6 +1,7 @@
 package yarn
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -15,4 +16,16 @@ func NewSessionRegistry() *SessionRegistry {
 	return &SessionRegistry{
 		sessions: make(map[string]*Session),
 	}
+}
+
+// Register adds a session to the registry.
+func (r *SessionRegistry) Register(name string, session *Session) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.sessions[name]; exists {
+		return fmt.Errorf("session %q already registered", name)
+	}
+	r.sessions[name] = session
+	return nil
 }

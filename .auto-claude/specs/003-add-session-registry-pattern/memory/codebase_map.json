@@ -1,0 +1,20 @@
+{
+  "discovered_files": {
+    "Weaver/pkg/backend/registry.go": {
+      "description": "Backend Registry pattern: Uses map[string]Backend with sync.RWMutex. Methods: NewRegistry(), Register(), Get(), List(), Available(ctx), Status(ctx). Key pattern: copies map before releasing lock during I/O operations.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:24:42.345432+00:00"
+    },
+    "Yarn/session.go": {
+      "description": "Session struct with ID, Name, Description, StartedAt, EndedAt, Config, Metadata. Contains Conversations and Measurements. Has internal sync.RWMutex. Methods: NewSession(), AddConversation(), AddMeasurement(), ActiveConversation(), End(), Stats(), Export()",
+      "category": "structure",
+      "discovered_at": "2025-12-26T04:24:42.351747+00:00"
+    },
+    "Yarn/registry.go": {
+      "description": "SessionRegistry struct mirrors Backend Registry pattern: map[string]*Session with sync.RWMutex for thread-safe session management. NewSessionRegistry() initializes empty map.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:26:22.645805+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:26:22.645814+00:00"
+}

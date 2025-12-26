@@ -1,0 +1,338 @@
+{
+  "feature": "Add Session Registry Pattern",
+  "description": "Create a SessionRegistry mirroring the Backend Registry pattern - manages multiple research sessions with thread-safe access, listing, and status retrieval. Enables running multiple concurrent experiments.",
+  "created_at": "2025-12-26T04:17:52.200Z",
+  "updated_at": "2025-12-26T04:17:52.200Z",
+  "status": "in_progress",
+  "planStatus": "complete",
+  "workflow_type": "development",
+  "services_involved": [
+    "Yarn"
+  ],
+  "spec_file": "spec.md",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Core Registry Implementation",
+      "description": "Implement the SessionRegistry struct and core methods following Backend Registry pattern",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create SessionRegistry struct and constructor",
+          "description": "Create the SessionRegistry struct with sessions map and sync.RWMutex. Implement NewSessionRegistry() constructor following the pattern in backend/registry.go",
+          "status": "completed",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "SessionRegistry struct defined with sessions map[string]*Session and mu sync.RWMutex",
+            "NewSessionRegistry() returns properly initialized registry",
+            "Package follows existing yarn package conventions"
+          ],
+          "notes": "Created Yarn/registry.go with SessionRegistry struct (sessions map[string]*Session, mu sync.RWMutex) and NewSessionRegistry() constructor. Follows Backend Registry pattern exactly. Committed as b9258f3.",
+          "updated_at": "2025-12-26T04:26:17.451435+00:00"
+        },
+        {
+          "id": "1.2",
+          "title": "Implement Register method",
+          "description": "Add Register(name string, session *Session) method with duplicate name detection. Uses write lock and returns error if name already exists.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Register adds session to map with write lock protection",
+            "Returns error if session name already registered",
+            "Returns nil on successful registration"
+          ]
+        },
+        {
+          "id": "1.3",
+          "title": "Implement Get method",
+          "description": "Add Get(name string) (*Session, bool) method to retrieve sessions by name with read lock protection.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Get returns session and true if found",
+            "Get returns nil and false if not found",
+            "Uses read lock for concurrent access"
+          ]
+        },
+        {
+          "id": "1.4",
+          "title": "Implement List method",
+          "description": "Add List() []string method to return all registered session names.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Returns slice of all registered session names",
+            "Uses read lock for concurrent access",
+            "Returns empty slice when no sessions registered"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Status and Enhanced Operations",
+      "description": "Implement status reporting and additional registry operations",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Create SessionStatus struct",
+          "description": "Define SessionStatus struct to represent session status with Name, ID, IsActive, StartedAt, EndedAt, and Stats fields.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "SessionStatus struct defined with appropriate JSON tags",
+            "Includes Name, ID, IsActive, StartedAt, EndedAt fields",
+            "Includes embedded or referenced SessionStats"
+          ]
+        },
+        {
+          "id": "2.2",
+          "title": "Implement Status method",
+          "description": "Add Status() map[string]SessionStatus method to return status for all registered sessions. Copies sessions before releasing lock to avoid holding lock during stats computation.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Returns map of session name to SessionStatus",
+            "Copies sessions before releasing lock (pattern from Backend Registry)",
+            "Computes stats for each session"
+          ]
+        },
+        {
+          "id": "2.3",
+          "title": "Implement Active method",
+          "description": "Add Active() []*Session method to return all sessions that have not ended (EndedAt is nil). Similar to Backend Registry's Available() method.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Returns slice of sessions where EndedAt is nil",
+            "Properly handles concurrent access",
+            "Returns empty slice when no active sessions"
+          ]
+        },
+        {
+          "id": "2.4",
+          "title": "Implement Unregister method",
+          "description": "Add Unregister(name string) error method to remove a session from the registry. Returns error if session not found.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Removes session from map with write lock",
+            "Returns error if session not found",
+            "Returns nil on successful removal"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Convenience Methods",
+      "description": "Add convenience methods for common operations",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Implement Create method",
+          "description": "Add Create(name, description string) (*Session, error) method that creates a new session and registers it in one operation.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Creates new session using NewSession()",
+            "Registers session with given name",
+            "Returns created session and nil on success",
+            "Returns nil and error if name already exists"
+          ]
+        },
+        {
+          "id": "3.2",
+          "title": "Implement GetOrCreate method",
+          "description": "Add GetOrCreate(name, description string) (*Session, bool) method that returns existing session or creates new one. Returns session and bool indicating if it was created.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Returns existing session and false if found",
+            "Creates and returns new session and true if not found",
+            "Thread-safe implementation"
+          ]
+        },
+        {
+          "id": "3.3",
+          "title": "Implement Count method",
+          "description": "Add Count() int method to return the number of registered sessions.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Returns accurate count of registered sessions",
+            "Uses read lock for thread safety"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Testing",
+      "description": "Comprehensive test coverage for SessionRegistry",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Write unit tests for core methods",
+          "description": "Test NewSessionRegistry, Register, Get, List methods with various scenarios including edge cases.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry_test.go"
+          ],
+          "estimated_effort": "medium",
+          "acceptance_criteria": [
+            "Test NewSessionRegistry returns initialized registry",
+            "Test Register adds session successfully",
+            "Test Register returns error for duplicate names",
+            "Test Get returns correct session",
+            "Test Get returns false for non-existent session",
+            "Test List returns all session names"
+          ]
+        },
+        {
+          "id": "4.2",
+          "title": "Write unit tests for status and enhanced operations",
+          "description": "Test Status, Active, Unregister methods with various scenarios.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry_test.go"
+          ],
+          "estimated_effort": "medium",
+          "acceptance_criteria": [
+            "Test Status returns correct status for all sessions",
+            "Test Active returns only non-ended sessions",
+            "Test Unregister removes session successfully",
+            "Test Unregister returns error for non-existent session"
+          ]
+        },
+        {
+          "id": "4.3",
+          "title": "Write unit tests for convenience methods",
+          "description": "Test Create, GetOrCreate, Count methods.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry_test.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "Test Create creates and registers session",
+            "Test Create returns error for duplicate name",
+            "Test GetOrCreate returns existing session",
+            "Test GetOrCreate creates new session if not found",
+            "Test Count returns accurate count"
+          ]
+        },
+        {
+          "id": "4.4",
+          "title": "Write concurrency tests",
+          "description": "Test thread-safety of registry operations with concurrent access patterns.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry_test.go"
+          ],
+          "estimated_effort": "medium",
+          "acceptance_criteria": [
+            "Test concurrent Register operations",
+            "Test concurrent Get operations",
+            "Test mixed read/write operations",
+            "No data races detected with -race flag"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Integration and Verification",
+      "description": "Final verification and code quality checks",
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Add Go doc comments",
+          "description": "Add comprehensive Go documentation comments to all exported types and methods following Go conventions.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "All exported types have doc comments",
+            "All exported methods have doc comments",
+            "Comments follow Go documentation conventions"
+          ]
+        },
+        {
+          "id": "5.2",
+          "title": "Run tests and verify",
+          "description": "Run all tests with race detector, verify no issues, ensure code compiles cleanly.",
+          "status": "pending",
+          "file_paths": [
+            "Yarn/registry.go",
+            "Yarn/registry_test.go"
+          ],
+          "estimated_effort": "small",
+          "acceptance_criteria": [
+            "All tests pass",
+            "No race conditions detected",
+            "Code compiles without warnings",
+            "go vet passes"
+          ]
+        }
+      ]
+    }
+  ],
+  "final_acceptance": [
+    "SessionRegistry struct with thread-safe map and RWMutex",
+    "Core methods: NewSessionRegistry, Register, Get, List",
+    "Status methods: Status, Active, Unregister",
+    "Convenience methods: Create, GetOrCreate, Count",
+    "Comprehensive unit tests with >80% coverage",
+    "Concurrency tests pass with -race flag",
+    "Pattern mirrors Backend Registry in Weaver/pkg/backend/registry.go"
+  ],
+  "qa_signoff": {
+    "status": "pending",
+    "tests_passed": "",
+    "issues": ""
+  },
+  "metadata": {
+    "total_subtasks": 15,
+    "estimated_total_effort": "medium",
+    "primary_language": "Go",
+    "target_package": "github.com/r3d91ll/yarn",
+    "pattern_reference": "Weaver/pkg/backend/registry.go"
+  },
+  "last_updated": "2025-12-26T04:26:17.451443+00:00"
+}

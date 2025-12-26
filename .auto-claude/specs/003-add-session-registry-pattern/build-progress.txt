@@ -1,0 +1,39 @@
+# Build Progress: Add Session Registry Pattern
+
+## Status: Planning Complete
+
+## Session Log
+
+### 2025-12-26 - Planning Phase
+
+**Completed:**
+- Read and analyzed spec.md
+- Examined existing Backend Registry pattern in Weaver/pkg/backend/registry.go
+- Examined Session implementation in Yarn/session.go
+- Created detailed implementation_plan.json with 5 phases and 15 subtasks
+
+**Key Discoveries:**
+1. Backend Registry Pattern (Weaver/pkg/backend/registry.go):
+   - Uses `map[string]Backend` with `sync.RWMutex`
+   - Core methods: NewRegistry(), Register(), Get(), List()
+   - Status methods: Available(ctx), Status(ctx)
+   - Key pattern: copies map before releasing lock during I/O operations
+
+2. Session Structure (Yarn/session.go):
+   - Has ID, Name, Description, StartedAt, EndedAt fields
+   - Contains Conversations and Measurements slices
+   - Already thread-safe with internal sync.RWMutex
+   - Methods: NewSession(), Stats(), End(), Export()
+
+**Implementation Plan Summary:**
+- Phase 1: Core Registry (struct, Register, Get, List) - 4 subtasks
+- Phase 2: Status & Enhanced Ops (SessionStatus, Status, Active, Unregister) - 4 subtasks
+- Phase 3: Convenience Methods (Create, GetOrCreate, Count) - 3 subtasks
+- Phase 4: Testing (unit tests, concurrency tests) - 4 subtasks
+- Phase 5: Integration & Verification - 2 subtasks
+
+**Target File:** Yarn/registry.go (new file)
+**Test File:** Yarn/registry_test.go (new file)
+
+## Next Steps
+- Begin Phase 1: Implement SessionRegistry struct and constructor

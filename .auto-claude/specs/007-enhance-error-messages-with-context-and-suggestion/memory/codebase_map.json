@@ -39,7 +39,17 @@
       "description": "Added createShellInitError() and createShellRunError() helper functions for structured shell error handling. These functions detect specific error types (permission issues, readline failures, TTY problems, EOF, etc.) and return WeaverErrors with context and actionable suggestions. Shell initialization and run errors now display with color-coded formatting via werrors.Display().",
       "category": "error_handling",
       "discovered_at": "2025-12-26T05:04:39.528910+00:00"
+    },
+    "Weaver/pkg/backend/claudecode.go": {
+      "description": "Enhanced with structured WeaverErrors for Chat() and ChatStream() methods. Added error detection helpers: isNotInstalledError(), isAuthError(), isRateLimitError(), isAPIError(), isNetworkError(). Error types distinguished: BACKEND_NOT_INSTALLED (CLI missing), BACKEND_AUTH_FAILED (auth errors), BACKEND_API_ERROR (API/rate limit), BACKEND_TIMEOUT (deadline exceeded), BACKEND_CONNECTION_FAILED (network), BACKEND_STREAM_FAILED (streaming issues). All errors include context (backend, exit_code, details) and actionable suggestions.",
+      "category": "error-handling",
+      "discovered_at": "2025-12-26T05:24:34.747220+00:00"
+    },
+    "Weaver/pkg/backend/loom.go": {
+      "description": "Enhanced with structured WeaverErrors for Chat() and ChatStream() methods. Added 7 error helper functions: createLoomMarshalError(), createLoomRequestError(), createLoomConnectionError(), createLoomReadError(), createLoomHTTPError(), createLoomUnmarshalError(). Added 6 error detection helpers: isLoomConnectionRefused(), isLoomTimeout(), isLoomDNSError(), isLoomGPUOOM(), isLoomModelNotFound(), isLoomCUDAError(). Error types distinguished: BACKEND_TIMEOUT (context deadline, connection timeout), BACKEND_CONNECTION_FAILED (refused, network issues), BACKEND_API_ERROR (GPU OOM, model not found, CUDA errors, 4xx/5xx), BACKEND_AUTH_FAILED (401/403), NETWORK_DNS_FAILED (hostname resolution), IO_MARSHAL_FAILED (request serialization), IO_UNMARSHAL_FAILED (response parsing), IO_READ_FAILED (response read). All errors include Loom-specific troubleshooting suggestions (server startup, health check commands, GPU memory tips).",
+      "category": "error-handling",
+      "discovered_at": "2025-12-26T05:27:32.884544+00:00"
     }
   },
-  "last_updated": "2025-12-26T05:20:51.554628+00:00"
+  "last_updated": "2025-12-26T05:27:32.884552+00:00"
 }

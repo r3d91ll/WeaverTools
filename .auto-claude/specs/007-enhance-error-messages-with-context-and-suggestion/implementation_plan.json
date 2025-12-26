@@ -241,12 +241,13 @@
           "id": "5.1",
           "title": "Enhance Claude Code backend errors",
           "description": "Update claudecode.go errors to distinguish between: CLI not installed, authentication issues, API errors, timeout, and streaming failures. Add installation/auth suggestions.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 25,
           "files": [
             "Weaver/pkg/backend/claudecode.go"
           ],
-          "notes": ""
+          "notes": "Enhanced Weaver/pkg/backend/claudecode.go with structured WeaverErrors for all error scenarios:\n\n1. CLI not installed (ErrBackendNotInstalled):\n   - Detected via \"executable file not found\", \"no such file or directory\", \"command not found\"\n   - Suggestions: npm/brew installation commands, claude auth login\n\n2. Authentication failures (ErrBackendAuthFailed):\n   - Detected via \"unauthorized\", \"401\", \"api key\", \"authentication\", \"login required\"\n   - Suggestions: claude auth login, verify API key, check Anthropic account\n\n3. Rate limiting (ErrBackendAPIError):\n   - Detected via \"429\", \"rate limit\", \"quota exceeded\", \"too many requests\"\n   - Suggestions: wait and retry, reduce request frequency, check usage limits\n\n4. API errors (ErrBackendAPIError):\n   - Detected via \"400\", \"500\", \"502\", \"503\", \"model not found\", \"invalid request\"\n   - Suggestions: check error details, verify parameters, check Anthropic status\n\n5. Timeout (ErrBackendTimeout):\n   - Detected via context.DeadlineExceeded\n   - Suggestions: shorter prompts, simpler requests, check network\n\n6. Network errors (ErrBackendConnectionFailed):\n   - Detected via \"connection refused\", \"timeout\", \"dns\", \"unreachable\"\n   - Suggestions: check internet, verify firewall settings\n\n7. Streaming failures (ErrBackendStreamFailed):\n   - Created helpers: createStreamSetupError(), createStreamStartError(), createStreamWriteError(), createStreamCommandError()\n   - All provide context (backend, pipe_type, exit_code) and actionable suggestions\n\nAdded 5 error detection helpers and truncateStderr() utility. Committed as 7a433d5.",
+          "updated_at": "2025-12-26T05:24:34.732148+00:00"
         },
         {
           "id": "5.2",
@@ -513,5 +514,5 @@
     "issues": "",
     "tests_passed": ""
   },
-  "last_updated": "2025-12-26T05:20:40.544771+00:00"
+  "last_updated": "2025-12-26T05:24:34.732155+00:00"
 }

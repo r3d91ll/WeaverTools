@@ -129,26 +129,30 @@
           "title": "Add spinner to handleAnalyze",
           "description": "Wrap the geometry analysis in handleAnalyze() with a spinner showing 'Analyzing concept...' with vector count and elapsed time.",
           "estimated_hours": 0.25,
-          "status": "pending",
+          "status": "completed",
           "dependencies": [
             "1.5"
           ],
           "files": [
             "Weaver/pkg/shell/shell.go"
-          ]
+          ],
+          "notes": "Replaced static fmt.Printf in handleAnalyze() with animated spinner. Spinner shows 'Analyzing concept...' with vector count, dimensions, and elapsed time. Uses spin.Fail() on errors and spin.Success() to display completion. Follows same pattern as handleExtract() (subtask 2.2).",
+          "updated_at": "2025-12-26T04:39:55.544192+00:00"
         },
         {
           "id": "2.4",
           "title": "Add spinner to handleCompare",
           "description": "Wrap the bilateral comparison in handleCompare() with a spinner showing 'Comparing concept1 vs concept2...' with elapsed time.",
           "estimated_hours": 0.25,
-          "status": "pending",
+          "status": "completed",
           "dependencies": [
             "1.5"
           ],
           "files": [
             "Weaver/pkg/shell/shell.go"
-          ]
+          ],
+          "notes": "Replaced static fmt.Printf in handleCompare() with animated spinner. Spinner shows 'Comparing concept1 (N) vs concept2 (M)...' with elapsed time. Uses spin.Fail() on errors and spin.Success() to display completion. Follows same pattern as handleAnalyze() (subtask 2.3).",
+          "updated_at": "2025-12-26T04:41:36.764991+00:00"
         },
         {
           "id": "2.5",
@@ -248,5 +252,5 @@
     "passed": false,
     "issues": []
   },
-  "last_updated": "2025-12-26T04:38:02.130600+00:00"
+  "last_updated": "2025-12-26T04:41:36.764997+00:00"
 }

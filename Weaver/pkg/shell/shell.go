@@ -532,31 +532,40 @@ func (s *Shell) handleValidate(ctx context.Context, args []string) error {
 		extractor := concepts.NewExtractor(extractAgent.Backend, tempStore)
 		cfg := concepts.DefaultExtractionConfig(concept, 10) // 10 samples per iteration
 
-		fmt.Printf("Iteration %d: extracting...", i+1)
+		// Start extraction spinner
+		extractSpin := spinner.New(fmt.Sprintf("Iteration %d/%d: Extracting '%s'...", i+1, iterations, concept))
+		extractSpin.Start()
+
 		_, err := extractor.Extract(ctx, cfg)
 		if err != nil {
-			fmt.Printf(" \033[31mfailed: %v\033[0m\n", err)
+			extractSpin.Fail(fmt.Sprintf("Iteration %d: Extraction failed: %v", i+1, err))
 			continue
 		}
 
 		tempConcept, ok := tempStore.Get(concept)
 		if !ok {
-			fmt.Printf(" \033[31mfailed: concept not found after extraction\033[0m\n")
+			extractSpin.Fail(fmt.Sprintf("Iteration %d: Concept not found after extraction", i+1))
 			continue
 		}
+		extractSpin.Success(fmt.Sprintf("Iteration %d: Extracted '%s'", i+1, concept))
+
 		vectors := tempConcept.VectorsAsFloat64()
 
-		fmt.Printf(" analyzing...")
+		// Start analysis spinner
+		analyzeSpin := spinner.New(fmt.Sprintf("Iteration %d/%d: Analyzing %d vectors...", i+1, iterations, len(vectors)))
+		analyzeSpin.Start()
+
 		result, err := s.analysisClient.AnalyzeGeometry(ctx, vectors)
 		if err != nil {
-			fmt.Printf(" \033[31mfailed: %v\033[0m\n", err)
+			analyzeSpin.Fail(fmt.Sprintf("Iteration %d: Analysis failed: %v", i+1, err))
 			continue
 		}
 
 		results = append(results, result)
-		fmt.Printf(" \033[32mdone\033[0m (D_eff=%d, coverage=%.2f)\n",
+		analyzeSpin.Success(fmt.Sprintf("Iteration %d: D_eff=%d, coverage=%.2f",
+			i+1,
 			result.DirectionalCoverage.EffectiveDim,
-			result.DirectionalCoverage.CoverageRatio)
+			result.DirectionalCoverage.CoverageRatio))
 	}
 
 	if len(results) < 2 {

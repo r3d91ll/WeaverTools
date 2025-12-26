@@ -1,9 +1,9 @@
 {
   "discovered_files": {
     "Weaver/pkg/shell/shell.go": {
-      "description": "Line 212 contains the static 'thinking...' text that needs to be replaced with animated spinner. Also lines 342, 389, 457, 508, 519 show other long-running operations that need spinners.",
-      "category": "integration_point",
-      "discovered_at": "2025-12-26T04:24:52.441228+00:00"
+      "description": "handleExtract() now uses spinner.New() + Start() before extraction, spin.Fail() on error, and spin.Success() to show completion. Pattern: create spinner with message, start, run operation, call Success/Fail based on result.",
+      "category": "implementation_pattern",
+      "discovered_at": "2025-12-26T04:38:02.140362+00:00"
     },
     "Weaver/pkg": {
       "description": "Package structure follows pattern of separate directories per feature (analysis, backend, concepts, config, runtime, shell). New spinner package should be at Weaver/pkg/spinner/.",
@@ -16,5 +16,5 @@
       "discovered_at": "2025-12-26T04:35:02.285212+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:35:02.285222+00:00"
+  "last_updated": "2025-12-26T04:38:02.140367+00:00"
 }

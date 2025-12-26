@@ -392,13 +392,18 @@ func (s *Shell) handleAnalyze(ctx context.Context, args []string) error {
 		return fmt.Errorf("need at least 3 samples, have %d", len(vectors))
 	}
 
-	fmt.Printf("\033[33mAnalyzing '%s' (%d vectors, %d dimensions)...\033[0m\n",
-		conceptName, len(vectors), concept.Dimension())
+	// Start analysis spinner
+	spin := spinner.New(fmt.Sprintf("Analyzing '%s' (%d vectors, %d dimensions)...",
+		conceptName, len(vectors), concept.Dimension()))
+	spin.Start()
 
 	result, err := s.analysisClient.AnalyzeGeometry(ctx, vectors)
 	if err != nil {
+		spin.Fail(fmt.Sprintf("Analysis failed for '%s'", conceptName))
 		return err
 	}
+
+	spin.Success(fmt.Sprintf("Analyzed '%s'", conceptName))
 
 	// Display results
 	fmt.Printf("\n\033[36m=== Kakeya Geometry Analysis: %s ===\033[0m\n", conceptName)

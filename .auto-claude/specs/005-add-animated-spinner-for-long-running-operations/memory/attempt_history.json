@@ -71,11 +71,23 @@
         }
       ],
       "status": "completed"
+    },
+    "2.2": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2025-12-25T22:38:22.098637",
+          "approach": "Implemented: Wrap the concept extraction operation in handleExtract() with a spinner showing 'Extracting N sample",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-25T22:22:19.433123",
-    "last_updated": "2025-12-25T22:36:41.889824"
+    "last_updated": "2025-12-25T22:38:22.098640"
   }
 }

@@ -114,6 +114,9 @@ func (r *SessionRegistry) Status() map[string]SessionStatus {
 
 	result := make(map[string]SessionStatus)
 	for name, session := range sessions {
+		if session == nil {
+			continue
+		}
 		result[name] = SessionStatus{
 			Name:      session.Name,
 			ID:        session.ID,
@@ -144,7 +147,7 @@ func (r *SessionRegistry) Active() []*Session {
 
 	result := make([]*Session, 0)
 	for _, session := range sessions {
-		if session.EndedAt == nil {
+		if session != nil && session.EndedAt == nil {
 			result = append(result, session)
 		}
 	}
@@ -206,12 +209,16 @@ func (r *SessionRegistry) Create(name, description string) (*Session, error) {
 // and the existing session's description is preserved.
 //
 // Returns the session and a bool indicating whether a new session was created
-// (true) or an existing session was returned (false).
-//
-// Note: For input validation (rejecting empty names), use Create() instead.
+// (true) or an existing session was returned (false). Returns nil and false
+// if the name is empty or whitespace-only.
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) GetOrCreate(name, description string) (*Session, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, false
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

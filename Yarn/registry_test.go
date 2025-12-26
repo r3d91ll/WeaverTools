@@ -796,21 +796,37 @@ func TestGetOrCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("empty name works", func(t *testing.T) {
+	t.Run("empty name returns nil", func(t *testing.T) {
 		registry := NewSessionRegistry()
 
 		s1, created1 := registry.GetOrCreate("", "first empty")
-		if !created1 {
-			t.Error("expected first GetOrCreate with empty name to create")
+		if s1 != nil {
+			t.Error("expected nil session for empty name")
+		}
+		if created1 {
+			t.Error("expected created=false for empty name")
 		}
 
-		s2, created2 := registry.GetOrCreate("", "second empty")
-		if created2 {
-			t.Error("expected second GetOrCreate with empty name to return existing")
+		// Verify nothing was registered
+		if registry.Count() != 0 {
+			t.Errorf("expected 0 sessions, got %d", registry.Count())
+		}
+	})
+
+	t.Run("whitespace-only name returns nil", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		session, created := registry.GetOrCreate("   ", "whitespace name")
+		if session != nil {
+			t.Error("expected nil session for whitespace-only name")
+		}
+		if created {
+			t.Error("expected created=false for whitespace-only name")
 		}
 
-		if s1 != s2 {
-			t.Error("expected same session instance for repeated empty name")
+		// Verify nothing was registered
+		if registry.Count() != 0 {
+			t.Errorf("expected 0 sessions, got %d", registry.Count())
 		}
 	})
 

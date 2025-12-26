@@ -32,39 +32,45 @@
           "title": "Implement spinner animation loop",
           "description": "Implement the core animation loop using a goroutine with configurable refresh rate, ANSI cursor manipulation for smooth updates, and proper terminal escape sequences for line clearing.",
           "estimated_hours": 0.75,
-          "status": "pending",
+          "status": "completed",
           "dependencies": [
             "1.1"
           ],
           "files": [
             "Weaver/pkg/spinner/spinner.go"
-          ]
+          ],
+          "notes": "Implemented core animation loop with: ANSI escape sequences (hideCursor, showCursor, clearLine, carriageReturn), spin() goroutine with ticker-based refresh rate, render() method for frame output, clearAndWrite()/clearLine() for line manipulation, formatElapsed() for duration display, and cursor control helpers.",
+          "updated_at": "2025-12-26T04:28:56.795452+00:00"
         },
         {
           "id": "1.3",
           "title": "Add elapsed time display",
           "description": "Add elapsed time tracking and display in the spinner message. Support formatting like '(1.2s)' or '(1m 30s)' depending on duration. Make it optional via Config.",
           "estimated_hours": 0.5,
-          "status": "pending",
+          "status": "completed",
           "dependencies": [
             "1.2"
           ],
           "files": [
             "Weaver/pkg/spinner/spinner.go"
-          ]
+          ],
+          "notes": "Elapsed time tracking and display was implemented as part of subtask 1.2. Features include: Config.ShowElapsed bool for optional display, formatElapsed() formatting durations as \"(1.2s)\" or \"(1m 30s)\", Elapsed() method returning duration since start, and render() conditionally including elapsed time based on config. No additional code changes needed.",
+          "updated_at": "2025-12-26T04:30:26.493122+00:00"
         },
         {
           "id": "1.4",
           "title": "Implement Start/Stop/Update methods",
           "description": "Implement thread-safe Start(), Stop(), Update(message) methods with proper synchronization using mutex. Handle edge cases like double-start, stop-before-start.",
           "estimated_hours": 0.5,
-          "status": "pending",
+          "status": "completed",
           "dependencies": [
             "1.2"
           ],
           "files": [
             "Weaver/pkg/spinner/spinner.go"
-          ]
+          ],
+          "notes": "Implemented thread-safe Start(), Stop(), Update(message) methods with proper synchronization using mutex. Start() guards against double-start (no-op if already active). Stop() handles stop-before-start and double-stop (no-op if not active), uses careful lock/unlock pattern to avoid holding mutex while waiting on goroutine termination. Update() allows thread-safe message changes while spinner is running. All methods properly synchronized via sync.Mutex.",
+          "updated_at": "2025-12-26T04:33:26.530098+00:00"
         },
         {
           "id": "1.5",
@@ -236,5 +242,5 @@
     "passed": false,
     "issues": []
   },
-  "last_updated": "2025-12-26T04:27:04.966657+00:00"
+  "last_updated": "2025-12-26T04:33:26.530104+00:00"
 }

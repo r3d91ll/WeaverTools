@@ -21,6 +21,15 @@ const (
 	clearLine = "\r\033[K"
 	// carriageReturn moves cursor to beginning of line.
 	carriageReturn = "\r"
+
+	// Color codes for status indicators.
+	colorGreen = "\033[32m"
+	colorRed   = "\033[31m"
+	colorReset = "\033[0m"
+
+	// Status indicator symbols.
+	symbolSuccess = "✓"
+	symbolFailure = "✗"
 )
 
 // CharSet defines a set of characters for spinner animation.
@@ -317,4 +326,77 @@ func (s *Spinner) Update(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config.Message = message
+}
+
+// Success stops the spinner and displays a success indicator.
+// If message is empty, the current spinner message is used.
+// Displays: ✓ message (elapsed) in green.
+// Thread-safe: uses mutex to protect state changes.
+func (s *Spinner) Success(message string) {
+	s.complete(message, symbolSuccess, colorGreen)
+}
+
+// Fail stops the spinner and displays a failure indicator.
+// If message is empty, the current spinner message is used.
+// Displays: ✗ message (elapsed) in red.
+// Thread-safe: uses mutex to protect state changes.
+func (s *Spinner) Fail(message string) {
+	s.complete(message, symbolFailure, colorRed)
+}
+
+// complete is the internal implementation for Success and Fail.
+// It stops the spinner and displays a final status with the given symbol and color.
+func (s *Spinner) complete(message, symbol, color string) {
+	s.mu.Lock()
+
+	// If not active, just display the final message without stopping anything
+	if !s.active {
+		if message == "" {
+			message = s.config.Message
+		}
+		s.mu.Unlock()
+		// Display final status even if spinner wasn't running
+		s.mu.Lock()
+		output := fmt.Sprintf("%s%s%s %s\n", color, symbol, colorReset, message)
+		fmt.Fprint(s.config.Writer, output)
+		s.mu.Unlock()
+		return
+	}
+
+	// Capture elapsed time and message before stopping
+	elapsed := time.Since(s.startTime)
+	if message == "" {
+		message = s.config.Message
+	}
+	showElapsed := s.config.ShowElapsed
+
+	// Mark as inactive to prevent render() from writing
+	s.active = false
+
+	// Get references to channels before unlocking
+	stopCh := s.stopCh
+	doneCh := s.doneCh
+
+	s.mu.Unlock()
+
+	// Signal the goroutine to stop (non-blocking)
+	close(stopCh)
+
+	// Wait for the goroutine to acknowledge and exit
+	<-doneCh
+
+	// Clean up and display final status
+	s.mu.Lock()
+	s.clearLine()
+	s.showCursorIfEnabled()
+
+	// Build the final output with color
+	var output string
+	if showElapsed {
+		output = fmt.Sprintf("%s%s%s %s %s\n", color, symbol, colorReset, message, s.formatElapsed(elapsed))
+	} else {
+		output = fmt.Sprintf("%s%s%s %s\n", color, symbol, colorReset, message)
+	}
+	fmt.Fprint(s.config.Writer, output)
+	s.mu.Unlock()
 }

@@ -11,10 +11,10 @@
       "discovered_at": "2025-12-26T04:24:52.453018+00:00"
     },
     "Weaver/pkg/spinner/spinner.go": {
-      "description": "New spinner package with core types: CharSet (animation characters), Config (refresh rate, elapsed time, writer options), Spinner struct (mutex-protected, with start/stop channels). Common character sets: Braille, Dots, Line, Arc. Constructor functions New() and NewWithConfig().",
-      "category": "package_structure",
-      "discovered_at": "2025-12-26T04:27:12.196793+00:00"
+      "description": "Elapsed time display is controlled by Config.ShowElapsed (defaults to true). formatElapsed() formats durations as \"(1.2s)\" for < 1 minute or \"(1m 30s)\" for longer durations. Integrated into render() which builds output as \"char message (elapsed)\".",
+      "category": "implementation",
+      "discovered_at": "2025-12-26T04:30:32.774959+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:27:12.196803+00:00"
+  "last_updated": "2025-12-26T04:30:32.774969+00:00"
 }

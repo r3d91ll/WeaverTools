@@ -379,12 +379,12 @@ func (s *Shell) handleAnalyze(ctx context.Context, args []string) error {
 	conceptName := args[0]
 	concept, ok := s.conceptStore.Get(conceptName)
 	if !ok {
-		return fmt.Errorf("concept %q not found (use /extract first)", conceptName)
+		return createConceptNotFoundError(conceptName, "/analyze", s.conceptStore.List())
 	}
 
 	vectors := concept.VectorsAsFloat64()
 	if len(vectors) < 3 {
-		return fmt.Errorf("need at least 3 samples, have %d", len(vectors))
+		return createInsufficientSamplesError(conceptName, "/analyze", len(vectors), 3)
 	}
 
 	fmt.Printf("\033[33mAnalyzing '%s' (%d vectors, %d dimensions)...\033[0m\n",
@@ -392,7 +392,7 @@ func (s *Shell) handleAnalyze(ctx context.Context, args []string) error {
 
 	result, err := s.analysisClient.AnalyzeGeometry(ctx, vectors)
 	if err != nil {
-		return err
+		return createAnalysisError(conceptName, "/analyze", len(vectors), err)
 	}
 
 	// Display results
@@ -438,21 +438,21 @@ func (s *Shell) handleCompare(ctx context.Context, args []string) error {
 
 	concept1, ok := s.conceptStore.Get(name1)
 	if !ok {
-		return fmt.Errorf("concept %q not found", name1)
+		return createConceptNotFoundError(name1, "/compare", s.conceptStore.List())
 	}
 	concept2, ok := s.conceptStore.Get(name2)
 	if !ok {
-		return fmt.Errorf("concept %q not found", name2)
+		return createConceptNotFoundError(name2, "/compare", s.conceptStore.List())
 	}
 
 	vectors1 := concept1.VectorsAsFloat64()
 	vectors2 := concept2.VectorsAsFloat64()
 
 	if len(vectors1) < 3 {
-		return fmt.Errorf("%q needs at least 3 samples, has %d", name1, len(vectors1))
+		return createInsufficientSamplesError(name1, "/compare", len(vectors1), 3)
 	}
 	if len(vectors2) < 3 {
-		return fmt.Errorf("%q needs at least 3 samples, has %d", name2, len(vectors2))
+		return createInsufficientSamplesError(name2, "/compare", len(vectors2), 3)
 	}
 
 	fmt.Printf("\033[33mComparing '%s' (%d) vs '%s' (%d)...\033[0m\n",
@@ -460,7 +460,7 @@ func (s *Shell) handleCompare(ctx context.Context, args []string) error {
 
 	result, err := s.analysisClient.CompareBilateral(ctx, vectors1, vectors2)
 	if err != nil {
-		return err
+		return createComparisonError(name1, name2, len(vectors1), len(vectors2), err)
 	}
 
 	// Display results
@@ -894,6 +894,181 @@ func createExtractionError(concept string, count int, agentName string, cause er
 			WithSuggestion("Check the backend connection with /agents").
 			WithSuggestion("Try with fewer samples: /extract " + concept + " 5").
 			WithSuggestion("If the problem persists, check backend logs for details")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// /analyze and /compare Command Error Helpers
+// -----------------------------------------------------------------------------
+
+// createConceptNotFoundError creates a structured error when a concept is not found in the store.
+func createConceptNotFoundError(conceptName, command string, storedConcepts map[string]int) *werrors.WeaverError {
+	err := werrors.Command(werrors.ErrConceptsNotFound, fmt.Sprintf("concept %q not found", conceptName)).
+		WithContext("command", command).
+		WithContext("concept", conceptName)
+
+	// Add list of available concepts if any exist
+	if len(storedConcepts) > 0 {
+		names := make([]string, 0, len(storedConcepts))
+		for name := range storedConcepts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		err.WithContext("available_concepts", strings.Join(names, ", "))
+		err.WithSuggestion("Available concepts: " + strings.Join(names, ", "))
+	} else {
+		err.WithContext("available_concepts", "none")
+		err.WithSuggestion("No concepts have been extracted yet")
+	}
+
+	err.WithSuggestion("Use /extract to create the concept first: /extract " + conceptName + " 20").
+		WithSuggestion("Use /concepts to list all stored concepts")
+
+	return err
+}
+
+// createInsufficientSamplesError creates a structured error when a concept has too few samples.
+func createInsufficientSamplesError(conceptName, command string, currentCount, requiredCount int) *werrors.WeaverError {
+	return werrors.Command(werrors.ErrConceptsInsufficientSamples,
+		fmt.Sprintf("%q has insufficient samples for analysis", conceptName)).
+		WithContext("command", command).
+		WithContext("concept", conceptName).
+		WithContext("current_samples", fmt.Sprintf("%d", currentCount)).
+		WithContext("required_samples", fmt.Sprintf("%d", requiredCount)).
+		WithSuggestion(fmt.Sprintf("Need at least %d samples, but only have %d", requiredCount, currentCount)).
+		WithSuggestion(fmt.Sprintf("Extract more samples: /extract %s %d", conceptName, requiredCount+5)).
+		WithSuggestion("For reliable analysis, consider extracting 10-20 samples").
+		WithSuggestion("Use /concepts to check current sample counts")
+}
+
+// createAnalysisError creates a structured error when geometry analysis fails.
+func createAnalysisError(conceptName, command string, vectorCount int, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	// Detect specific error types and provide targeted suggestions
+	switch {
+	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "connect:"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisServerUnavailable, "analysis server connection failed").
+			WithContext("command", command).
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("Check if TheLoom analysis server is running").
+			WithSuggestion("Verify the server URL in your configuration").
+			WithSuggestion("Default: http://localhost:8080 - ensure the server is started")
+
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "analysis request timed out").
+			WithContext("command", command).
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("The analysis is taking too long - try with fewer vectors").
+			WithSuggestion("Extract a smaller sample: /extract " + conceptName + " 10 and analyze again").
+			WithSuggestion("Check if the analysis server is overloaded")
+
+	case strings.Contains(errStr, "EOF") || strings.Contains(errStr, "unexpected end"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisInvalidResponse, "analysis server returned incomplete response").
+			WithContext("command", command).
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("The analysis server may have crashed or restarted").
+			WithSuggestion("Check the analysis server logs for errors").
+			WithSuggestion("Try the request again")
+
+	case strings.Contains(errStr, "invalid") || strings.Contains(errStr, "parse") || strings.Contains(errStr, "unmarshal"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisInvalidResponse, "analysis server returned invalid data").
+			WithContext("command", command).
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("The server response could not be parsed").
+			WithSuggestion("Check for version mismatch between Weaver and TheLoom").
+			WithSuggestion("Verify the analysis server is running the correct version")
+
+	case strings.Contains(errStr, "context canceled"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "analysis was interrupted").
+			WithContext("command", command).
+			WithContext("concept", conceptName).
+			WithSuggestion("The request was canceled before completion").
+			WithSuggestion("Try running the command again")
+
+	default:
+		// Generic analysis failure
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "geometry analysis failed").
+			WithContext("command", command).
+			WithContext("concept", conceptName).
+			WithContext("vector_count", fmt.Sprintf("%d", vectorCount)).
+			WithSuggestion("Check the analysis server connection and logs").
+			WithSuggestion("Verify your vectors have the expected dimension").
+			WithSuggestion("Try again with /analyze " + conceptName)
+	}
+}
+
+// createComparisonError creates a structured error when bilateral comparison fails.
+func createComparisonError(concept1, concept2 string, count1, count2 int, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	// Detect specific error types and provide targeted suggestions
+	switch {
+	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "connect:"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisServerUnavailable, "analysis server connection failed").
+			WithContext("command", "/compare").
+			WithContext("concept1", concept1).
+			WithContext("concept2", concept2).
+			WithContext("vectors1", fmt.Sprintf("%d", count1)).
+			WithContext("vectors2", fmt.Sprintf("%d", count2)).
+			WithSuggestion("Check if TheLoom analysis server is running").
+			WithSuggestion("Verify the server URL in your configuration").
+			WithSuggestion("Default: http://localhost:8080 - ensure the server is started")
+
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "comparison request timed out").
+			WithContext("command", "/compare").
+			WithContext("concept1", concept1).
+			WithContext("concept2", concept2).
+			WithContext("vectors1", fmt.Sprintf("%d", count1)).
+			WithContext("vectors2", fmt.Sprintf("%d", count2)).
+			WithSuggestion("The comparison is taking too long - try with fewer vectors").
+			WithSuggestion("Extract smaller samples for both concepts and compare again").
+			WithSuggestion("Check if the analysis server is overloaded")
+
+	case strings.Contains(errStr, "dimension") || strings.Contains(errStr, "mismatch"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "comparison failed: vector dimension mismatch").
+			WithContext("command", "/compare").
+			WithContext("concept1", concept1).
+			WithContext("concept2", concept2).
+			WithContext("vectors1", fmt.Sprintf("%d", count1)).
+			WithContext("vectors2", fmt.Sprintf("%d", count2)).
+			WithSuggestion("Both concepts must have vectors of the same dimension").
+			WithSuggestion("Re-extract both concepts from the same model/backend").
+			WithSuggestion("Use /concepts to check dimensions of stored concepts")
+
+	case strings.Contains(errStr, "EOF") || strings.Contains(errStr, "unexpected end"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisInvalidResponse, "analysis server returned incomplete response").
+			WithContext("command", "/compare").
+			WithContext("concept1", concept1).
+			WithContext("concept2", concept2).
+			WithSuggestion("The analysis server may have crashed or restarted").
+			WithSuggestion("Check the analysis server logs for errors").
+			WithSuggestion("Try the request again")
+
+	case strings.Contains(errStr, "context canceled"):
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "comparison was interrupted").
+			WithContext("command", "/compare").
+			WithContext("concept1", concept1).
+			WithContext("concept2", concept2).
+			WithSuggestion("The request was canceled before completion").
+			WithSuggestion("Try running the command again")
+
+	default:
+		// Generic comparison failure
+		return werrors.CommandWrap(cause, werrors.ErrAnalysisFailed, "bilateral comparison failed").
+			WithContext("command", "/compare").
+			WithContext("concept1", concept1).
+			WithContext("concept2", concept2).
+			WithContext("vectors1", fmt.Sprintf("%d", count1)).
+			WithContext("vectors2", fmt.Sprintf("%d", count2)).
+			WithSuggestion("Check the analysis server connection and logs").
+			WithSuggestion("Verify both concepts have vectors of the same dimension").
+			WithSuggestion("Try again with /compare " + concept1 + " " + concept2)
 	}
 }
 

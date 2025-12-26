@@ -1,0 +1,15 @@
+{
+  "discovered_files": {
+    "Yarn/conversation.go": {
+      "description": "Conversation struct has mu sync.RWMutex for thread safety. Existing MessagesWithHiddenStates() method demonstrates the filter pattern: RLock, iterate messages, append matches, return slice copy.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:23:50.346555+00:00"
+    },
+    "Yarn/message.go": {
+      "description": "Message struct has Role (MessageRole), AgentID (string), Timestamp (time.Time), and Metadata (map[string]any) - all needed for the new filter methods.",
+      "category": "structure",
+      "discovered_at": "2025-12-26T04:23:50.352941+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:23:50.352946+00:00"
+}

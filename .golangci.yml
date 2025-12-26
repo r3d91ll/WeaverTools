@@ -1,5 +1,5 @@
 # golangci-lint configuration for WeaverTools
-# This configuration enables core linters for code quality and bug detection.
+# This configuration enables linters for code quality, security, style, and best practices.
 
 run:
   # Timeout for analysis (set high for CI environments)
@@ -37,6 +37,18 @@ linters:
     - unused       # Finds unused code
     - typecheck    # Parses and type-checks Go code
 
+    # Security linters
+    - gosec        # Inspects source code for security problems
+
+    # Style linters
+    - goimports    # Checks import ordering and formatting
+    - gci          # Controls Go package import order
+    - whitespace   # Checks for unnecessary whitespace
+
+    # Best practices linters
+    - gocritic     # Opinionated linter with many useful checks
+    - revive       # Fast, configurable, extensible linter
+
 linters-settings:
   # gofmt settings
   gofmt:
@@ -63,18 +75,159 @@ linters-settings:
     # Use the latest staticcheck checks
     checks: ["all"]
 
+  # gosec settings - security linter
+  gosec:
+    # Include all rules by default
+    includes: []
+    # Exclude rules that may be too noisy for this codebase
+    excludes: []
+    # Exclude generated files
+    exclude-generated: true
+    # Severity of issues (low, medium, high)
+    severity: medium
+    # Confidence level (low, medium, high)
+    confidence: medium
+
+  # goimports settings
+  goimports:
+    # Put local imports after 3rd-party packages
+    local-prefixes: github.com/r3d91ll
+
+  # gci settings - import ordering
+  gci:
+    sections:
+      - standard                       # Standard library imports
+      - default                        # Third-party imports
+      - prefix(github.com/r3d91ll)     # Local/project imports
+    # Skip generated files
+    skip-generated: true
+    # Custom order for better readability
+    custom-order: true
+
+  # whitespace settings
+  whitespace:
+    # Enforce newlines at end of function bodies
+    multi-func: false
+    # Allow multiple empty lines in function bodies
+    multi-if: false
+
+  # gocritic settings - best practices
+  gocritic:
+    # Enable specific checker groups
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    # Disable experimental checks (can be noisy)
+    disabled-tags:
+      - experimental
+      - opinionated
+    # Settings for specific checkers
+    settings:
+      captLocal:
+        # Check for capitalized local variables
+        paramsOnly: true
+      rangeValCopy:
+        # Size threshold for range value copy warning
+        sizeThreshold: 32
+      hugeParam:
+        # Size threshold for parameter size warning
+        sizeThreshold: 80
+
+  # revive settings - extensible linter
+  revive:
+    # Confidence threshold for issues
+    confidence: 0.8
+    # Severity for issues (warning or error)
+    severity: warning
+    # Enable all rules by default, then configure exceptions
+    enable-all-rules: false
+    rules:
+      # Enable specific rules for best practices
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+        disabled: false
+        arguments:
+          - "checkPrivateReceivers"
+      - name: if-return
+      - name: increment-decrement
+      - name: var-declaration
+      - name: package-comments
+        disabled: true  # Can be noisy, enable when ready
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+        disabled: true  # Can be noisy with interface implementations
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
 issues:
+
   # Maximum issues count per one linter (0 = unlimited)
   max-issues-per-linter: 0
 
   # Maximum count of issues with the same text (0 = unlimited)
   max-same-issues: 0
 
-  # Exclude some checks for test files
+  # Exclude some checks for test files and generated code
   exclude-rules:
+    # Test files - relax some checks
     - path: _test\.go
       linters:
-        - errcheck
+        - errcheck      # Don't require checking all errors in tests
+        - gosec         # Security checks less critical in tests
+        - gocritic      # Relax style in tests
+        - revive        # Relax best practices in tests
+
+    # Generated code patterns - skip entirely
+    - path: _gen\.go$
+      linters:
+        - goimports
+        - gci
+        - whitespace
+        - gocritic
+        - revive
+        - gosec
+
+    - path: \.pb\.go$
+      linters:
+        - goimports
+        - gci
+        - whitespace
+        - gocritic
+        - revive
+        - gosec
+
+    - path: generated
+      linters:
+        - goimports
+        - gci
+        - whitespace
+        - gocritic
+        - revive
+        - gosec
+
+    # Mock files - relax checks
+    - path: mock.*\.go$
+      linters:
+        - gocritic
+        - revive
+
+    - path: _mock\.go$
+      linters:
+        - gocritic
+        - revive
 
 severity:
   # Set the default severity for issues
@@ -88,3 +241,9 @@ severity:
     - linters:
         - staticcheck
       severity: error
+    - linters:
+        - gosec
+      severity: error    # Security issues should be treated as errors
+    - linters:
+        - govet
+      severity: error    # Vet issues often indicate real bugs

@@ -14,7 +14,12 @@
       "description": "Count() method returns number of registered sessions using read lock (RLock/RUnlock) and len(r.sessions). Simple read-only pattern consistent with Get() method.",
       "category": "pattern",
       "discovered_at": "2025-12-26T04:40:37.506647+00:00"
+    },
+    "Yarn/registry_test.go": {
+      "description": "Concurrency tests for SessionRegistry: TestConcurrentRegister, TestConcurrentGet, TestConcurrentList, TestConcurrentMixedOperations, TestConcurrentStress. Uses sync.WaitGroup and channels to coordinate goroutines. Tests verify thread-safety of all registry operations under high concurrency (up to 200 goroutines). Run with -race flag to detect data races.",
+      "category": "testing",
+      "discovered_at": "2025-12-26T04:50:17.011386+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:40:37.506656+00:00"
+  "last_updated": "2025-12-26T04:50:17.011391+00:00"
 }

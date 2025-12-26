@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "004-add-conversation-store-with-persistence",
+  "state": "building",
+  "subtasks": {
+    "completed": 0,
+    "total": 0,
+    "in_progress": 1,
+    "failed": 0
+  },
+  "phase": {
+    "current": "Core ConversationStore Implementation",
+    "id": null,
+    "total": 4
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 2,
+    "started_at": "2025-12-25T22:22:45.443390"
+  },
+  "last_update": "2025-12-25T22:25:46.788432"
+}

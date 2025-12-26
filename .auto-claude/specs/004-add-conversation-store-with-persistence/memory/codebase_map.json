@@ -1,0 +1,10 @@
+{
+  "discovered_files": {
+    "Weaver/pkg/concepts/store.go": {
+      "description": "Concept Store pattern: Thread-safe map with RWMutex, provides Add/Get/List/Clear/ClearAll/Count methods, Save/Load for JSON persistence. Key pattern: copy data under lock, perform I/O outside lock. Returns copies from Get to protect internal state.",
+      "category": "pattern",
+      "discovered_at": "2025-12-26T04:25:15.857017+00:00"
+    }
+  },
+  "last_updated": "2025-12-26T04:25:15.857023+00:00"
+}

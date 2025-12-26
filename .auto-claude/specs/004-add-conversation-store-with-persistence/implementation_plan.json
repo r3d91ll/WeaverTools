@@ -1,0 +1,222 @@
+{
+  "feature": "Add Conversation Store with Persistence",
+  "description": "Create a ConversationStore that mirrors the existing Concept Store pattern - thread-safe storage for conversations with Save/Load file persistence to JSON. This enables research session replay and conversation history analysis across runs.",
+  "created_at": "2025-12-26T04:17:55.903Z",
+  "updated_at": "2025-12-26T04:23:00.000Z",
+  "status": "in_progress",
+  "planStatus": "approved",
+  "workflow_type": "development",
+  "services_involved": ["Yarn"],
+  "spec_file": "spec.md",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Core ConversationStore Implementation",
+      "description": "Implement the ConversationStore struct with thread-safe CRUD operations",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create conversation_store.go with Store struct",
+          "description": "Create the ConversationStore struct with sync.RWMutex and map[string]*Conversation. Include NewConversationStore() constructor.",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "ConversationStore struct with RWMutex and map",
+            "NewConversationStore() returns initialized store",
+            "Package properly imports sync and other required packages"
+          ]
+        },
+        {
+          "id": "1.2",
+          "title": "Implement Add method",
+          "description": "Add method to store a conversation by ID, creating or updating as needed. Should set UpdatedAt timestamp.",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "Add(conversation *Conversation) stores conversation by ID",
+            "Properly acquires write lock",
+            "Updates the UpdatedAt timestamp on the conversation"
+          ]
+        },
+        {
+          "id": "1.3",
+          "title": "Implement Get method",
+          "description": "Get retrieves a conversation by ID, returning a copy to protect internal state (mirroring Concept Store pattern).",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "Get(id string) (*Conversation, bool) returns conversation copy",
+            "Returns false if not found",
+            "Properly acquires read lock",
+            "Returns shallow copy to protect internal state"
+          ]
+        },
+        {
+          "id": "1.4",
+          "title": "Implement List, Count, Clear, and ClearAll methods",
+          "description": "Implement remaining CRUD operations matching Concept Store pattern.",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "List() returns map[string]int with conversation IDs and message counts",
+            "Count() returns number of conversations",
+            "Clear(id string) bool removes specific conversation",
+            "ClearAll() int removes all conversations and returns count"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Persistence Layer",
+      "description": "Implement Save and Load methods for JSON file persistence",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Implement Save method",
+          "description": "Save persists all conversations to a directory, each as a separate JSON file named by ID. Marshal under lock, write outside lock (like Concept Store).",
+          "status": "pending",
+          "estimated_effort": "medium",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "Save(dir string) error persists conversations",
+            "Each conversation saved as {id}.json",
+            "Uses MarshalIndent for readable JSON",
+            "Creates directory if needed",
+            "Copies data under lock, performs I/O outside lock"
+          ]
+        },
+        {
+          "id": "2.2",
+          "title": "Implement Load method",
+          "description": "Load reads conversations from a directory, unmarshaling each JSON file and merging into store.",
+          "status": "pending",
+          "estimated_effort": "medium",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "Load(dir string) error loads conversations from directory",
+            "Gracefully handles non-existent directory",
+            "Skips non-JSON files and directories",
+            "Performs I/O outside lock, updates map under lock",
+            "Returns wrapped errors for debugging"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Testing",
+      "description": "Comprehensive tests for ConversationStore",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Create unit tests for CRUD operations",
+          "description": "Test Add, Get, List, Count, Clear, ClearAll operations including edge cases.",
+          "status": "pending",
+          "estimated_effort": "medium",
+          "files": ["Yarn/conversation_store_test.go"],
+          "acceptance_criteria": [
+            "TestNewConversationStore verifies initialization",
+            "TestAdd tests adding single and multiple conversations",
+            "TestGet tests retrieval and copy semantics",
+            "TestList verifies conversation listing",
+            "TestClear and TestClearAll verify deletion"
+          ]
+        },
+        {
+          "id": "3.2",
+          "title": "Create tests for Save and Load persistence",
+          "description": "Test round-trip persistence with temporary directories.",
+          "status": "pending",
+          "estimated_effort": "medium",
+          "files": ["Yarn/conversation_store_test.go"],
+          "acceptance_criteria": [
+            "TestSave verifies JSON file creation",
+            "TestLoad verifies loading saved conversations",
+            "TestSaveLoad round-trip preserves data",
+            "TestLoadNonExistent handles missing directory",
+            "Uses t.TempDir() for test isolation"
+          ]
+        },
+        {
+          "id": "3.3",
+          "title": "Create concurrency tests",
+          "description": "Test thread-safety with concurrent reads and writes.",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": ["Yarn/conversation_store_test.go"],
+          "acceptance_criteria": [
+            "TestConcurrentAccess uses goroutines for parallel operations",
+            "Verifies no data races with -race flag",
+            "Tests concurrent Add/Get operations"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Documentation and Finalization",
+      "description": "Add documentation and verify all tests pass",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Add comprehensive code documentation",
+          "description": "Ensure all exported types and methods have godoc comments matching project style.",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": ["Yarn/conversation_store.go"],
+          "acceptance_criteria": [
+            "Package-level documentation for Store purpose",
+            "All exported methods have doc comments",
+            "Comments explain thread-safety guarantees",
+            "Comments follow existing project style from conversation.go"
+          ]
+        },
+        {
+          "id": "4.2",
+          "title": "Run tests and verify implementation",
+          "description": "Run all tests including race detector to verify correctness.",
+          "status": "pending",
+          "estimated_effort": "small",
+          "files": [],
+          "acceptance_criteria": [
+            "All tests pass",
+            "No race conditions detected with -race",
+            "go vet and go fmt pass"
+          ]
+        }
+      ]
+    }
+  ],
+  "dependencies": {
+    "1.2": ["1.1"],
+    "1.3": ["1.1"],
+    "1.4": ["1.1"],
+    "2.1": ["1.4"],
+    "2.2": ["1.4"],
+    "3.1": ["1.4"],
+    "3.2": ["2.2"],
+    "3.3": ["1.4"],
+    "4.1": ["2.2"],
+    "4.2": ["3.1", "3.2", "3.3", "4.1"]
+  },
+  "final_acceptance": [
+    "ConversationStore is thread-safe for concurrent access",
+    "Save/Load persists conversations to JSON matching Concept Store pattern",
+    "All tests pass with -race flag",
+    "API mirrors Concept Store for consistency"
+  ],
+  "qa_status": {
+    "status": "pending",
+    "tests_passed": "",
+    "issues": ""
+  }
+}

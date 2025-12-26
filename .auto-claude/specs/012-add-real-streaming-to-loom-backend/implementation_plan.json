@@ -80,7 +80,7 @@
           "id": "2.2",
           "title": "Implement SSE parser",
           "description": "Add bufio.Scanner-based SSE parser following ClaudeCode pattern. Parse event types and JSON data payloads.",
-          "status": "pending",
+          "status": "completed",
           "files": [
             "Weaver/pkg/backend/loom.go"
           ],
@@ -89,13 +89,15 @@
             "Handles multi-line data fields",
             "Skips empty lines and comments"
           ],
-          "estimated_complexity": "medium"
+          "estimated_complexity": "medium",
+          "notes": "Implemented SSE parser following ClaudeCode pattern. Added sseEvent struct and parseSSE function using bufio.Scanner. Parser correctly handles: event: and data: lines, multi-line data fields (joined with newlines), empty lines (event separator), comment lines (: prefix), and context cancellation. Commit: 8be000e",
+          "updated_at": "2025-12-26T02:18:18.058860+00:00"
         },
         {
           "id": "2.3",
           "title": "Implement ChatStream method",
           "description": "Rewrite ChatStream to make streaming HTTP request and parse SSE events, converting them to StreamChunk channel",
-          "status": "pending",
+          "status": "completed",
           "files": [
             "Weaver/pkg/backend/loom.go"
           ],
@@ -107,7 +109,9 @@
             "Handles errors gracefully",
             "Respects context cancellation"
           ],
-          "estimated_complexity": "medium"
+          "estimated_complexity": "medium",
+          "notes": "Implemented real streaming in ChatStream method. Rewrote to use buildStreamingRequest for HTTP POST with stream=true, parseSSE for SSE event parsing, and converts content_block_delta/message_delta events to StreamChunk channel. Added SSE event payload structs (loomSSEEvent, loomContentDelta, loomMessageDelta, loomErrorEvent) for parsing JSON payloads. Handles errors gracefully and respects context cancellation. Commit: e7c66eb",
+          "updated_at": "2025-12-26T02:21:27.790523+00:00"
         },
         {
           "id": "2.4",
@@ -207,6 +211,6 @@
     "tests_passed": null,
     "issues": null
   },
-  "last_updated": "2025-12-26T02:15:56.105282+00:00",
+  "last_updated": "2025-12-26T02:21:27.790528+00:00",
   "recoveryNote": "Task recovered from stuck state at 2025-12-26T02:09:44.408Z"
 }

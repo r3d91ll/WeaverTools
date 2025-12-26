@@ -151,6 +151,26 @@ type loomMessageDelta struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
+	// Metadata contains generation statistics (optional).
+	Metadata *loomMessageMetadata `json:"metadata,omitempty"`
+	// HiddenState contains the final hidden state vector if requested (optional).
+	HiddenState *loomHiddenState `json:"hidden_state,omitempty"`
+}
+
+// loomMessageMetadata contains generation statistics from The Loom server.
+type loomMessageMetadata struct {
+	Model           string  `json:"model"`
+	LatencyMS       float64 `json:"latency_ms"`
+	TokensPerSecond float64 `json:"tokens_per_second"`
+}
+
+// loomHiddenState represents the hidden state returned in streaming responses.
+// This is the "boundary object" - the geometric representation of meaning.
+type loomHiddenState struct {
+	Final []float32 `json:"final"` // Final layer hidden state vector
+	Shape []int     `json:"shape"` // Tensor shape [batch, hidden_dim]
+	Layer int       `json:"layer"` // Layer index (-1 = last)
+	DType string    `json:"dtype"` // Data type (e.g., "float32")
 }
 
 // loomErrorEvent represents an error event payload.

@@ -4,7 +4,12 @@
       "description": "StreamingChatCompletionRequest model added alongside ChatCompletionRequest. Both models support the same fields, but StreamingChatCompletionRequest defaults stream=True. Use from_chat_request() classmethod to convert between them.",
       "category": "model",
       "discovered_at": "2025-12-26T02:13:49.049388+00:00"
+    },
+    "Weaver/pkg/backend/loom.go": {
+      "description": "ChatStream now uses real SSE streaming. It uses buildStreamingRequest() to create HTTP POST with stream=true, parseSSE() to parse SSE events from response body, and converts content_block_delta events to StreamChunk{Content: text} and message_delta events to StreamChunk{Done: true}. The error event type sends errors to the error channel.",
+      "category": "streaming",
+      "discovered_at": "2025-12-26T02:21:33.733861+00:00"
     }
   },
-  "last_updated": "2025-12-26T02:13:49.049394+00:00"
+  "last_updated": "2025-12-26T02:21:33.733871+00:00"
 }

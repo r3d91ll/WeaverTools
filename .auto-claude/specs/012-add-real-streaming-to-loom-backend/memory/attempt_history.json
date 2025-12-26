@@ -23,11 +23,35 @@
         }
       ],
       "status": "completed"
+    },
+    "2.2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2025-12-25T20:18:26.750244",
+          "approach": "Implemented: Add bufio.Scanner-based SSE parser following ClaudeCode pattern. Parse event types and JSON data pay",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "2.3": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2025-12-25T20:21:44.516616",
+          "approach": "Implemented: Rewrite ChatStream to make streaming HTTP request and parse SSE events, converting them to StreamChu",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-25T20:09:44.795952",
-    "last_updated": "2025-12-25T20:16:10.911602"
+    "last_updated": "2025-12-25T20:21:44.516619"
   }
 }

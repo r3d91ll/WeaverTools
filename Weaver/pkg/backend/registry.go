@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	werrors "github.com/northwood-labs/weaver/pkg/errors"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 )
 
 // Registry manages available backends.

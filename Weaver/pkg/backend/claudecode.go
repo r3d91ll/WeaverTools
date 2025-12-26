@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	werrors "github.com/northwood-labs/weaver/pkg/errors"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 )
 
 // ClaudeCode wraps the Claude Code CLI as a backend.

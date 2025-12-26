@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	werrors "github.com/northwood-labs/weaver/pkg/errors"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 	"github.com/r3d91ll/weaver/pkg/backend"
 	"github.com/r3d91ll/yarn"
 )

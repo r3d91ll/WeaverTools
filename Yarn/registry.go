@@ -103,3 +103,15 @@ func (r *SessionRegistry) Active() []*Session {
 	}
 	return result
 }
+
+// Unregister removes a session from the registry.
+func (r *SessionRegistry) Unregister(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.sessions[name]; !exists {
+		return fmt.Errorf("session %q not registered", name)
+	}
+	delete(r.sessions, name)
+	return nil
+}

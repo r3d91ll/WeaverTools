@@ -323,13 +323,13 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 	if len(args) > 1 {
 		n, err := strconv.Atoi(args[1])
 		if err != nil {
-			return fmt.Errorf("invalid count: %s", args[1])
+			return createInvalidCountError(args[1], concept)
 		}
 		if n <= 0 {
-			return fmt.Errorf("count must be positive")
+			return createCountOutOfRangeError(args[1], concept, "must be positive (1-100)")
 		}
 		if n > 100 {
-			return fmt.Errorf("count exceeds maximum (100)")
+			return createCountOutOfRangeError(args[1], concept, "exceeds maximum of 100")
 		}
 		count = n
 	}
@@ -337,7 +337,7 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 	// Find an agent with hidden state support
 	extractAgent, err := s.findHiddenStateAgent(ctx)
 	if err != nil {
-		return err
+		return createNoHiddenStateAgentError(s.agents.List())
 	}
 
 	fmt.Printf("\033[33mExtracting %d samples for '%s' using %s...\033[0m\n", count, concept, extractAgent.Name())
@@ -348,7 +348,7 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 
 	result, err := extractor.Extract(ctx, cfg)
 	if err != nil {
-		return err
+		return createExtractionError(concept, count, extractAgent.Name(), err)
 	}
 
 	// Display results
@@ -787,6 +787,113 @@ func createChatError(agentName, backendName string, cause error) *werrors.Weaver
 			WithSuggestion("Check the backend connection with /agents").
 			WithSuggestion("Try the request again").
 			WithSuggestion("If the problem persists, check the backend logs")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// /extract Command Error Helpers
+// -----------------------------------------------------------------------------
+
+// createInvalidCountError creates a structured error when the count argument is not a valid number.
+func createInvalidCountError(invalidValue, concept string) *werrors.WeaverError {
+	return werrors.Command(werrors.ErrCommandInvalidArg, "invalid count value: not a number").
+		WithContext("command", "/extract").
+		WithContext("argument", "count").
+		WithContext("invalid_value", invalidValue).
+		WithContext("concept", concept).
+		WithContext("valid_range", "1-100").
+		WithSuggestion("Count must be a positive integer between 1 and 100").
+		WithSuggestion("Example: /extract " + concept + " 20").
+		WithSuggestion("Default count is 10 if not specified: /extract " + concept)
+}
+
+// createCountOutOfRangeError creates a structured error when the count is out of valid range.
+func createCountOutOfRangeError(value, concept, reason string) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrValidationOutOfRange, "count "+reason).
+		WithContext("command", "/extract").
+		WithContext("argument", "count").
+		WithContext("value", value).
+		WithContext("concept", concept).
+		WithContext("valid_range", "1-100").
+		WithSuggestion("Count must be between 1 and 100").
+		WithSuggestion("Example: /extract " + concept + " 20").
+		WithSuggestion("Recommended: 10-30 samples for quick tests, 50-100 for comprehensive analysis")
+}
+
+// createNoHiddenStateAgentError creates a structured error when no agent supports hidden states.
+func createNoHiddenStateAgentError(availableAgents []string) *werrors.WeaverError {
+	err := werrors.Agent(werrors.ErrAgentNoHiddenState, "no agent with hidden state support available")
+
+	// Add context about available agents
+	if len(availableAgents) > 0 {
+		sort.Strings(availableAgents)
+		err.WithContext("available_agents", strings.Join(availableAgents, ", "))
+	}
+
+	err.WithContext("command", "/extract").
+		WithContext("required_capability", "hidden_states").
+		WithSuggestion("Hidden state extraction requires a backend that returns embedding vectors").
+		WithSuggestion("The Loom backend with local models typically supports hidden states").
+		WithSuggestion("Use /agents to check which agents support hidden states (look for [hidden states] indicator)").
+		WithSuggestion("Configure an agent with a Loom backend that has hidden state support enabled")
+
+	return err
+}
+
+// createExtractionError creates a structured error when concept extraction fails.
+func createExtractionError(concept string, count int, agentName string, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	// Detect specific error types and provide targeted suggestions
+	switch {
+	case strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "connect:"):
+		return werrors.CommandWrap(cause, werrors.ErrConceptsExtractionFailed, "extraction failed: backend connection error").
+			WithContext("command", "/extract").
+			WithContext("concept", concept).
+			WithContext("count", fmt.Sprintf("%d", count)).
+			WithContext("agent", agentName).
+			WithSuggestion("Check if the backend service is running").
+			WithSuggestion("Verify the backend URL in your configuration").
+			WithSuggestion("Use /agents to check agent status")
+
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"):
+		return werrors.CommandWrap(cause, werrors.ErrConceptsExtractionFailed, "extraction failed: request timed out").
+			WithContext("command", "/extract").
+			WithContext("concept", concept).
+			WithContext("count", fmt.Sprintf("%d", count)).
+			WithContext("agent", agentName).
+			WithSuggestion("Try a smaller sample count (e.g., /extract " + concept + " 5)").
+			WithSuggestion("The backend may be overloaded - try again later").
+			WithSuggestion("Check backend logs for performance issues")
+
+	case strings.Contains(errStr, "hidden state") || strings.Contains(errStr, "embedding"):
+		return werrors.CommandWrap(cause, werrors.ErrConceptsExtractionFailed, "extraction failed: hidden states not available").
+			WithContext("command", "/extract").
+			WithContext("concept", concept).
+			WithContext("agent", agentName).
+			WithSuggestion("The backend may not support hidden state extraction").
+			WithSuggestion("Verify the model supports returning embeddings/hidden states").
+			WithSuggestion("Try a different agent with /agents")
+
+	case strings.Contains(errStr, "context canceled"):
+		return werrors.CommandWrap(cause, werrors.ErrConceptsExtractionFailed, "extraction was interrupted").
+			WithContext("command", "/extract").
+			WithContext("concept", concept).
+			WithContext("count", fmt.Sprintf("%d", count)).
+			WithContext("agent", agentName).
+			WithSuggestion("The extraction was canceled before completion").
+			WithSuggestion("Try running /extract again")
+
+	default:
+		// Generic extraction failure
+		return werrors.CommandWrap(cause, werrors.ErrConceptsExtractionFailed, "concept extraction failed").
+			WithContext("command", "/extract").
+			WithContext("concept", concept).
+			WithContext("count", fmt.Sprintf("%d", count)).
+			WithContext("agent", agentName).
+			WithSuggestion("Check the backend connection with /agents").
+			WithSuggestion("Try with fewer samples: /extract " + concept + " 5").
+			WithSuggestion("If the problem persists, check backend logs for details")
 	}
 }
 

@@ -36,10 +36,10 @@
       "discovered_at": "2025-12-26T04:52:53.014997+00:00"
     },
     "Weaver/cmd/weaver/main.go": {
-      "description": "Added createBackendUnavailableError() helper function that creates structured WeaverErrors for backend unavailability. Provides context-aware suggestions for Claude Code (CLI installation, authentication) and Loom (server status, health check URL). Replaces simple fmt.Println-based error output with color-coded structured error display via werrors.Display().",
+      "description": "Added createShellInitError() and createShellRunError() helper functions for structured shell error handling. These functions detect specific error types (permission issues, readline failures, TTY problems, EOF, etc.) and return WeaverErrors with context and actionable suggestions. Shell initialization and run errors now display with color-coded formatting via werrors.Display().",
       "category": "error_handling",
-      "discovered_at": "2025-12-26T04:58:19.558323+00:00"
+      "discovered_at": "2025-12-26T05:04:39.528910+00:00"
     }
   },
-  "last_updated": "2025-12-26T04:58:19.558330+00:00"
+  "last_updated": "2025-12-26T05:04:39.528921+00:00"
 }

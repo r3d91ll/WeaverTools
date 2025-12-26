@@ -119,11 +119,47 @@
         }
       ],
       "status": "completed"
+    },
+    "3.4": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2025-12-25T23:04:51.469212",
+          "approach": "Implemented: Enhance shell initialization errors with context about readline setup, history file permissions, etc",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "4.1": {
+      "attempts": [
+        {
+          "session": 13,
+          "timestamp": "2025-12-25T23:07:08.019743",
+          "approach": "Implemented: Replace 'Error: %v' in Run() with errors.Display() that properly formats WeaverError types and falls",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "4.2": {
+      "attempts": [
+        {
+          "session": 14,
+          "timestamp": "2025-12-25T23:10:22.055413",
+          "approach": "Implemented: Update handleMessage() errors for @agent prefix parsing, agent not found, and chat failures with con",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
     }
   },
   "stuck_subtasks": [],
   "metadata": {
     "created_at": "2025-12-25T22:22:20.221731",
-    "last_updated": "2025-12-25T23:01:35.283934"
+    "last_updated": "2025-12-25T23:10:22.055417"
   }
 }

@@ -153,12 +153,13 @@
           "id": "3.4",
           "title": "Update shell creation and run errors",
           "description": "Enhance shell initialization errors with context about readline setup, history file permissions, etc.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 15,
           "files": [
             "Weaver/cmd/weaver/main.go"
           ],
-          "notes": ""
+          "notes": "Added createShellInitError() and createShellRunError() helper functions in Weaver/cmd/weaver/main.go that transform generic shell error messages into structured WeaverErrors with rich context and actionable suggestions.\n\nShell initialization errors (createShellInitError) now detect and provide guidance for:\n- History file permission issues \u2192 ErrShellHistoryFailed with chmod/ownership fix suggestions\n- History directory not found \u2192 ErrShellHistoryFailed with mkdir suggestions  \n- Disk full/quota exceeded \u2192 ErrShellHistoryFailed with cleanup suggestions\n- Readline/terminal setup issues \u2192 ErrShellReadlineFailed with TERM env and TTY requirements\n- Invalid terminal or not a TTY \u2192 ErrShellReadlineFailed with Docker -it flag, script guidance\n- Signal interruption during init \u2192 ErrShellInitFailed with restart guidance\n\nShell runtime errors (createShellRunError) now detect and provide guidance for:\n- EOF/closed input stream \u2192 ErrShellReadlineFailed with non-interactive usage tips\n- Signal interruption \u2192 ErrShellInitFailed with graceful exit suggestions (/quit, /exit)\n- Readline errors during execution \u2192 ErrShellReadlineFailed with terminal config checks\n- Terminal I/O errors \u2192 ErrShellReadlineFailed with reconnection guidance\n- Generic errors \u2192 ErrShellInitFailed with restart and reporting suggestions\n\nUpdated main.go lines 241-248 to use werrors.Display() instead of fmt.Printf for structured, color-coded error output. Committed as 6c3bc2d.",
+          "updated_at": "2025-12-26T05:04:33.210403+00:00"
         }
       ]
     },
@@ -172,23 +173,25 @@
           "id": "4.1",
           "title": "Update shell error display loop",
           "description": "Replace 'Error: %v' in Run() with errors.Display() that properly formats WeaverError types and falls back gracefully for standard errors.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 15,
           "files": [
             "Weaver/pkg/shell/shell.go"
           ],
-          "notes": ""
+          "notes": "Updated shell.go Run() method to use structured error formatting:\n\n1. Added werrors import for pkg/errors (line 16)\n2. Replaced fmt.Printf(\"Error: %v\\n\", err) with werrors.Display(err) for command errors (line 110)\n3. Replaced fmt.Printf(\"Error: %v\\n\", err) with werrors.Display(err) for message handling errors (line 117)\n\nThe werrors.Display() function from the errors package:\n- Properly formats WeaverError types with color-coded output (red for error code, yellow for context, cyan for suggestions)\n- Falls back gracefully to \"Error: message\" for standard errors\n- Detects TTY automatically to enable/disable ANSI colors\n\nCommitted as 7e00720.",
+          "updated_at": "2025-12-26T05:06:55.137239+00:00"
         },
         {
           "id": "4.2",
           "title": "Enhance message handling errors",
           "description": "Update handleMessage() errors for @agent prefix parsing, agent not found, and chat failures with context-aware suggestions.",
-          "status": "pending",
+          "status": "completed",
           "estimated_minutes": 20,
           "files": [
             "Weaver/pkg/shell/shell.go"
           ],
-          "notes": ""
+          "notes": "Updated handleMessage() in Weaver/pkg/shell/shell.go with structured WeaverErrors for three error cases:\n\n1. createMissingMessageError(): When no message follows @agent prefix\n   - Uses COMMAND_INVALID_SYNTAX code\n   - Context: agent name, attempted input\n   - Suggestions: usage example, /agents command reference\n\n2. createAgentNotFoundError(): When specified agent doesn't exist\n   - Uses AgentNotFound() constructor from werrors\n   - Context: agent name, available agents list\n   - Suggestions: available agents, typo check, /agents command\n\n3. createChatError(): When agent.Chat() fails\n   - Detects 7 specific error types:\n     * Connection refused \u2192 backend running suggestions\n     * Timeout \u2192 simplify request suggestions\n     * Auth errors (401, unauthorized) \u2192 credential suggestions\n     * Rate limits (429) \u2192 wait and retry suggestions\n     * Model not found \u2192 config check suggestions\n     * Context canceled \u2192 retry suggestions\n     * Default \u2192 generic troubleshooting\n   - Context: agent name, backend name\n   - Wraps original error with cause chain\n\nAll errors display with color-coded formatting via werrors.Display(). Committed as 9ee80ae.",
+          "updated_at": "2025-12-26T05:10:12.597888+00:00"
         },
         {
           "id": "4.3",
@@ -507,5 +510,5 @@
     "issues": "",
     "tests_passed": ""
   },
-  "last_updated": "2025-12-26T05:01:20.154800+00:00"
+  "last_updated": "2025-12-26T05:10:12.597893+00:00"
 }

@@ -1,12 +1,14 @@
 package backend
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -113,6 +115,87 @@ type loomResponse struct {
 		DType string    `json:"dtype"`
 	} `json:"hidden_state,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// sseEvent represents a parsed Server-Sent Event from The Loom server.
+type sseEvent struct {
+	Event string // Event type (e.g., "content_block_delta", "message_delta", "error")
+	Data  string // JSON data payload
+}
+
+// parseSSE parses Server-Sent Events from a response body using bufio.Scanner.
+// It follows the SSE spec: event: and data: lines, empty lines separate events,
+// lines starting with : are comments.
+//
+// The returned channel emits parsed SSE events as they arrive. The channel is
+// closed when the stream ends or when the context is canceled. Any parse errors
+// are logged but do not stop parsing.
+func parseSSE(ctx context.Context, body io.Reader) <-chan sseEvent {
+	events := make(chan sseEvent, 100)
+
+	go func() {
+		defer close(events)
+
+		scanner := bufio.NewScanner(body)
+		var currentEvent string
+		var dataLines []string
+
+		for scanner.Scan() {
+			// Check for context cancellation
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			line := scanner.Text()
+
+			// Empty line signals end of event
+			if line == "" {
+				if len(dataLines) > 0 {
+					// Combine multi-line data fields with newlines
+					data := strings.Join(dataLines, "\n")
+					events <- sseEvent{
+						Event: currentEvent,
+						Data:  data,
+					}
+				}
+				// Reset for next event
+				currentEvent = ""
+				dataLines = nil
+				continue
+			}
+
+			// Skip comment lines (start with :)
+			if strings.HasPrefix(line, ":") {
+				continue
+			}
+
+			// Parse field: value format
+			if strings.HasPrefix(line, "event:") {
+				currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			} else if strings.HasPrefix(line, "data:") {
+				data := strings.TrimPrefix(line, "data:")
+				// Only trim the single leading space after "data:" per SSE spec
+				if len(data) > 0 && data[0] == ' ' {
+					data = data[1:]
+				}
+				dataLines = append(dataLines, data)
+			}
+			// Other fields like id: and retry: are ignored
+		}
+
+		// Handle any remaining event at end of stream
+		if len(dataLines) > 0 {
+			data := strings.Join(dataLines, "\n")
+			events <- sseEvent{
+				Event: currentEvent,
+				Data:  data,
+			}
+		}
+	}()
+
+	return events
 }
 
 // buildStreamingRequest creates an HTTP request for streaming chat completions.

@@ -1,0 +1,212 @@
+{
+  "feature": "Add Real Streaming to Loom Backend",
+  "description": "Implement true streaming support in the Loom backend ChatStream method using Server-Sent Events (SSE), replacing the current stub that buffers the entire response.",
+  "created_at": "2025-12-25T18:34:54.737Z",
+  "updated_at": "2025-12-26T02:09:44.408Z",
+  "status": "in_progress",
+  "planStatus": "in_progress",
+  "workflow_type": "development",
+  "services_involved": [
+    "Weaver",
+    "TheLoom"
+  ],
+  "spec_file": "spec.md",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Server-side Streaming Support",
+      "description": "Add SSE streaming support to The Loom's /v1/chat/completions endpoint",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Add streaming chat completion endpoint",
+          "description": "Modify /v1/chat/completions to support stream=true by returning SSE responses. Follow the pattern established by /generate/stream endpoint.",
+          "status": "completed",
+          "files": [
+            "TheLoom/the-loom/src/transport/http.py"
+          ],
+          "acceptance_criteria": [
+            "Endpoint returns SSE stream when stream=true",
+            "Emits 'content_block_delta' events with text deltas",
+            "Emits 'message_delta' event at completion",
+            "Error events are properly handled"
+          ],
+          "estimated_complexity": "medium",
+          "notes": "Implemented SSE streaming for /v1/chat/completions endpoint. Added _stream_chat_completions helper function that yields content_block_delta events for tokens and message_delta event at completion. Updated test to verify streaming functionality. Commit: 70acebd",
+          "updated_at": "2025-12-26T00:55:42.986414+00:00"
+        },
+        {
+          "id": "1.2",
+          "title": "Add streaming chat completion request model",
+          "description": "Create StreamingChatCompletionRequest model with stream parameter and ensure proper validation",
+          "status": "completed",
+          "files": [
+            "TheLoom/the-loom/src/transport/http.py"
+          ],
+          "acceptance_criteria": [
+            "Request model supports all chat completion fields plus streaming options",
+            "Validation works correctly for streaming requests"
+          ],
+          "estimated_complexity": "low",
+          "notes": "Created StreamingChatCompletionRequest model with stream=True default. Updated ChatCompletionRequest.stream field description. Added from_chat_request() classmethod for conversion. Added comprehensive validation tests for streaming requests including field validation, temperature range checks, and empty messages rejection. Commit: 164954b",
+          "updated_at": "2025-12-26T02:13:40.850149+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Client-side Streaming Implementation",
+      "description": "Implement SSE streaming consumption in the Loom Go backend",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "2.1",
+          "title": "Add streaming request builder",
+          "description": "Add helper function to build streaming chat completion requests with stream=true flag",
+          "status": "completed",
+          "files": [
+            "Weaver/pkg/backend/loom.go"
+          ],
+          "acceptance_criteria": [
+            "Request includes stream=true in JSON body",
+            "Request headers include Accept: text/event-stream"
+          ],
+          "estimated_complexity": "low",
+          "notes": "Added loomStreamingRequest struct with Stream field and buildStreamingRequest() helper method. The helper creates HTTP requests with stream=true in JSON body and Accept: text/event-stream header. Commit: bd5514c",
+          "updated_at": "2025-12-26T02:15:56.105275+00:00"
+        },
+        {
+          "id": "2.2",
+          "title": "Implement SSE parser",
+          "description": "Add bufio.Scanner-based SSE parser following ClaudeCode pattern. Parse event types and JSON data payloads.",
+          "status": "pending",
+          "files": [
+            "Weaver/pkg/backend/loom.go"
+          ],
+          "acceptance_criteria": [
+            "Parses event: and data: lines correctly",
+            "Handles multi-line data fields",
+            "Skips empty lines and comments"
+          ],
+          "estimated_complexity": "medium"
+        },
+        {
+          "id": "2.3",
+          "title": "Implement ChatStream method",
+          "description": "Rewrite ChatStream to make streaming HTTP request and parse SSE events, converting them to StreamChunk channel",
+          "status": "pending",
+          "files": [
+            "Weaver/pkg/backend/loom.go"
+          ],
+          "acceptance_criteria": [
+            "Makes POST request with stream=true",
+            "Reads SSE stream using bufio.Scanner",
+            "Parses content_block_delta events for text",
+            "Parses message_delta events for completion",
+            "Handles errors gracefully",
+            "Respects context cancellation"
+          ],
+          "estimated_complexity": "medium"
+        },
+        {
+          "id": "2.4",
+          "title": "Add streaming response types",
+          "description": "Add Go structs to parse SSE JSON event payloads matching server format",
+          "status": "pending",
+          "files": [
+            "Weaver/pkg/backend/loom.go"
+          ],
+          "acceptance_criteria": [
+            "Structs match server SSE event JSON format",
+            "Handles optional fields correctly"
+          ],
+          "estimated_complexity": "low"
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Testing and Verification",
+      "description": "Add tests and verify integration works end-to-end",
+      "status": "pending",
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Add unit tests for SSE parser",
+          "description": "Create tests for the SSE parsing logic with various edge cases",
+          "status": "pending",
+          "files": [
+            "Weaver/pkg/backend/loom_test.go"
+          ],
+          "acceptance_criteria": [
+            "Tests parse valid SSE events",
+            "Tests handle malformed events gracefully",
+            "Tests handle empty streams"
+          ],
+          "estimated_complexity": "medium"
+        },
+        {
+          "id": "3.2",
+          "title": "Add Python streaming tests",
+          "description": "Add tests for the new streaming chat completion endpoint",
+          "status": "pending",
+          "files": [
+            "TheLoom/the-loom/tests/test_server.py"
+          ],
+          "acceptance_criteria": [
+            "Tests verify SSE format",
+            "Tests verify token streaming works",
+            "Tests verify completion events"
+          ],
+          "estimated_complexity": "medium"
+        },
+        {
+          "id": "3.3",
+          "title": "Verify streaming works end-to-end",
+          "description": "Manual or integration test to verify Weaver can stream from a running Loom server",
+          "status": "pending",
+          "files": [],
+          "acceptance_criteria": [
+            "Streaming works with real Loom server",
+            "Tokens appear incrementally, not all at once"
+          ],
+          "estimated_complexity": "low"
+        }
+      ]
+    }
+  ],
+  "critical_paths": [
+    "Server streaming must be implemented before client can consume it",
+    "SSE parser must correctly handle Loom's specific event format"
+  ],
+  "dependencies": {
+    "external": [],
+    "internal": [
+      "Phase 2 depends on Phase 1 completion"
+    ]
+  },
+  "risks": [
+    {
+      "description": "SSE format differences between server and client expectations",
+      "mitigation": "Use consistent event naming matching OpenAI/Claude conventions"
+    },
+    {
+      "description": "Connection handling edge cases (timeouts, disconnects)",
+      "mitigation": "Follow established patterns from ClaudeCode backend"
+    }
+  ],
+  "final_acceptance": [
+    "Loom backend streams tokens incrementally instead of buffering",
+    "Server-side streaming endpoint works correctly",
+    "Unit tests pass for both Go and Python code",
+    "Integration verified with real Loom server"
+  ],
+  "qa_signoff": {
+    "status": "pending",
+    "tests_passed": null,
+    "issues": null
+  },
+  "last_updated": "2025-12-26T02:15:56.105282+00:00",
+  "recoveryNote": "Task recovered from stuck state at 2025-12-26T02:09:44.408Z"
+}

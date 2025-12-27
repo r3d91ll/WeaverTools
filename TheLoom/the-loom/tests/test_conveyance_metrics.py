@@ -474,6 +474,92 @@ class TestBetaEdgeCases:
         # With 2 samples, d_max = 1, so Beta = 1.0
         assert beta == 1.0, f"Beta should be 1.0 for 2 samples (d_max=1), got {beta}"
 
+    def test_beta_perfect_collapse_identical_embeddings(self) -> None:
+        """Test Beta = 1 for identical embeddings with arbitrary values.
+
+        Edge case: All embeddings are identical (not just ones), representing
+        complete semantic convergence where all agents say the same thing.
+        """
+        np.random.seed(42)
+        # Create a random template and replicate it
+        template = np.random.randn(1, 256)
+        identical = np.tile(template, (100, 1))
+        beta = calculate_beta(identical)
+
+        assert beta == 1.0, f"Beta should be 1.0 for identical embeddings, got {beta}"
+
+    def test_beta_perfect_collapse_detailed(self) -> None:
+        """Test detailed Beta result for perfect collapse includes metadata."""
+        constant = np.ones((50, 128))
+        result = calculate_beta_detailed(constant)
+
+        assert result.beta == 1.0
+        assert result.d_eff == 1
+        assert result.collapse_severity == "severe"
+        assert result.is_collapsed
+        assert not result.is_healthy
+        assert "edge_case" in result.metadata
+
+    def test_beta_no_collapse_detailed(self) -> None:
+        """Test detailed Beta result for minimal collapse.
+
+        For full-rank random data, Beta should be low with proper diagnostics.
+        """
+        np.random.seed(42)
+        # More samples than features ensures full rank
+        embeddings = np.random.randn(200, 32)
+        result = calculate_beta_detailed(embeddings)
+
+        assert result.beta < 0.3
+        assert result.d_eff > 20  # Should capture many dimensions
+        assert result.collapse_severity in ["none", "mild"]
+        assert not result.is_collapsed
+        assert result.is_healthy
+
+    def test_beta_zero_vectors(self) -> None:
+        """Test Beta handles zero vectors gracefully.
+
+        Zero vectors represent degenerate embeddings; should return Beta = 1.
+        """
+        zero_vectors = np.zeros((50, 256))
+        beta = calculate_beta(zero_vectors)
+
+        # Zero vectors are constant → Beta = 1
+        assert beta == 1.0, f"Beta should be 1.0 for zero vectors, got {beta}"
+
+    def test_beta_orthogonal_embeddings(self) -> None:
+        """Test Beta for orthogonal embeddings (identity matrix pattern).
+
+        Orthogonal vectors represent maximally diverse semantic space.
+        """
+        np.random.seed(42)
+        n = 50
+        # Create orthogonal vectors using QR decomposition
+        random_matrix = np.random.randn(n, n)
+        q, _ = np.linalg.qr(random_matrix)
+        orthogonal = q
+
+        beta = calculate_beta(orthogonal)
+
+        # Orthogonal vectors should have low Beta (high diversity)
+        assert beta < 0.5, f"Orthogonal embeddings should have Beta < 0.5, got {beta}"
+
+    def test_beta_near_collapse_high_similarity(self) -> None:
+        """Test high Beta for embeddings with small perturbations.
+
+        When embeddings are nearly identical with small noise, Beta should be high.
+        """
+        np.random.seed(42)
+        # Base embedding with very small perturbations
+        base = np.random.randn(1, 128)
+        noise_scale = 0.01
+        nearly_identical = np.tile(base, (100, 1)) + noise_scale * np.random.randn(100, 128)
+
+        beta = calculate_beta(nearly_identical)
+
+        # Nearly identical should have very high Beta
+        assert beta > 0.95, f"Nearly identical embeddings should have Beta > 0.95, got {beta}"
+
 
 class TestBetaRange:
     """Tests for Beta value range validation."""

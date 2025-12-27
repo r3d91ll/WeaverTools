@@ -7,6 +7,9 @@ backends:
   loom:
     enabled: true
     url: http://localhost:8080
+    path: ../TheLoom/the-loom    # Path to TheLoom directory (relative to this config)
+    auto_start: true              # Start TheLoom automatically if not running
+    port: 8080                    # Port for TheLoom server
 
 agents:
   # Senior: The researcher/orchestrator (you via Claude Code)

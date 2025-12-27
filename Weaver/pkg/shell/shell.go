@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -686,10 +685,16 @@ func formatHealth(health string) string {
 	}
 }
 
-// Stub implementations for methods that are truncated in all versions
+// findHiddenStateAgent finds an agent that supports hidden state extraction.
+// Requires the agent to have a model configured and be ready.
 func (s *Shell) findHiddenStateAgent(ctx context.Context) (*runtime.Agent, error) {
-	for _, agent := range s.agents.Agents(ctx) {
-		if agent.HasHiddenState() {
+	for _, name := range s.agents.List() {
+		agent, ok := s.agents.Get(name)
+		if !ok {
+			continue
+		}
+		// Must have a model configured and support hidden states
+		if agent.ModelName() != "" && agent.SupportsHiddenStates() && agent.IsReady(ctx) {
 			return agent, nil
 		}
 	}
@@ -697,14 +702,18 @@ func (s *Shell) findHiddenStateAgent(ctx context.Context) (*runtime.Agent, error
 }
 
 func (s *Shell) printConcepts() {
-	concepts := s.conceptStore.All()
-	if len(concepts) == 0 {
+	conceptList := s.conceptStore.List()
+	if len(conceptList) == 0 {
 		fmt.Println("No concepts stored yet.")
 		return
 	}
 	fmt.Println("Stored Concepts:")
-	for name, concept := range concepts {
-		fmt.Printf("  %s: %d samples, %d dimensions\n", name, len(concept.Vectors()), concept.Dimension())
+	for name, count := range conceptList {
+		concept, ok := s.conceptStore.Get(name)
+		if !ok {
+			continue
+		}
+		fmt.Printf("  %s: %d samples, %d dimensions\n", name, count, concept.Dimension())
 	}
 }
 

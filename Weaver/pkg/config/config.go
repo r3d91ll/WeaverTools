@@ -32,8 +32,11 @@ type ClaudeCodeConfig struct {
 
 // LoomConfig holds The Loom backend settings.
 type LoomConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	URL     string `yaml:"url"`
+	Enabled   bool   `yaml:"enabled"`
+	URL       string `yaml:"url"`
+	Path      string `yaml:"path"`       // Path to TheLoom directory (for auto-start)
+	AutoStart bool   `yaml:"auto_start"` // Start TheLoom if not running
+	Port      int    `yaml:"port"`       // Port for TheLoom server
 }
 
 // AgentConfig holds agent settings.
@@ -89,11 +92,14 @@ func Default() *Config {
 	return &Config{
 		Backends: BackendsConfig{
 			ClaudeCode: ClaudeCodeConfig{
-				Enabled: true,
+				Enabled:   true,
 			},
 			Loom: LoomConfig{
-				Enabled: true,
-				URL:     "http://localhost:8080",
+				Enabled:   true,
+				URL:       "http://localhost:8080",
+				Path:      "../TheLoom/the-loom",
+				AutoStart: true,
+				Port:      8080,
 			},
 		},
 		Agents: map[string]AgentConfig{
@@ -104,7 +110,7 @@ func Default() *Config {
 				SystemPrompt: `You are the Senior Engineer in a multi-agent AI research system.
 Your role is to handle complex reasoning, architecture decisions, and orchestration.
 You can interact with other agents using @agent <message>.`,
-				ToolsEnabled: true,
+				ToolsEnabled:   true,
 			},
 			"junior": {
 				Role:    "junior",

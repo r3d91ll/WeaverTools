@@ -499,7 +499,7 @@ func TestFindWordStart(t *testing.T) {
 		{"one two three", 8},
 		{" leading", 1},
 		{"\tleading", 1},
-		{"mixed\t and spaces", 9},
+		{"mixed\t and spaces", 11},
 		{"no-spaces-here", 0},
 	}
 

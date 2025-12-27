@@ -78,3 +78,11 @@ credentials.json
 
 # Local workspace for testing
 weaver-testing/
+
+# Auto-Claude (task automation tool)
+.auto-claude/
+.auto-claude-status
+.worktrees/
+
+# Session files
+session_*.json

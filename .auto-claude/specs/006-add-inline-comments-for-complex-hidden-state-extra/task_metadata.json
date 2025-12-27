@@ -1,8 +1,0 @@
-{
-  "sourceType": "ideation",
-  "ideationType": "documentation_gaps",
-  "ideaId": "doc-005",
-  "rationale": "Hidden state extraction is the core value proposition of TheLoom. Different model architectures store hidden states differently, requiring loader-specific logic. Current code handles edge cases (bfloat16→float32 conversion, empty tensors, shape variations) but doesn't explain why. Contributors adding new loaders need to understand these patterns.",
-  "category": "documentation",
-  "priority": "medium"
-}

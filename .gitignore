@@ -86,3 +86,12 @@ weaver-testing/
 
 # Session files
 session_*.json
+
+# Compiled Go binaries (named after directory)
+Weaver/weaver
+
+# TheLoom example outputs (regenerated when examples run)
+TheLoom/the-loom/examples/outputs/
+
+# Local bug hunt notes
+bughunt_*.md

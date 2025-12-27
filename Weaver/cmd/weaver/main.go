@@ -18,10 +18,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/r3d91ll/weaver/pkg/backend"
 	"github.com/r3d91ll/weaver/pkg/config"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
+	"github.com/r3d91ll/weaver/pkg/loom"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/weaver/pkg/shell"
 	"github.com/r3d91ll/wool"
@@ -52,7 +55,7 @@ func main() {
 	// Initialize config if requested
 	if *initConfig {
 		if err := config.InitConfig(cfgPath); err != nil {
-			fmt.Printf("Failed to initialize config: %v\n", err)
+			werrors.Display(createConfigInitError(cfgPath, err))
 			os.Exit(1)
 		}
 		fmt.Printf("Config initialized at: %s\n", cfgPath)
@@ -63,7 +66,7 @@ func main() {
 	// Load config
 	cfg, err := config.LoadOrDefault(cfgPath)
 	if err != nil {
-		fmt.Printf("Failed to load config: %v\n", err)
+		werrors.Display(createConfigLoadError(cfgPath, err))
 		os.Exit(1)
 	}
 
@@ -102,11 +105,37 @@ func main() {
 		registry.Register("claudecode", claudeCode)
 	}
 
+	// Initialize TheLoom manager for auto-start capability
+	var loomMgr *loom.Manager
 	if cfg.Backends.Loom.Enabled {
-		loom := backend.NewLoom(backend.LoomConfig{
-			URL: cfg.Backends.Loom.URL,
+		// Resolve TheLoom path relative to config file location
+		loomPath := cfg.Backends.Loom.Path
+		if loomPath != "" && !filepath.IsAbs(loomPath) {
+			// Make path relative to config file directory
+			cfgDir := filepath.Dir(cfgPath)
+			loomPath = filepath.Join(cfgDir, loomPath)
+		}
+
+		loomMgr = loom.NewManager(loom.Config{
+			Path:      loomPath,
+			Port:      cfg.Backends.Loom.Port,
+			AutoStart: cfg.Backends.Loom.AutoStart,
 		})
-		registry.Register("loom", loom)
+
+		// Ensure TheLoom is running (starts it if needed)
+		if err := loomMgr.EnsureRunning(ctx); err != nil {
+			if cfg.Backends.Loom.AutoStart {
+				fmt.Printf("⚠ Failed to start TheLoom: %v\n", err)
+			}
+			// Continue - backend will show as unavailable
+		} else if loomMgr.IsManaged() {
+			fmt.Println("✓ Started TheLoom server")
+		}
+
+		loomBackend := backend.NewLoom(backend.LoomConfig{
+			URL: loomMgr.URL(),
+		})
+		registry.Register("loom", loomBackend)
 	}
 
 	// Check backend availability
@@ -128,9 +157,7 @@ func main() {
 	// Check at least one backend is available
 	available := registry.Available(ctx)
 	if len(available) == 0 {
-		fmt.Println("⚠ No backends available!")
-		fmt.Println("  • Ensure 'claude' CLI is installed for Claude Code")
-		fmt.Println("  • Ensure The Loom is running at", cfg.Backends.Loom.URL)
+		werrors.Display(createBackendUnavailableError(cfg, status))
 		os.Exit(1)
 	}
 
@@ -184,7 +211,7 @@ func main() {
 
 		agent, err := agentMgr.Create(def)
 		if err != nil {
-			fmt.Printf("  ✗ %-10s - failed: %v\n", name, err)
+			werrors.Display(createAgentCreationError(name, agentCfg, err))
 			continue
 		}
 
@@ -239,12 +266,12 @@ func main() {
 		DefaultAgent: defaultAgent,
 	})
 	if err != nil {
-		fmt.Printf("Failed to create shell: %v\n", err)
+		werrors.Display(createShellInitError(historyFile, err))
 		os.Exit(1)
 	}
 
 	if err := sh.Run(ctx); err != nil && err != context.Canceled {
-		fmt.Printf("Shell error: %v\n", err)
+		werrors.Display(createShellRunError(err))
 		os.Exit(1)
 	}
 
@@ -258,5 +285,387 @@ func main() {
 		}
 	}
 
+	// Stop TheLoom if we started it
+	if loomMgr != nil && loomMgr.IsManaged() {
+		fmt.Print("Stopping TheLoom server...")
+		if err := loomMgr.Stop(); err != nil {
+			fmt.Printf(" error: %v\n", err)
+		} else {
+			fmt.Println(" done")
+		}
+	}
+
 	fmt.Println("Goodbye!")
+}
+
+// createConfigLoadError creates a structured error for config loading failures.
+// It analyzes the underlying error to provide specific guidance on how to fix it.
+func createConfigLoadError(path string, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for file not found
+	if os.IsNotExist(err) || strings.Contains(errStr, "no such file") {
+		return werrors.ConfigNotFound(path)
+	}
+
+	// Check for YAML parse errors
+	if strings.Contains(errStr, "yaml") || strings.Contains(errStr, "unmarshal") ||
+		strings.Contains(errStr, "parse") {
+		return werrors.ConfigParseError(path, err)
+	}
+
+	// Check for permission errors
+	if os.IsPermission(err) || strings.Contains(errStr, "permission denied") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigReadFailed, "permission denied reading config file").
+			WithContext("path", path)
+	}
+
+	// Generic config read failure
+	return werrors.ConfigWrap(err, werrors.ErrConfigReadFailed, "failed to read configuration").
+		WithContext("path", path)
+}
+
+// createConfigInitError creates a structured error for config initialization failures.
+// It provides guidance on directory creation and permissions.
+func createConfigInitError(path string, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for permission errors
+	if os.IsPermission(err) || strings.Contains(errStr, "permission denied") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "permission denied creating config file").
+			WithContext("path", path).
+			WithContext("directory", filepath.Dir(path))
+	}
+
+	// Check for directory not found
+	if strings.Contains(errStr, "no such file or directory") ||
+		strings.Contains(errStr, "directory") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "config directory does not exist").
+			WithContext("path", path).
+			WithContext("directory", filepath.Dir(path)).
+			WithSuggestion("Create the directory first: mkdir -p " + filepath.Dir(path))
+	}
+
+	// Check for disk full or write errors
+	if strings.Contains(errStr, "no space") || strings.Contains(errStr, "disk full") {
+		return werrors.ConfigWrap(err, werrors.ErrConfigWriteFailed, "disk is full").
+			WithContext("path", path)
+	}
+
+	// Generic init failure
+	return werrors.ConfigWrap(err, werrors.ErrConfigInitFailed, "failed to initialize configuration").
+		WithContext("path", path)
+}
+
+// createBackendUnavailableError creates a structured error when no backends are available.
+// It provides specific suggestions for each configured backend type.
+func createBackendUnavailableError(cfg *config.Config, status map[string]backend.Status) *werrors.WeaverError {
+	// Build the error with context about configured backends
+	err := werrors.Backend(werrors.ErrBackendUnavailable, "no backends available")
+
+	// Track which backends are configured and their status
+	var configuredBackends []string
+
+	// Add context for Claude Code backend
+	if cfg.Backends.ClaudeCode.Enabled {
+		configuredBackends = append(configuredBackends, "claudecode")
+		if s, ok := status["claudecode"]; ok && !s.Available {
+			err = err.WithContext("claudecode_status", "not available")
+		}
+	}
+
+	// Add context for Loom backend
+	if cfg.Backends.Loom.Enabled {
+		configuredBackends = append(configuredBackends, "loom")
+		if s, ok := status["loom"]; ok && !s.Available {
+			err = err.WithContext("loom_status", "not available")
+			err = err.WithContext("loom_url", cfg.Backends.Loom.URL)
+		}
+	}
+
+	// Add configured backends summary
+	if len(configuredBackends) > 0 {
+		err = err.WithContext("configured_backends", strings.Join(configuredBackends, ", "))
+	}
+
+	// Add backend-specific suggestions
+	// Claude Code suggestions
+	if cfg.Backends.ClaudeCode.Enabled {
+		err = err.WithSuggestion("For Claude Code: Ensure 'claude' CLI is installed and in your PATH")
+		err = err.WithSuggestion("Install Claude CLI with: npm install -g @anthropic-ai/claude-cli")
+		err = err.WithSuggestion("After installing, run 'claude auth login' to authenticate")
+	}
+
+	// Loom suggestions
+	if cfg.Backends.Loom.Enabled {
+		err = err.WithSuggestion(fmt.Sprintf("For Loom: Ensure The Loom server is running at %s", cfg.Backends.Loom.URL))
+		err = err.WithSuggestion("Check Loom server status with: curl " + cfg.Backends.Loom.URL + "/health")
+		err = err.WithSuggestion("Start the Loom server if it's not running")
+	}
+
+	// General suggestions
+	if !cfg.Backends.ClaudeCode.Enabled && !cfg.Backends.Loom.Enabled {
+		err = err.WithSuggestion("Enable at least one backend in your config file")
+		err = err.WithSuggestion("Run 'weaver --init' to create a default configuration with backends enabled")
+	}
+
+	return err
+}
+
+// createAgentCreationError creates a structured error for agent creation failures.
+// It analyzes the underlying error to provide specific guidance on invalid fields,
+// valid options, and example configurations.
+func createAgentCreationError(name string, agentCfg config.AgentConfig, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Valid options for reference
+	validRoles := []string{"senior", "junior", "conversant", "subject", "observer"}
+	validBackends := []string{"loom", "claudecode"}
+
+	// Check for "agent already exists" error
+	if strings.Contains(errStr, "already exists") {
+		return werrors.Agent(werrors.ErrAgentAlreadyExists, fmt.Sprintf("agent '%s' already exists", name)).
+			WithContext("agent", name).
+			WithSuggestion("Each agent must have a unique name in the configuration").
+			WithSuggestion("Rename the duplicate agent or remove one of the definitions")
+	}
+
+	// Check for "backend not found" error
+	if strings.Contains(errStr, "not found") && strings.Contains(errStr, "backend") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid backend '%s' for agent '%s'", agentCfg.Backend, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "backend").
+			WithContext("invalid_value", agentCfg.Backend).
+			WithContext("valid_options", strings.Join(validBackends, ", ")).
+			WithSuggestion(fmt.Sprintf("Valid backends are: %s", strings.Join(validBackends, ", "))).
+			WithSuggestion("Update your config.yaml with a valid backend value").
+			WithSuggestion("Example: backend: claudecode  # for Claude Code CLI").
+			WithSuggestion("Example: backend: loom       # for The Loom server")
+	}
+
+	// Check for role validation errors
+	if strings.Contains(errStr, "role") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid role '%s' for agent '%s'", agentCfg.Role, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "role").
+			WithContext("invalid_value", agentCfg.Role).
+			WithContext("valid_options", strings.Join(validRoles, ", ")).
+			WithSuggestion(fmt.Sprintf("Valid roles are: %s", strings.Join(validRoles, ", "))).
+			WithSuggestion("senior: high-level reasoning and orchestration (uses Claude Code)").
+			WithSuggestion("junior: implementation tasks and tool execution (uses Loom)").
+			WithSuggestion("subject: experiment participant for conveyance measurement").
+			WithSuggestion("Example configuration:").
+			WithSuggestion("  myagent:").
+			WithSuggestion("    role: junior").
+			WithSuggestion("    backend: loom").
+			WithSuggestion("    model: Qwen/Qwen2.5-Coder-7B-Instruct")
+	}
+
+	// Check for tools_enabled with incompatible role
+	if strings.Contains(errStr, "tools") && strings.Contains(errStr, "role") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("tools_enabled not supported for role '%s' on agent '%s'", agentCfg.Role, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "tools_enabled").
+			WithContext("role", agentCfg.Role).
+			WithSuggestion("Only 'senior' and 'junior' roles support tools").
+			WithSuggestion("Either change the role to senior/junior or set tools_enabled: false").
+			WithSuggestion("For measurement experiments, use role: subject with tools_enabled: false")
+	}
+
+	// Check for temperature out of range
+	if strings.Contains(errStr, "temperature") {
+		temp := float64(0)
+		if agentCfg.Temperature != nil {
+			temp = *agentCfg.Temperature
+		}
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid temperature %.2f for agent '%s'", temp, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "temperature").
+			WithContext("invalid_value", fmt.Sprintf("%.2f", temp)).
+			WithContext("valid_range", "0.0 - 2.0").
+			WithSuggestion("Temperature must be between 0.0 and 2.0").
+			WithSuggestion("Lower values (0.0-0.5): more deterministic output").
+			WithSuggestion("Higher values (0.8-1.2): more creative/varied output").
+			WithSuggestion("Example: temperature: 0.7  # balanced default")
+	}
+
+	// Check for top_p out of range
+	if strings.Contains(errStr, "top_p") {
+		topP := float64(0)
+		if agentCfg.TopP != nil {
+			topP = *agentCfg.TopP
+		}
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("invalid top_p %.2f for agent '%s'", topP, name)).
+			WithContext("agent", name).
+			WithContext("invalid_field", "top_p").
+			WithContext("invalid_value", fmt.Sprintf("%.2f", topP)).
+			WithContext("valid_range", "0.0 - 1.0").
+			WithSuggestion("top_p must be between 0.0 and 1.0").
+			WithSuggestion("Example: top_p: 0.9  # common default for balanced sampling")
+	}
+
+	// Check for missing required fields
+	if strings.Contains(errStr, "required") || strings.Contains(errStr, "missing") {
+		return werrors.Agent(werrors.ErrAgentInvalidConfig, fmt.Sprintf("missing required field for agent '%s'", name)).
+			WithContext("agent", name).
+			WithSuggestion("Required fields for each agent: name, role, backend").
+			WithSuggestion("For Loom backend, also specify 'model'").
+			WithSuggestion("Example minimal configuration:").
+			WithSuggestion("  agents:").
+			WithSuggestion("    myagent:").
+			WithSuggestion("      role: junior").
+			WithSuggestion("      backend: loom").
+			WithSuggestion("      model: Qwen/Qwen2.5-Coder-7B-Instruct").
+			WithSuggestion("      active: true")
+	}
+
+	// Generic agent creation error with helpful context
+	return werrors.AgentWrap(err, werrors.ErrAgentCreationFailed, fmt.Sprintf("failed to create agent '%s'", name)).
+		WithContext("agent", name).
+		WithContext("role", agentCfg.Role).
+		WithContext("backend", agentCfg.Backend).
+		WithContext("model", agentCfg.Model).
+		WithSuggestion("Check your config.yaml for agent configuration errors").
+		WithSuggestion(fmt.Sprintf("Valid roles: %s", strings.Join(validRoles, ", "))).
+		WithSuggestion(fmt.Sprintf("Valid backends: %s", strings.Join(validBackends, ", "))).
+		WithSuggestion("Ensure the specified backend is enabled in the backends section").
+		WithSuggestion("Run 'weaver --init' to see an example configuration")
+}
+
+// createShellInitError creates a structured error for shell initialization failures.
+// It analyzes the underlying error to provide specific guidance on readline setup,
+// history file permissions, and terminal configuration.
+func createShellInitError(historyFile string, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for history file permission issues
+	if strings.Contains(errStr, "permission") ||
+		strings.Contains(errStr, "Permission denied") ||
+		os.IsPermission(err) {
+		return werrors.Command(werrors.ErrShellHistoryFailed, "cannot access shell history file").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithContext("error_type", "permission denied").
+			WithSuggestion("Check permissions on history file: ls -la " + historyFile).
+			WithSuggestion("Fix permissions with: chmod 600 " + historyFile).
+			WithSuggestion("Or remove and let Weaver recreate it: rm " + historyFile)
+	}
+
+	// Check for history file directory not found
+	historyDir := filepath.Dir(historyFile)
+	if strings.Contains(errStr, "no such file or directory") ||
+		strings.Contains(errStr, "directory") {
+		return werrors.Command(werrors.ErrShellHistoryFailed, "history file directory does not exist").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithContext("directory", historyDir).
+			WithSuggestion("Create the directory: mkdir -p " + historyDir).
+			WithSuggestion("Ensure your home directory is properly configured")
+	}
+
+	// Check for disk full or write errors related to history
+	if strings.Contains(errStr, "no space") ||
+		strings.Contains(errStr, "disk full") ||
+		strings.Contains(errStr, "quota") {
+		return werrors.Command(werrors.ErrShellHistoryFailed, "cannot write to history file - disk full").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithSuggestion("Free up disk space on your system").
+			WithSuggestion("Clear the history file: rm " + historyFile)
+	}
+
+	// Check for readline library issues
+	if strings.Contains(errStr, "readline") ||
+		strings.Contains(errStr, "terminal") ||
+		strings.Contains(errStr, "tty") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "failed to initialize readline/terminal").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithContext("terminal", os.Getenv("TERM")).
+			WithSuggestion("Ensure TERM environment variable is set correctly").
+			WithSuggestion("Try setting: export TERM=xterm-256color").
+			WithSuggestion("If running in a non-interactive context, Weaver requires a TTY")
+	}
+
+	// Check for invalid terminal or not a TTY
+	if strings.Contains(errStr, "not a terminal") ||
+		strings.Contains(errStr, "inappropriate ioctl") ||
+		strings.Contains(errStr, "bad file descriptor") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "not connected to a valid terminal").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithSuggestion("Weaver requires an interactive terminal (TTY) to run").
+			WithSuggestion("If running in a script, consider using pipes or the API directly").
+			WithSuggestion("If running in Docker, use: docker run -it ...")
+	}
+
+	// Check for Ctrl-C or signal interruption during init
+	if strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "signal") {
+		return werrors.Command(werrors.ErrShellInitFailed, "shell initialization interrupted").
+			WithCause(err).
+			WithContext("history_file", historyFile).
+			WithSuggestion("Try starting Weaver again").
+			WithSuggestion("Allow initialization to complete before pressing Ctrl-C")
+	}
+
+	// Generic shell initialization error
+	return werrors.CommandWrap(err, werrors.ErrShellInitFailed, "failed to initialize interactive shell").
+		WithContext("history_file", historyFile).
+		WithSuggestion("Check that your terminal supports interactive input").
+		WithSuggestion("Verify the history file path is writable: touch " + historyFile).
+		WithSuggestion("Ensure readline library is properly installed on your system")
+}
+
+// createShellRunError creates a structured error for shell runtime failures.
+// It provides context about what went wrong during shell execution.
+func createShellRunError(err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for EOF/input stream closed
+	if strings.Contains(errStr, "EOF") ||
+		strings.Contains(errStr, "closed pipe") ||
+		strings.Contains(errStr, "broken pipe") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "input stream closed unexpectedly").
+			WithCause(err).
+			WithSuggestion("The input stream was closed. This can happen when:").
+			WithSuggestion("  - Running Weaver in a non-interactive script").
+			WithSuggestion("  - The terminal connection was lost").
+			WithSuggestion("  - Input was piped and reached end of file").
+			WithSuggestion("For non-interactive use, consider using the API directly")
+	}
+
+	// Check for interrupt/signal during execution
+	if strings.Contains(errStr, "interrupt") ||
+		strings.Contains(errStr, "signal") {
+		return werrors.Command(werrors.ErrShellInitFailed, "shell execution interrupted").
+			WithCause(err).
+			WithSuggestion("The shell was interrupted by a signal").
+			WithSuggestion("Use /quit or /exit to gracefully exit Weaver")
+	}
+
+	// Check for readline-specific errors during execution
+	if strings.Contains(errStr, "readline") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "readline error during shell execution").
+			WithCause(err).
+			WithSuggestion("Try restarting Weaver").
+			WithSuggestion("If the problem persists, check your terminal configuration").
+			WithSuggestion("Ensure TERM environment variable is set correctly")
+	}
+
+	// Check for I/O errors
+	if strings.Contains(errStr, "input/output error") ||
+		strings.Contains(errStr, "I/O error") {
+		return werrors.Command(werrors.ErrShellReadlineFailed, "terminal I/O error").
+			WithCause(err).
+			WithSuggestion("There was an error reading from or writing to the terminal").
+			WithSuggestion("This can happen if the terminal connection was interrupted").
+			WithSuggestion("Try reconnecting to your terminal session and restart Weaver")
+	}
+
+	// Generic shell run error
+	return werrors.CommandWrap(err, werrors.ErrShellInitFailed, "shell encountered an error").
+		WithSuggestion("Try restarting Weaver").
+		WithSuggestion("Check system logs for any relevant error messages").
+		WithSuggestion("If the problem persists, please report the issue with the error details above")
 }

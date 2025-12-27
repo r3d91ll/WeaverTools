@@ -1,9 +1,0 @@
-{
-  "sourceType": "ideation",
-  "ideationType": "code_quality",
-  "ideaId": "cq-003",
-  "rationale": "Type duplication violates DRY (Don't Repeat Yourself) and creates maintenance overhead. When one definition is updated, the other must be manually updated too. A shared type definition ensures consistency and eliminates conversion code.",
-  "category": "refactoring",
-  "codeQualitySeverity": "minor",
-  "priority": "medium"
-}

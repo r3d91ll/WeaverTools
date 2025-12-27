@@ -78,3 +78,20 @@ credentials.json
 
 # Local workspace for testing
 weaver-testing/
+
+# Auto-Claude (task automation tool)
+.auto-claude/
+.auto-claude-status
+.worktrees/
+
+# Session files
+session_*.json
+
+# Compiled Go binaries (named after directory)
+Weaver/weaver
+
+# TheLoom example outputs (regenerated when examples run)
+TheLoom/the-loom/examples/outputs/
+
+# Local bug hunt notes
+bughunt_*.md

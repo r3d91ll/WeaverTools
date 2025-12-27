@@ -19,8 +19,10 @@ import pytest
 import torch
 
 # Skip all tests in this module if no GPU available
+# Mark with 'gpu' marker to allow exclusion with: pytest -m 'not gpu'
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.gpu,
     pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required for integration tests"),
 ]
 

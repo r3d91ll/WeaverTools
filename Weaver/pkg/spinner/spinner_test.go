@@ -256,6 +256,7 @@ func TestSuccess(t *testing.T) {
 		Writer:      &buf,
 		HideCursor:  false,
 		ShowElapsed: true,
+		IsTTY:       boolPtr(true), // Force TTY mode to get color output
 	})
 
 	s.Start()
@@ -306,6 +307,7 @@ func TestFail(t *testing.T) {
 		Writer:      &buf,
 		HideCursor:  false,
 		ShowElapsed: true,
+		IsTTY:       boolPtr(true), // Force TTY mode to get color output
 	})
 
 	s.Start()
@@ -536,6 +538,7 @@ func TestRenderWithElapsedTime(t *testing.T) {
 		HideCursor:  false,
 		ShowElapsed: true,
 		RefreshRate: 20 * time.Millisecond,
+		IsTTY:       boolPtr(true), // Force TTY mode to get animated output with elapsed time
 	})
 
 	s.Start()

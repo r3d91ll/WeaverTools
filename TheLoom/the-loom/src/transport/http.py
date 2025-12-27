@@ -1388,7 +1388,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     # OpenAI-Compatible Chat Completions (WeaverCode Integration)
     # ========================================================================
 
-    @app.post("/v1/chat/completions")
+    @app.post("/v1/chat/completions", response_model=None)
     async def chat_completions(
         request: ChatCompletionRequest,
     ) -> ChatCompletionResponse | StreamingResponse:

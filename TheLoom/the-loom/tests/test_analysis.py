@@ -28,6 +28,7 @@ from src.analysis import (
 class TestAnalyzeKakeyaGeometry:
     """Tests for the main analyze_kakeya_geometry function."""
 
+    @pytest.mark.gpu
     def test_basic_analysis(self) -> None:
         """Test basic Kakeya geometry analysis with random vectors."""
         np.random.seed(42)
@@ -41,6 +42,7 @@ class TestAnalyzeKakeyaGeometry:
         assert report.wolf_axiom.max_density_ratio > 0
         assert report.grain_analysis.num_grains >= 0
 
+    @pytest.mark.gpu
     def test_small_vectors(self) -> None:
         """Test analysis with small number of vectors."""
         np.random.seed(42)
@@ -50,6 +52,7 @@ class TestAnalyzeKakeyaGeometry:
         assert isinstance(report, KakeyaGeometryReport)
         assert report.directional_coverage.ambient_dim == 64
 
+    @pytest.mark.gpu
     def test_normalized_input(self) -> None:
         """Test that analysis works with pre-normalized vectors."""
         np.random.seed(42)
@@ -61,6 +64,7 @@ class TestAnalyzeKakeyaGeometry:
         report = analyze_kakeya_geometry(normalized)
         assert isinstance(report, KakeyaGeometryReport)
 
+    @pytest.mark.gpu
     def test_metadata_populated(self) -> None:
         """Test that report fields are populated."""
         np.random.seed(42)
@@ -75,6 +79,7 @@ class TestAnalyzeKakeyaGeometry:
 class TestWolfAxiomAnalysis:
     """Tests for Wolf axiom density analysis."""
 
+    @pytest.mark.gpu
     def test_check_wolf_axioms_basic(self) -> None:
         """Test basic Wolf axiom checking."""
         np.random.seed(42)
@@ -125,6 +130,7 @@ class TestWolfAxiomAnalysis:
 class TestDirectionalCoverage:
     """Tests for directional coverage analysis."""
 
+    @pytest.mark.gpu
     def test_analyze_directional_coverage_basic(self) -> None:
         """Test basic directional coverage analysis."""
         np.random.seed(42)
@@ -172,6 +178,7 @@ class TestDirectionalCoverage:
 class TestGrainAnalysis:
     """Tests for grain (cluster) detection."""
 
+    @pytest.mark.gpu
     def test_analyze_grains_basic(self) -> None:
         """Test basic grain analysis."""
         np.random.seed(42)
@@ -182,6 +189,7 @@ class TestGrainAnalysis:
         assert result.num_grains >= 0
         assert 0 <= result.grain_coverage <= 1
 
+    @pytest.mark.gpu
     def test_clustered_data_finds_grains(self) -> None:
         """Test that clustered data produces grains."""
         np.random.seed(42)
@@ -199,6 +207,7 @@ class TestGrainAnalysis:
 class TestBilateralComparison:
     """Tests for bilateral geometry comparison."""
 
+    @pytest.mark.gpu
     def test_bilateral_comparison_identical(self) -> None:
         """Test bilateral comparison with identical vectors."""
         np.random.seed(42)
@@ -210,6 +219,7 @@ class TestBilateralComparison:
         assert bilateral.directional_alignment == pytest.approx(1.0, abs=0.01)
         assert bilateral.subspace_overlap == pytest.approx(1.0, abs=0.01)
 
+    @pytest.mark.gpu
     def test_bilateral_comparison_similar(self) -> None:
         """Test bilateral comparison with similar vectors."""
         np.random.seed(42)
@@ -221,6 +231,7 @@ class TestBilateralComparison:
         assert 0 <= bilateral.overall_alignment <= 1
         assert bilateral.overall_alignment > 0.5  # Should be high for similar vectors
 
+    @pytest.mark.gpu
     def test_bilateral_comparison_orthogonal(self) -> None:
         """Test bilateral comparison with orthogonal vectors."""
         np.random.seed(42)
@@ -242,6 +253,7 @@ class TestBilateralComparison:
 class TestConveyanceExperiment:
     """Tests for the conveyance experiment runner."""
 
+    @pytest.mark.gpu
     def test_run_conveyance_experiment_basic(self) -> None:
         """Test basic conveyance experiment."""
         np.random.seed(42)
@@ -285,6 +297,7 @@ class TestConveyanceExperiment:
 class TestHiddenStateBatch:
     """Tests for hidden state batch analysis."""
 
+    @pytest.mark.gpu
     def test_analyze_hidden_state_batch_with_arrays(self) -> None:
         """Test batch analysis with raw numpy arrays."""
         np.random.seed(42)

@@ -1205,6 +1205,100 @@ class TestConveyanceMetricsResult:
 
 
 # ============================================================================
+# Standalone C_pair Tests (for verification)
+# ============================================================================
+
+
+def test_c_pair_zero_propagation() -> None:
+    """Test C_pair = 0 when c_in or c_out is 0.
+
+    This is a critical property of the C_pair metric: if either direction
+    of communication is blocked (conveyance = 0), then the pairwise
+    conveyance must be zero because effective bilateral communication
+    requires both sending AND receiving capabilities.
+
+    This implements the "zero-propagation principle" from the Conveyance
+    Hypothesis: complete blockage in any component prevents information
+    transfer entirely.
+    """
+    # Test c_out = 0 (sender cannot transmit)
+    c_pair_zero_out = calculate_c_pair(c_out=0.0, c_in=0.8, d_eff=100, p_ij=1.0)
+    assert c_pair_zero_out == 0.0, (
+        f"C_pair should be 0 when c_out=0 (sender blocked), got {c_pair_zero_out}"
+    )
+
+    # Test c_in = 0 (receiver cannot absorb)
+    c_pair_zero_in = calculate_c_pair(c_out=0.8, c_in=0.0, d_eff=100, p_ij=1.0)
+    assert c_pair_zero_in == 0.0, (
+        f"C_pair should be 0 when c_in=0 (receiver blocked), got {c_pair_zero_in}"
+    )
+
+    # Test both = 0 (complete communication breakdown)
+    c_pair_both_zero = calculate_c_pair(c_out=0.0, c_in=0.0, d_eff=100, p_ij=1.0)
+    assert c_pair_both_zero == 0.0, (
+        f"C_pair should be 0 when both directions blocked, got {c_pair_both_zero}"
+    )
+
+    # Verify detailed result also captures zero-propagation
+    result_zero_out = calculate_c_pair_detailed(c_out=0.0, c_in=0.8, d_eff=100, p_ij=1.0)
+    assert result_zero_out.c_pair == 0.0
+    assert result_zero_out.harmonic_mean == 0.0
+    assert "zero_propagation" in result_zero_out.metadata
+
+    result_zero_in = calculate_c_pair_detailed(c_out=0.8, c_in=0.0, d_eff=100, p_ij=1.0)
+    assert result_zero_in.c_pair == 0.0
+    assert result_zero_in.harmonic_mean == 0.0
+    assert "zero_propagation" in result_zero_in.metadata
+
+
+def test_c_pair_harmonic_mean() -> None:
+    """Test that C_pair uses harmonic mean which favors the minimum value.
+
+    The harmonic mean H(a, b) = 2ab / (a + b) has the property that
+    H(a, b) <= min(a, b) when a != b. This is the "limited by weakest link"
+    semantics - effective bilateral communication is constrained by the
+    weaker direction.
+
+    Key properties verified:
+    1. H(a, b) < arithmetic_mean(a, b) when a != b
+    2. H(a, b) is closer to min(a, b) than arithmetic mean
+    3. H(a, a) = a (identity for equal inputs)
+    """
+    # Test asymmetric case: harmonic mean should be closer to minimum
+    c_out, c_in = 0.9, 0.3
+    result = calculate_c_pair_detailed(c_out=c_out, c_in=c_in, d_eff=100, p_ij=1.0)
+
+    # Calculate expected values
+    harmonic = 2 * c_out * c_in / (c_out + c_in)  # = 0.45
+    arithmetic = (c_out + c_in) / 2  # = 0.6
+    minimum = min(c_out, c_in)  # = 0.3
+
+    # Verify harmonic mean is computed correctly
+    assert result.harmonic_mean == pytest.approx(harmonic, rel=1e-10), (
+        f"Expected harmonic mean {harmonic}, got {result.harmonic_mean}"
+    )
+
+    # Verify harmonic mean is less than arithmetic mean
+    assert harmonic < arithmetic, (
+        "Harmonic mean should be less than arithmetic mean for unequal inputs"
+    )
+
+    # Verify harmonic mean is closer to minimum than arithmetic mean
+    harmonic_distance = abs(harmonic - minimum)
+    arithmetic_distance = abs(arithmetic - minimum)
+    assert harmonic_distance < arithmetic_distance, (
+        "Harmonic mean should be closer to minimum value than arithmetic mean"
+    )
+
+    # Test symmetric case: H(a, a) = a
+    c_equal = 0.7
+    result_sym = calculate_c_pair_detailed(c_out=c_equal, c_in=c_equal, d_eff=100, p_ij=1.0)
+    assert result_sym.harmonic_mean == pytest.approx(c_equal, rel=1e-10), (
+        f"Harmonic mean of equal values should equal input, got {result_sym.harmonic_mean}"
+    )
+
+
+# ============================================================================
 # Constants Tests
 # ============================================================================
 

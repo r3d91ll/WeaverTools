@@ -1299,6 +1299,243 @@ def test_c_pair_harmonic_mean() -> None:
 
 
 # ============================================================================
+# Bootstrap CI Coverage Tests (Standalone)
+# ============================================================================
+
+
+def test_bootstrap_ci_coverage() -> None:
+    """Test that bootstrap CI achieves approximately correct coverage.
+
+    This is the core statistical validation test for bootstrap confidence intervals.
+    We run a Monte Carlo simulation where we:
+    1. Generate many samples from a distribution with KNOWN true parameter
+    2. Compute 95% CI for each sample
+    3. Count how often the true parameter falls within the CI
+    4. Verify this coverage rate is approximately 95%
+
+    STATISTICAL GROUNDING
+    =====================
+    For a well-calibrated 95% confidence interval:
+    - Expected coverage: 95%
+    - With 200 trials, standard error ≈ sqrt(0.95 * 0.05 / 200) ≈ 1.5%
+    - Reasonable acceptance range: [85%, 100%] (conservative for simulation noise)
+
+    This validates that bootstrap_ci produces statistically valid intervals
+    that contain the true parameter with the specified probability.
+    """
+    np.random.seed(42)
+
+    # Test parameters
+    true_mean = 5.0  # Known true parameter
+    n_trials = 200  # Number of Monte Carlo trials
+    n_samples = 50  # Samples per trial
+    n_resamples = 500  # Bootstrap resamples (reduced for speed)
+    coverage_count = 0
+
+    for trial in range(n_trials):
+        # Generate sample from known distribution (normal with mean=true_mean)
+        data = np.random.randn(n_samples) + true_mean
+
+        # Compute bootstrap CI
+        _, ci_low, ci_high = bootstrap_ci(
+            data,
+            statistic=np.mean,
+            n_resamples=n_resamples,
+            confidence_level=0.95,
+            random_state=trial,  # Different seed per trial for independence
+        )
+
+        # Check if true parameter is within CI
+        if ci_low <= true_mean <= ci_high:
+            coverage_count += 1
+
+    coverage_rate = coverage_count / n_trials
+
+    # Validate coverage is approximately 95%
+    # Using conservative bounds to account for Monte Carlo variance
+    assert 0.85 <= coverage_rate <= 1.0, (
+        f"Coverage rate {coverage_rate:.2%} outside expected range [85%, 100%]. "
+        f"Expected ~95% coverage for 95% CI. "
+        f"This may indicate a problem with the bootstrap implementation."
+    )
+
+
+def test_bootstrap_ci_coverage_median() -> None:
+    """Test bootstrap CI coverage for median statistic.
+
+    Verifies that bootstrap CI works correctly for non-mean statistics.
+    The median is a common robust alternative that should also achieve
+    approximately 95% coverage.
+    """
+    np.random.seed(123)
+
+    true_median = 3.0
+    n_trials = 150
+    n_samples = 50
+    coverage_count = 0
+
+    for trial in range(n_trials):
+        # Generate sample from known distribution
+        # Using shifted normal where mean ≈ median
+        data = np.random.randn(n_samples) + true_median
+
+        _, ci_low, ci_high = bootstrap_ci(
+            data,
+            statistic=np.median,
+            n_resamples=500,
+            confidence_level=0.95,
+            random_state=trial + 1000,
+        )
+
+        if ci_low <= true_median <= ci_high:
+            coverage_count += 1
+
+    coverage_rate = coverage_count / n_trials
+
+    # Median CI may be slightly less efficient, so use wider bounds
+    assert 0.80 <= coverage_rate <= 1.0, (
+        f"Median CI coverage rate {coverage_rate:.2%} outside expected range [80%, 100%]"
+    )
+
+
+def test_bootstrap_ci_coverage_different_confidence_levels() -> None:
+    """Test that different confidence levels produce appropriate coverage.
+
+    Validates that:
+    - 90% CI has ~90% coverage
+    - 95% CI has ~95% coverage
+    - 99% CI has ~99% coverage
+
+    This confirms the confidence_level parameter is correctly used.
+    """
+    np.random.seed(456)
+
+    true_mean = 0.0
+    n_trials = 150
+    n_samples = 50
+
+    confidence_levels = [0.90, 0.95, 0.99]
+    # Expected minimum coverage (allowing for simulation noise)
+    min_coverage = {0.90: 0.75, 0.95: 0.85, 0.99: 0.90}
+
+    for conf_level in confidence_levels:
+        coverage_count = 0
+
+        for trial in range(n_trials):
+            data = np.random.randn(n_samples) + true_mean
+
+            _, ci_low, ci_high = bootstrap_ci(
+                data,
+                statistic=np.mean,
+                n_resamples=500,
+                confidence_level=conf_level,
+                random_state=trial + int(conf_level * 10000),
+            )
+
+            if ci_low <= true_mean <= ci_high:
+                coverage_count += 1
+
+        coverage_rate = coverage_count / n_trials
+
+        assert coverage_rate >= min_coverage[conf_level], (
+            f"Coverage rate {coverage_rate:.2%} for {conf_level:.0%} CI "
+            f"below minimum expected {min_coverage[conf_level]:.0%}"
+        )
+
+
+def test_bootstrap_ci_coverage_non_normal_distribution() -> None:
+    """Test bootstrap CI coverage for non-normal (exponential) distribution.
+
+    Bootstrap CIs should work for any distribution, not just normal.
+    This test uses exponential distribution to validate robustness.
+    """
+    np.random.seed(789)
+
+    # Exponential distribution with rate=1 has true mean = 1
+    true_mean = 1.0
+    n_trials = 150
+    n_samples = 50
+    coverage_count = 0
+
+    for trial in range(n_trials):
+        # Generate from exponential distribution
+        data = np.random.exponential(scale=true_mean, size=n_samples)
+
+        _, ci_low, ci_high = bootstrap_ci(
+            data,
+            statistic=np.mean,
+            n_resamples=500,
+            confidence_level=0.95,
+            random_state=trial + 2000,
+        )
+
+        if ci_low <= true_mean <= ci_high:
+            coverage_count += 1
+
+    coverage_rate = coverage_count / n_trials
+
+    # Bootstrap should still achieve reasonable coverage for skewed distributions
+    assert 0.80 <= coverage_rate <= 1.0, (
+        f"Exponential distribution CI coverage {coverage_rate:.2%} "
+        f"outside expected range [80%, 100%]"
+    )
+
+
+def test_bootstrap_ci_coverage_sample_size_effect() -> None:
+    """Test that larger samples produce narrower CIs with maintained coverage.
+
+    Validates that:
+    1. Coverage remains approximately 95% regardless of sample size
+    2. CI width decreases as sample size increases (more precision)
+    """
+    np.random.seed(101112)
+
+    true_mean = 0.0
+    n_trials = 100
+    sample_sizes = [20, 50, 100]
+
+    avg_widths = {}
+    coverages = {}
+
+    for n_samples in sample_sizes:
+        coverage_count = 0
+        widths = []
+
+        for trial in range(n_trials):
+            data = np.random.randn(n_samples) + true_mean
+
+            point, ci_low, ci_high = bootstrap_ci(
+                data,
+                statistic=np.mean,
+                n_resamples=500,
+                confidence_level=0.95,
+                random_state=trial + n_samples * 100,
+            )
+
+            widths.append(ci_high - ci_low)
+            if ci_low <= true_mean <= ci_high:
+                coverage_count += 1
+
+        avg_widths[n_samples] = np.mean(widths)
+        coverages[n_samples] = coverage_count / n_trials
+
+    # Verify coverage is maintained across sample sizes
+    for n_samples in sample_sizes:
+        assert coverages[n_samples] >= 0.80, (
+            f"Coverage {coverages[n_samples]:.2%} for n={n_samples} "
+            f"below minimum expected 80%"
+        )
+
+    # Verify CI width decreases with larger samples
+    assert avg_widths[50] < avg_widths[20], (
+        "CI width should decrease from n=20 to n=50"
+    )
+    assert avg_widths[100] < avg_widths[50], (
+        "CI width should decrease from n=50 to n=100"
+    )
+
+
+# ============================================================================
 # Constants Tests
 # ============================================================================
 

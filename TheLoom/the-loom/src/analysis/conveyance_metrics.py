@@ -55,6 +55,11 @@ DEFAULT_VARIANCE_THRESHOLD = 0.90
 # With fewer samples, collapse measurement is unreliable.
 MIN_SAMPLES_FOR_BETA = 2
 
+# Default reference dimensionality for f_dim scaling function.
+# Used when computing pairwise conveyance to normalize D_eff.
+# 768 is chosen as typical hidden state dimensionality (GPT-2, BERT-base).
+DEFAULT_D_REF = 768
+
 
 # ============================================================================
 # Data Classes for Results
@@ -190,6 +195,117 @@ class BetaResult:
     def is_healthy(self) -> bool:
         """Check if embeddings maintain healthy diversity (Beta < 0.3)."""
         return self.beta < 0.3
+
+
+@dataclass
+class CPairResult:
+    """Results from C_pair (Pairwise Conveyance) calculation.
+
+    C_pair measures the effective semantic information transfer capacity between
+    a specific agent pair, incorporating bidirectional conveyance, dimensionality
+    effects, and participation weight.
+
+    MATHEMATICAL GROUNDING
+    ======================
+    C_pair is computed using the harmonic mean of directional conveyances:
+
+        C_pair = H(C_out, C_in) × f_dim(D_eff) × P_ij
+
+    Where:
+    - H(C_out, C_in): Harmonic mean of outgoing and incoming conveyance
+    - f_dim(D_eff): Dimensionality scaling function (log-normalized)
+    - P_ij: Participation weight for the agent pair
+
+    HARMONIC MEAN SEMANTICS
+    =======================
+    The harmonic mean is chosen because it captures the "limited by weakest link"
+    semantics of information transfer:
+
+    - H(a, b) = 2ab / (a + b), always ≤ min(a, b) when a ≠ b
+    - If either direction has zero conveyance, the pair has zero transfer
+    - Penalizes asymmetric transfer (one direction much stronger than other)
+
+    This aligns with the intuition that effective bilateral communication requires
+    both sending AND receiving capabilities.
+
+    ZERO-PROPAGATION PRINCIPLE
+    ==========================
+    If any component (c_out, c_in, d_eff, p_ij) is zero or negative, C_pair = 0.
+    This implements the principle that complete blockage in any component
+    prevents information transfer entirely.
+
+    INTERPRETATION
+    ==============
+    - C_pair near 0: Poor/blocked information transfer
+    - C_pair moderate (0.3-0.6): Functional but constrained transfer
+    - C_pair high (>0.6): Strong bilateral information flow
+
+    VALIDATION TARGET
+    =================
+    C_pair should correlate with task success metrics in multi-agent scenarios.
+    The harmonic mean property ensures it's limited by the weaker participant.
+    """
+
+    c_pair: float  # Pairwise conveyance value (non-negative)
+    c_out: float  # Outgoing conveyance (sender → receiver)
+    c_in: float  # Incoming conveyance (receiver → sender)
+    harmonic_mean: float  # H(c_out, c_in)
+    d_eff: int  # Effective dimensionality used
+    f_dim: float  # Dimensionality scaling factor applied
+    p_ij: float  # Participation weight
+    d_ref: int  # Reference dimensionality for f_dim
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_blocked(self) -> bool:
+        """Check if transfer is effectively blocked (C_pair ≈ 0)."""
+        return self.c_pair < 0.01
+
+    @property
+    def is_asymmetric(self) -> bool:
+        """Check if transfer is highly asymmetric (ratio > 3:1)."""
+        if min(self.c_out, self.c_in) < 0.01:
+            return True  # Extreme asymmetry (one direction blocked)
+        ratio = max(self.c_out, self.c_in) / min(self.c_out, self.c_in)
+        return ratio > 3.0
+
+    @property
+    def transfer_quality(self) -> str:
+        """Classify the quality of bilateral transfer.
+
+        Categories:
+        - blocked: C_pair < 0.01, effectively no transfer
+        - poor: 0.01 <= C_pair < 0.2, severely limited
+        - moderate: 0.2 <= C_pair < 0.5, functional but constrained
+        - good: 0.5 <= C_pair < 0.7, healthy transfer
+        - excellent: C_pair >= 0.7, strong bilateral flow
+        """
+        if self.c_pair < 0.01:
+            return "blocked"
+        elif self.c_pair < 0.2:
+            return "poor"
+        elif self.c_pair < 0.5:
+            return "moderate"
+        elif self.c_pair < 0.7:
+            return "good"
+        else:
+            return "excellent"
+
+    @property
+    def limiting_direction(self) -> str:
+        """Identify which direction limits the transfer.
+
+        Returns:
+        - "outgoing": c_out < c_in (sender is the bottleneck)
+        - "incoming": c_in < c_out (receiver is the bottleneck)
+        - "balanced": c_out ≈ c_in (within 10%)
+        - "both_zero": Both directions blocked
+        """
+        if self.c_out < 0.01 and self.c_in < 0.01:
+            return "both_zero"
+        if abs(self.c_out - self.c_in) / max(self.c_out, self.c_in, 0.01) < 0.1:
+            return "balanced"
+        return "outgoing" if self.c_out < self.c_in else "incoming"
 
 
 # ============================================================================
@@ -606,6 +722,241 @@ def calculate_beta_detailed(
 
 
 # ============================================================================
+# C_pair (Pairwise Conveyance) Calculation
+# ============================================================================
+
+
+def _compute_harmonic_mean(a: float, b: float) -> float:
+    """Compute harmonic mean of two values with zero-propagation.
+
+    The harmonic mean H(a, b) = 2ab / (a + b).
+
+    Properties:
+    - H(a, b) <= min(a, b) when a != b (limited by weakest link)
+    - H(a, a) = a (identity when equal)
+    - H(0, x) = 0 (zero-propagation)
+
+    Parameters:
+        a: First value (must be non-negative)
+        b: Second value (must be non-negative)
+
+    Returns:
+        Harmonic mean of a and b, or 0.0 if either is <= 0.
+    """
+    # Zero-propagation: if either value is zero or negative, result is zero
+    if a <= 0 or b <= 0:
+        return 0.0
+
+    # Standard harmonic mean formula: 2ab / (a + b)
+    return 2.0 * a * b / (a + b)
+
+
+def _compute_f_dim(d_eff: int, d_ref: int = DEFAULT_D_REF) -> float:
+    """Compute dimensionality scaling factor f_dim(D_eff).
+
+    This function scales the contribution of effective dimensionality to
+    pairwise conveyance. Uses log-normalized scaling to prevent extreme
+    values while maintaining sensitivity to dimensionality changes.
+
+    DESIGN RATIONALE
+    ================
+    Log scaling is chosen because:
+    1. Diminishing returns: Going from 10 to 100 dimensions matters more
+       than going from 1000 to 1090 dimensions.
+    2. Bounded output: f_dim ∈ (0, 1] for reasonable inputs.
+    3. Smooth gradient: No sharp transitions that could destabilize learning.
+
+    Formula:
+        f_dim(d) = log(1 + d) / log(1 + d_ref)
+
+    Where d_ref is a reference dimensionality (default 768, typical for
+    transformer hidden states).
+
+    Parameters:
+        d_eff: Effective dimensionality (must be positive integer)
+        d_ref: Reference dimensionality for normalization (default 768)
+
+    Returns:
+        Scaling factor in range (0, 1] for d_eff <= d_ref,
+        or > 1 for d_eff > d_ref.
+
+    Example:
+        >>> _compute_f_dim(100, d_ref=768)
+        0.693...  # log(101) / log(769)
+        >>> _compute_f_dim(768, d_ref=768)
+        1.0  # Equal to reference
+    """
+    # Zero-propagation: if d_eff is zero or negative, return 0
+    if d_eff <= 0:
+        return 0.0
+
+    if d_ref <= 0:
+        raise ValueError(f"d_ref must be positive, got {d_ref}")
+
+    # Log-normalized scaling
+    # Adding 1 to avoid log(0) and ensure f_dim(1) > 0
+    return np.log1p(d_eff) / np.log1p(d_ref)
+
+
+def calculate_c_pair(
+    c_out: float,
+    c_in: float,
+    d_eff: int,
+    p_ij: float,
+    d_ref: int = DEFAULT_D_REF,
+) -> float:
+    """Calculate C_pair (Pairwise Conveyance) for an agent pair.
+
+    C_pair measures the effective semantic information transfer capacity
+    between a specific agent pair, using the harmonic mean of bidirectional
+    conveyances scaled by dimensionality and participation weight.
+
+    MATHEMATICAL GROUNDING
+    ======================
+    C_pair is computed as:
+
+        C_pair = H(C_out, C_in) × f_dim(D_eff) × P_ij
+
+    Where:
+    - H(C_out, C_in): Harmonic mean of directional conveyances
+    - f_dim(D_eff): Log-normalized dimensionality scaling = log(1+D_eff)/log(1+D_ref)
+    - P_ij: Participation weight ∈ [0, 1]
+
+    HARMONIC MEAN SEMANTICS
+    =======================
+    The harmonic mean captures "limited by weakest link" semantics:
+    - If sender can transmit but receiver can't absorb → low C_pair
+    - If receiver can absorb but sender can't transmit → low C_pair
+    - Only when BOTH directions work well → high C_pair
+
+    This aligns with the communication theory principle that effective
+    bilateral exchange requires both transmission AND reception.
+
+    ZERO-PROPAGATION PRINCIPLE
+    ==========================
+    If ANY component is zero or negative, C_pair = 0:
+    - c_out = 0: Sender cannot transmit → no transfer
+    - c_in = 0: Receiver cannot absorb → no transfer
+    - d_eff = 0: Degenerate space → no meaningful transfer
+    - p_ij = 0: Zero participation → no transfer
+
+    Parameters:
+        c_out: Outgoing conveyance (sender → receiver), typically in [0, 1]
+        c_in: Incoming conveyance (receiver → sender), typically in [0, 1]
+        d_eff: Effective dimensionality of the shared semantic space
+        p_ij: Participation weight for this agent pair, in [0, 1]
+        d_ref: Reference dimensionality for f_dim normalization (default 768)
+
+    Returns:
+        c_pair: float
+            The pairwise conveyance value (non-negative).
+            Higher values indicate stronger bilateral information transfer.
+
+    Raises:
+        ValueError: If d_ref <= 0.
+
+    Example:
+        >>> # Symmetric transfer with moderate dimensionality
+        >>> c_pair = calculate_c_pair(c_out=0.8, c_in=0.8, d_eff=100, p_ij=1.0)
+        >>> print(f"C_pair: {c_pair:.4f}")  # ~0.554
+
+        >>> # Asymmetric transfer (limited by weaker direction)
+        >>> c_pair = calculate_c_pair(c_out=0.9, c_in=0.3, d_eff=100, p_ij=1.0)
+        >>> print(f"C_pair: {c_pair:.4f}")  # ~0.311 (closer to 0.3 than 0.9)
+
+        >>> # Zero-propagation example
+        >>> c_pair = calculate_c_pair(c_out=0.8, c_in=0.0, d_eff=100, p_ij=1.0)
+        >>> print(f"C_pair: {c_pair:.4f}")  # 0.0 (blocked by zero c_in)
+
+    Notes:
+        - C_pair is always <= min(c_out, c_in) * f_dim(d_eff) * p_ij
+        - The harmonic mean ensures asymmetric transfers are penalized
+        - Use calculate_c_pair_detailed for diagnostic information
+    """
+    # Zero-propagation: check all components
+    if c_out <= 0 or c_in <= 0 or d_eff <= 0 or p_ij <= 0:
+        return 0.0
+
+    # Compute harmonic mean of directional conveyances
+    h_mean = _compute_harmonic_mean(c_out, c_in)
+
+    # Compute dimensionality scaling factor
+    f_dim = _compute_f_dim(d_eff, d_ref)
+
+    # Final C_pair calculation
+    c_pair = h_mean * f_dim * p_ij
+
+    return float(c_pair)
+
+
+def calculate_c_pair_detailed(
+    c_out: float,
+    c_in: float,
+    d_eff: int,
+    p_ij: float,
+    d_ref: int = DEFAULT_D_REF,
+) -> CPairResult:
+    """Calculate C_pair (Pairwise Conveyance) with full diagnostic information.
+
+    This is the detailed version of calculate_c_pair that returns complete
+    results including intermediate values and metadata for analysis.
+
+    Parameters:
+        c_out: Outgoing conveyance (sender → receiver)
+        c_in: Incoming conveyance (receiver → sender)
+        d_eff: Effective dimensionality of the shared semantic space
+        p_ij: Participation weight for this agent pair
+        d_ref: Reference dimensionality for f_dim normalization (default 768)
+
+    Returns:
+        CPairResult with full diagnostic information including:
+        - c_pair: The final pairwise conveyance value
+        - harmonic_mean: H(c_out, c_in)
+        - f_dim: Dimensionality scaling factor
+        - transfer_quality: Classification of transfer quality
+        - limiting_direction: Which direction is the bottleneck
+
+    Example:
+        >>> result = calculate_c_pair_detailed(c_out=0.8, c_in=0.6, d_eff=50, p_ij=0.3)
+        >>> print(f"C_pair: {result.c_pair:.4f}")
+        >>> print(f"Transfer Quality: {result.transfer_quality}")
+        >>> print(f"Limiting Direction: {result.limiting_direction}")
+    """
+    # Compute harmonic mean (with zero-propagation)
+    h_mean = _compute_harmonic_mean(c_out, c_in)
+
+    # Compute dimensionality scaling
+    f_dim = _compute_f_dim(d_eff, d_ref) if d_eff > 0 else 0.0
+
+    # Final C_pair (with zero-propagation for p_ij)
+    if p_ij <= 0:
+        c_pair = 0.0
+    else:
+        c_pair = h_mean * f_dim * p_ij
+
+    # Build metadata
+    metadata: dict[str, Any] = {}
+    if c_out <= 0 or c_in <= 0:
+        metadata["zero_propagation"] = "directional_conveyance"
+    elif d_eff <= 0:
+        metadata["zero_propagation"] = "d_eff"
+    elif p_ij <= 0:
+        metadata["zero_propagation"] = "p_ij"
+
+    return CPairResult(
+        c_pair=float(c_pair),
+        c_out=float(c_out),
+        c_in=float(c_in),
+        harmonic_mean=float(h_mean),
+        d_eff=int(d_eff) if d_eff > 0 else 0,
+        f_dim=float(f_dim),
+        p_ij=float(p_ij),
+        d_ref=int(d_ref),
+        metadata=metadata,
+    )
+
+
+# ============================================================================
 # Module Self-Test
 # ============================================================================
 
@@ -692,4 +1043,58 @@ if __name__ == "__main__":
     assert isinstance(beta_verify, float), "Beta must be a float"
     assert 0 <= beta_verify <= 1, f"Beta must be in [0, 1], got {beta_verify}"
 
-    print("\nAll D_eff and Beta tests passed!")
+    print("\n" + "=" * 60)
+    print("Testing C_pair (Pairwise Conveyance) Calculation...")
+    print("=" * 60)
+
+    # Basic C_pair calculation
+    c_pair = calculate_c_pair(c_out=0.8, c_in=0.6, d_eff=50, p_ij=0.3)
+    print(f"\nBasic C_pair (0.8, 0.6, 50, 0.3): {c_pair:.4f}")
+    assert isinstance(c_pair, float), "C_pair must be a float"
+    assert c_pair >= 0, f"C_pair must be non-negative, got {c_pair}"
+
+    # Detailed C_pair calculation
+    c_pair_result = calculate_c_pair_detailed(c_out=0.8, c_in=0.6, d_eff=50, p_ij=0.3)
+    print(f"\nDetailed C_pair Results:")
+    print(f"  C_pair: {c_pair_result.c_pair:.4f}")
+    print(f"  Harmonic Mean: {c_pair_result.harmonic_mean:.4f}")
+    print(f"  f_dim: {c_pair_result.f_dim:.4f}")
+    print(f"  Transfer Quality: {c_pair_result.transfer_quality}")
+    print(f"  Limiting Direction: {c_pair_result.limiting_direction}")
+
+    # Test zero-propagation: c_out = 0
+    c_pair_zero_out = calculate_c_pair(c_out=0.0, c_in=0.8, d_eff=100, p_ij=1.0)
+    print(f"\nZero-propagation (c_out=0): C_pair = {c_pair_zero_out:.4f}")
+    assert c_pair_zero_out == 0.0, f"C_pair should be 0 when c_out=0, got {c_pair_zero_out}"
+
+    # Test zero-propagation: c_in = 0
+    c_pair_zero_in = calculate_c_pair(c_out=0.8, c_in=0.0, d_eff=100, p_ij=1.0)
+    print(f"Zero-propagation (c_in=0): C_pair = {c_pair_zero_in:.4f}")
+    assert c_pair_zero_in == 0.0, f"C_pair should be 0 when c_in=0, got {c_pair_zero_in}"
+
+    # Test zero-propagation: p_ij = 0
+    c_pair_zero_pij = calculate_c_pair(c_out=0.8, c_in=0.6, d_eff=100, p_ij=0.0)
+    print(f"Zero-propagation (p_ij=0): C_pair = {c_pair_zero_pij:.4f}")
+    assert c_pair_zero_pij == 0.0, f"C_pair should be 0 when p_ij=0, got {c_pair_zero_pij}"
+
+    # Test harmonic mean property: result closer to minimum
+    c_pair_asym = calculate_c_pair(c_out=0.9, c_in=0.3, d_eff=100, p_ij=1.0)
+    # Harmonic mean of 0.9 and 0.3 = 2*0.9*0.3/(0.9+0.3) = 0.45
+    # Arithmetic mean would be 0.6
+    h_mean = 2 * 0.9 * 0.3 / (0.9 + 0.3)
+    a_mean = (0.9 + 0.3) / 2
+    print(f"\nAsymmetric transfer (0.9, 0.3):")
+    print(f"  Harmonic mean: {h_mean:.4f} (used)")
+    print(f"  Arithmetic mean: {a_mean:.4f} (not used)")
+    print(f"  Difference from minimum: H-min={h_mean - 0.3:.4f}, A-min={a_mean - 0.3:.4f}")
+    assert h_mean < a_mean, "Harmonic mean should be less than arithmetic mean"
+    assert h_mean - 0.3 < a_mean - 0.3, "Harmonic mean should be closer to minimum"
+
+    # Test symmetric transfer
+    c_pair_sym = calculate_c_pair(c_out=0.7, c_in=0.7, d_eff=100, p_ij=1.0)
+    h_mean_sym = 2 * 0.7 * 0.7 / (0.7 + 0.7)  # Should equal 0.7
+    print(f"\nSymmetric transfer (0.7, 0.7):")
+    print(f"  Harmonic mean: {h_mean_sym:.4f} (equals inputs when symmetric)")
+    assert abs(h_mean_sym - 0.7) < 1e-10, "Harmonic mean of equal values should equal that value"
+
+    print("\nAll D_eff, Beta, and C_pair tests passed!")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/r3d91ll/weaver/pkg/analysis"
 	"github.com/r3d91ll/weaver/pkg/concepts"
 	werrors "github.com/r3d91ll/weaver/pkg/errors"
+	"github.com/r3d91ll/weaver/pkg/help"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/yarn"
 )
@@ -73,9 +75,10 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 func (s *Shell) Run(ctx context.Context) error {
 	defer s.rl.Close()
 
-	fmt.Println("Type a message to chat. Use @agent to target a specific agent.")
-	fmt.Println("Commands: /agents, /session, /history, /clear, /help, /quit")
-	fmt.Println("Concepts: /extract, /analyze, /compare, /concepts, /metrics")
+	// Startup hint - concise message pointing to /help for details
+	fmt.Println(help.Dim("Type a message to chat. ") +
+		help.StyleCommand("/help") + help.Dim(" for commands, ") +
+		help.StyleExample("@agent") + help.Dim(" to target agents."))
 	fmt.Println()
 
 	for {
@@ -130,7 +133,14 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		return errQuit
 
 	case "/help", "/h":
-		s.printHelp()
+		if len(parts) > 1 {
+			// Show detailed help for a specific command
+			cmdName := parts[1]
+			renderer := help.NewRenderer(os.Stdout)
+			renderer.RenderCommand(cmdName)
+		} else {
+			s.printHelp()
+		}
 
 	case "/agents":
 		s.printAgents(ctx)
@@ -235,27 +245,8 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 }
 
 func (s *Shell) printHelp() {
-	fmt.Println("Commands:")
-	fmt.Println("  /agents        - List available agents")
-	fmt.Println("  /session       - Show session info")
-	fmt.Println("  /history       - Show conversation history")
-	fmt.Println("  /clear         - Start new conversation")
-	fmt.Println("  /default <agent> - Set default agent")
-	fmt.Println("  /quit          - Exit")
-	fmt.Println()
-	fmt.Println("Concept Extraction & Analysis:")
-	fmt.Println("  /extract <concept> [n]   - Extract n samples (default 10)")
-	fmt.Println("  /analyze <concept>       - Run Kakeya geometry analysis")
-	fmt.Println("  /compare <c1> <c2>       - Compare two concepts")
-	fmt.Println("  /validate <concept> [n]  - Test consistency over n iterations")
-	fmt.Println("  /metrics <concept>       - Show raw metric values")
-	fmt.Println("  /concepts                - List stored concepts")
-	fmt.Println("  /clear_concepts          - Remove all concepts")
-	fmt.Println()
-	fmt.Println("Messages:")
-	fmt.Println("  <text>         - Send to default agent")
-	fmt.Println("  @senior <text> - Send to senior agent")
-	fmt.Println("  @junior <text> - Send to junior agent")
+	renderer := help.NewRenderer(os.Stdout)
+	renderer.RenderFull()
 }
 
 func (s *Shell) printAgents(ctx context.Context) {

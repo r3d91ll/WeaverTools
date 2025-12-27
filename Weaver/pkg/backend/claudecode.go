@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 )
 
 // ClaudeCode wraps the Claude Code CLI as a backend.
@@ -80,10 +82,7 @@ func (c *ClaudeCode) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, 
 
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("claude error: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("failed to run claude: %w", err)
+		return nil, createClaudeChatError(ctx, err)
 	}
 
 	var resp struct {
@@ -136,23 +135,23 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
-			errs <- err
+			errs <- createStreamSetupError(err, "stdin pipe")
 			return
 		}
 		defer stdin.Close() // Ensure stdin is closed even on error
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			errs <- err
+			errs <- createStreamSetupError(err, "stdout pipe")
 			return
 		}
 		if err := cmd.Start(); err != nil {
-			errs <- err
+			errs <- createStreamStartError(ctx, err)
 			return
 		}
 
 		if _, err := stdin.Write([]byte(prompt)); err != nil {
-			errs <- fmt.Errorf("failed to write prompt: %w", err)
+			errs <- createStreamWriteError(err)
 			return
 		}
 		stdin.Close() // Close immediately to signal EOF to subprocess
@@ -194,7 +193,7 @@ func (c *ClaudeCode) ChatStream(ctx context.Context, req ChatRequest) (<-chan St
 		if err := cmd.Wait(); err != nil {
 			// Only send error if channel isn't full
 			select {
-			case errs <- fmt.Errorf("command failed: %w", err):
+			case errs <- createStreamCommandError(ctx, err):
 			default:
 			}
 		}
@@ -215,4 +214,307 @@ func (c *ClaudeCode) buildPrompt(messages []ChatMessage) string {
 	}
 	parts = append(parts, "Assistant:")
 	return strings.Join(parts, "\n\n")
+}
+
+// -----------------------------------------------------------------------------
+// Error Helper Functions
+// -----------------------------------------------------------------------------
+// These functions create structured WeaverErrors for different Claude Code
+// failure scenarios with appropriate context and suggestions.
+
+// createClaudeChatError creates a structured error for Chat() failures.
+// It distinguishes between: CLI not installed, authentication issues,
+// API errors, timeout, and general execution failures.
+func createClaudeChatError(ctx context.Context, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for CLI not installed
+	if isNotInstalledError(errStr) {
+		return werrors.BackendWithContext(
+			werrors.ErrBackendNotInstalled,
+			"Claude CLI is not installed or not found in PATH",
+			map[string]string{werrors.ContextBackend: werrors.BackendClaudeCode},
+		).WithCause(err).
+			WithSuggestion("Install Claude CLI: npm install -g @anthropic-ai/claude-cli").
+			WithSuggestion("Or on macOS: brew install anthropic/tap/claude-cli").
+			WithSuggestion("After installation, authenticate with: claude auth login")
+	}
+
+	// Check for context timeout/cancellation
+	if ctx.Err() != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return werrors.BackendWithContext(
+				werrors.ErrBackendTimeout,
+				"Claude CLI request timed out",
+				map[string]string{werrors.ContextBackend: werrors.BackendClaudeCode},
+			).WithCause(err).
+				WithSuggestion("The request took too long to complete").
+				WithSuggestion("Try a shorter prompt or simpler request").
+				WithSuggestion("Check your network connection")
+		}
+		return werrors.BackendWithContext(
+			werrors.ErrBackendConnectionFailed,
+			"Claude CLI request was cancelled",
+			map[string]string{werrors.ContextBackend: werrors.BackendClaudeCode},
+		).WithCause(err).
+			WithSuggestion("The request was interrupted before completion")
+	}
+
+	// Handle exit errors with stderr content
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		stderr := string(exitErr.Stderr)
+		return createExitError(exitErr, stderr)
+	}
+
+	// Generic execution failure
+	return werrors.BackendWrap(err, werrors.ErrBackendConnectionFailed,
+		"failed to execute Claude CLI").
+		WithContext("backend", "claudecode").
+		WithSuggestion("Check that 'claude' is in your PATH").
+		WithSuggestion("Try running 'claude --version' to verify installation")
+}
+
+// createExitError creates a structured error from Claude CLI exit errors.
+// It parses stderr to determine the specific error type.
+func createExitError(exitErr *exec.ExitError, stderr string) *werrors.WeaverError {
+	stderrLower := strings.ToLower(stderr)
+
+	// Authentication errors
+	if isAuthError(stderrLower) {
+		return werrors.BackendWithContext(
+			werrors.ErrBackendAuthFailed,
+			"Claude CLI authentication failed",
+			map[string]string{
+				werrors.ContextBackend: werrors.BackendClaudeCode,
+				"exit_code":            fmt.Sprintf("%d", exitErr.ExitCode()),
+			},
+		).WithCause(exitErr).
+			WithContext("details", truncateStderr(stderr)).
+			WithSuggestion("Run 'claude auth login' to authenticate").
+			WithSuggestion("Check that your API key is valid").
+			WithSuggestion("Verify your Anthropic account is active")
+	}
+
+	// Rate limiting
+	if isRateLimitError(stderrLower) {
+		return werrors.BackendWithContext(
+			werrors.ErrBackendAPIError,
+			"Claude API rate limit exceeded",
+			map[string]string{
+				werrors.ContextBackend: werrors.BackendClaudeCode,
+				"exit_code":            fmt.Sprintf("%d", exitErr.ExitCode()),
+			},
+		).WithCause(exitErr).
+			WithContext("details", truncateStderr(stderr)).
+			WithSuggestion("Wait a few minutes and try again").
+			WithSuggestion("Consider reducing request frequency").
+			WithSuggestion("Check your API usage limits at console.anthropic.com")
+	}
+
+	// API errors (model not found, invalid request, etc.)
+	if isAPIError(stderrLower) {
+		return werrors.BackendWithContext(
+			werrors.ErrBackendAPIError,
+			"Claude API returned an error",
+			map[string]string{
+				werrors.ContextBackend: werrors.BackendClaudeCode,
+				"exit_code":            fmt.Sprintf("%d", exitErr.ExitCode()),
+			},
+		).WithCause(exitErr).
+			WithContext("details", truncateStderr(stderr)).
+			WithSuggestion("Check the error details above for more information").
+			WithSuggestion("Verify your request parameters are valid").
+			WithSuggestion("Check Anthropic status page for service issues")
+	}
+
+	// Network/connection errors
+	if isNetworkError(stderrLower) {
+		return werrors.BackendWithContext(
+			werrors.ErrBackendConnectionFailed,
+			"Claude CLI could not connect to API",
+			map[string]string{
+				werrors.ContextBackend: werrors.BackendClaudeCode,
+				"exit_code":            fmt.Sprintf("%d", exitErr.ExitCode()),
+			},
+		).WithCause(exitErr).
+			WithContext("details", truncateStderr(stderr)).
+			WithSuggestion("Check your internet connection").
+			WithSuggestion("Verify firewall settings allow outbound HTTPS").
+			WithSuggestion("Try again in a few moments")
+	}
+
+	// Generic API error with stderr content
+	return werrors.BackendWithContext(
+		werrors.ErrBackendAPIError,
+		"Claude CLI returned an error",
+		map[string]string{
+			werrors.ContextBackend: werrors.BackendClaudeCode,
+			"exit_code":            fmt.Sprintf("%d", exitErr.ExitCode()),
+		},
+	).WithCause(exitErr).
+		WithContext("details", truncateStderr(stderr)).
+		WithSuggestion("Check the error details above").
+		WithSuggestion("Run 'claude --help' for CLI usage information")
+}
+
+// createStreamSetupError creates a structured error for stream pipe setup failures.
+func createStreamSetupError(err error, pipeType string) *werrors.WeaverError {
+	return werrors.BackendWrap(err, werrors.ErrBackendStreamFailed,
+		fmt.Sprintf("failed to create %s for Claude CLI", pipeType)).
+		WithContext("backend", "claudecode").
+		WithContext("pipe_type", pipeType).
+		WithSuggestion("This is likely a system resource issue").
+		WithSuggestion("Try closing some applications to free resources").
+		WithSuggestion("Check system file descriptor limits")
+}
+
+// createStreamStartError creates a structured error for stream command start failures.
+func createStreamStartError(ctx context.Context, err error) *werrors.WeaverError {
+	errStr := err.Error()
+
+	// Check for CLI not installed
+	if isNotInstalledError(errStr) {
+		return werrors.BackendWithContext(
+			werrors.ErrBackendNotInstalled,
+			"Claude CLI is not installed or not found in PATH",
+			map[string]string{werrors.ContextBackend: werrors.BackendClaudeCode},
+		).WithCause(err).
+			WithSuggestion("Install Claude CLI: npm install -g @anthropic-ai/claude-cli").
+			WithSuggestion("Or on macOS: brew install anthropic/tap/claude-cli").
+			WithSuggestion("After installation, authenticate with: claude auth login")
+	}
+
+	return werrors.BackendWrap(err, werrors.ErrBackendStreamFailed,
+		"failed to start Claude CLI for streaming").
+		WithContext("backend", "claudecode").
+		WithSuggestion("Check that 'claude' is in your PATH").
+		WithSuggestion("Try running 'claude --version' to verify installation")
+}
+
+// createStreamWriteError creates a structured error for stream prompt write failures.
+func createStreamWriteError(err error) *werrors.WeaverError {
+	return werrors.BackendWrap(err, werrors.ErrBackendStreamFailed,
+		"failed to send prompt to Claude CLI").
+		WithContext("backend", "claudecode").
+		WithSuggestion("The Claude CLI process may have terminated unexpectedly").
+		WithSuggestion("Try the request again").
+		WithSuggestion("Check system resources and memory availability")
+}
+
+// createStreamCommandError creates a structured error for streaming command failures.
+func createStreamCommandError(ctx context.Context, err error) *werrors.WeaverError {
+	// Check for context timeout/cancellation
+	if ctx.Err() != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return werrors.BackendWithContext(
+				werrors.ErrBackendTimeout,
+				"Claude CLI streaming request timed out",
+				map[string]string{werrors.ContextBackend: werrors.BackendClaudeCode},
+			).WithCause(err).
+				WithSuggestion("The streaming request took too long to complete").
+				WithSuggestion("Try a shorter prompt or simpler request")
+		}
+		return werrors.BackendWithContext(
+			werrors.ErrBackendStreamFailed,
+			"Claude CLI streaming was cancelled",
+			map[string]string{werrors.ContextBackend: werrors.BackendClaudeCode},
+		).WithCause(err).
+			WithSuggestion("The streaming request was interrupted")
+	}
+
+	// Handle exit errors
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		stderr := string(exitErr.Stderr)
+		if stderr != "" {
+			return createExitError(exitErr, stderr)
+		}
+		// No stderr, generic stream failure
+		return werrors.BackendWithContext(
+			werrors.ErrBackendStreamFailed,
+			"Claude CLI streaming command failed",
+			map[string]string{
+				werrors.ContextBackend: werrors.BackendClaudeCode,
+				"exit_code":            fmt.Sprintf("%d", exitErr.ExitCode()),
+			},
+		).WithCause(err).
+			WithSuggestion("The Claude CLI exited unexpectedly during streaming").
+			WithSuggestion("Try the request again").
+			WithSuggestion("Check 'claude auth status' for authentication issues")
+	}
+
+	// Generic stream failure
+	return werrors.BackendWrap(err, werrors.ErrBackendStreamFailed,
+		"Claude CLI streaming command failed").
+		WithContext("backend", "claudecode").
+		WithSuggestion("An error occurred during streaming response").
+		WithSuggestion("Try the request again")
+}
+
+// -----------------------------------------------------------------------------
+// Error Detection Helpers
+// -----------------------------------------------------------------------------
+
+// isNotInstalledError checks if the error indicates the CLI is not installed.
+func isNotInstalledError(errStr string) bool {
+	errLower := strings.ToLower(errStr)
+	return strings.Contains(errLower, "executable file not found") ||
+		strings.Contains(errLower, "no such file or directory") ||
+		strings.Contains(errLower, "command not found") ||
+		strings.Contains(errLower, "not found in path")
+}
+
+// isAuthError checks if stderr indicates an authentication failure.
+func isAuthError(stderr string) bool {
+	return strings.Contains(stderr, "unauthorized") ||
+		strings.Contains(stderr, "authentication") ||
+		strings.Contains(stderr, "auth") && strings.Contains(stderr, "fail") ||
+		strings.Contains(stderr, "api key") ||
+		strings.Contains(stderr, "invalid key") ||
+		strings.Contains(stderr, "401") ||
+		strings.Contains(stderr, "not authenticated") ||
+		strings.Contains(stderr, "login required")
+}
+
+// isRateLimitError checks if stderr indicates rate limiting.
+func isRateLimitError(stderr string) bool {
+	return strings.Contains(stderr, "rate limit") ||
+		strings.Contains(stderr, "too many requests") ||
+		strings.Contains(stderr, "429") ||
+		strings.Contains(stderr, "quota exceeded") ||
+		strings.Contains(stderr, "throttl")
+}
+
+// isAPIError checks if stderr indicates a general API error.
+func isAPIError(stderr string) bool {
+	return strings.Contains(stderr, "api error") ||
+		strings.Contains(stderr, "api_error") ||
+		strings.Contains(stderr, "invalid request") ||
+		strings.Contains(stderr, "bad request") ||
+		strings.Contains(stderr, "400") ||
+		strings.Contains(stderr, "500") ||
+		strings.Contains(stderr, "502") ||
+		strings.Contains(stderr, "503") ||
+		strings.Contains(stderr, "model not found") ||
+		strings.Contains(stderr, "invalid model")
+}
+
+// isNetworkError checks if stderr indicates a network error.
+func isNetworkError(stderr string) bool {
+	return strings.Contains(stderr, "network") ||
+		strings.Contains(stderr, "connection") && strings.Contains(stderr, "fail") ||
+		strings.Contains(stderr, "connection") && strings.Contains(stderr, "refuse") ||
+		strings.Contains(stderr, "timeout") ||
+		strings.Contains(stderr, "timed out") ||
+		strings.Contains(stderr, "dns") ||
+		strings.Contains(stderr, "unreachable") ||
+		strings.Contains(stderr, "no route to host")
+}
+
+// truncateStderr truncates stderr to a reasonable length for error context.
+func truncateStderr(stderr string) string {
+	stderr = strings.TrimSpace(stderr)
+	if len(stderr) > 200 {
+		return stderr[:200] + "..."
+	}
+	return stderr
 }

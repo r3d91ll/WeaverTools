@@ -3,10 +3,11 @@ package runtime
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/r3d91ll/weaver/pkg/backend"
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 	"github.com/r3d91ll/wool"
 	"github.com/r3d91ll/yarn"
 )
@@ -73,7 +74,7 @@ func (a *Agent) Chat(ctx context.Context, messages []*yarn.Message) (*yarn.Messa
 	// Call backend (lock already released)
 	resp, err := b.Chat(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("agent %s: %w", def.Name, err)
+		return nil, createAgentChatError(def.Name, def.Backend, err)
 	}
 
 	// Create response message
@@ -156,13 +157,13 @@ func (m *Manager) Create(def wool.Agent) (*Agent, error) {
 
 	// Check for duplicate
 	if _, exists := m.agents[def.Name]; exists {
-		return nil, fmt.Errorf("agent %q already exists", def.Name)
+		return nil, createAgentAlreadyExistsError(def.Name, m.listAgentNamesLocked())
 	}
 
 	// Get backend
 	b, ok := m.registry.Get(def.Backend)
 	if !ok {
-		return nil, fmt.Errorf("backend %q not found", def.Backend)
+		return nil, createBackendNotFoundError(def.Name, def.Backend, m.registry.List())
 	}
 
 	// Create agent
@@ -227,7 +228,7 @@ func (m *Manager) CreateDefaults(juniorModel string) error {
 	senior := wool.DefaultSenior()
 	senior.ID = "senior-001"
 	if _, err := m.Create(senior); err != nil {
-		return fmt.Errorf("failed to create senior: %w", err)
+		return createDefaultAgentCreationError("senior", senior.Name, senior.Backend, err)
 	}
 
 	// Create junior (Loom)
@@ -235,8 +236,189 @@ func (m *Manager) CreateDefaults(juniorModel string) error {
 	junior.ID = "junior-001"
 	junior.Model = juniorModel
 	if _, err := m.Create(junior); err != nil {
-		return fmt.Errorf("failed to create junior: %w", err)
+		return createDefaultAgentCreationError("junior", junior.Name, junior.Backend, err)
 	}
 
 	return nil
+}
+
+// listAgentNamesLocked returns all agent names without acquiring the lock.
+// Must be called while holding the mutex.
+func (m *Manager) listAgentNamesLocked() []string {
+	names := make([]string, 0, len(m.agents))
+	for name := range m.agents {
+		names = append(names, name)
+	}
+	return names
+}
+
+// -----------------------------------------------------------------------------
+// Error Creation Helpers
+// -----------------------------------------------------------------------------
+
+// createAgentChatError creates a structured error for chat failures.
+// Detects specific failure modes and provides contextual suggestions.
+func createAgentChatError(agentName, backendName string, cause error) *werrors.WeaverError {
+	errStr := strings.ToLower(cause.Error())
+
+	// Check if the cause is already a WeaverError (from backend)
+	// In that case, wrap it to add agent context
+	if we, ok := werrors.AsWeaverError(cause); ok {
+		// Add agent context to the existing error
+		return werrors.AgentWrap(we, werrors.ErrAgentChatFailed, "chat request failed").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName)
+	}
+
+	// Detect specific error types
+	switch {
+	case isConnectionRefused(errStr):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: backend connection refused").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Ensure the backend service is running").
+			WithSuggestion("Check your network configuration")
+
+	case isTimeout(errStr):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: request timed out").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("The backend is taking too long to respond").
+			WithSuggestion("Try a simpler request or check backend status")
+
+	case isAuthError(errStr):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: authentication error").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Check your API credentials or authentication status").
+			WithSuggestion("For Claude Code: Run 'claude auth login'")
+
+	case isRateLimit(errStr):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: rate limit exceeded").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Wait a moment before sending more requests").
+			WithSuggestion("Check your API usage limits")
+
+	case isModelNotFound(errStr):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed: model not found").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("Verify the model name in your agent configuration").
+			WithSuggestion("Check available models with the backend")
+
+	case isContextCanceled(errStr):
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request was cancelled").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName).
+			WithSuggestion("The request was interrupted").
+			WithSuggestion("Try sending the message again")
+
+	default:
+		// Generic chat failure
+		return werrors.AgentWrap(cause, werrors.ErrAgentChatFailed, "chat request failed").
+			WithContext("agent", agentName).
+			WithContext("backend", backendName)
+	}
+}
+
+// createAgentAlreadyExistsError creates a structured error when an agent name is already in use.
+func createAgentAlreadyExistsError(name string, existingAgents []string) *werrors.WeaverError {
+	err := werrors.Agent(werrors.ErrAgentAlreadyExists, "an agent with this name already exists").
+		WithContext("agent", name)
+
+	if len(existingAgents) > 0 {
+		err.WithContext("existing_agents", strings.Join(existingAgents, ", "))
+	}
+
+	return err.
+		WithSuggestion("Choose a different name for the new agent").
+		WithSuggestion("Or modify the existing agent's configuration")
+}
+
+// createBackendNotFoundError creates a structured error when the backend is not registered.
+func createBackendNotFoundError(agentName, backendName string, availableBackends []string) *werrors.WeaverError {
+	err := werrors.Backend(werrors.ErrBackendNotFound, "the specified backend is not registered").
+		WithContext("agent", agentName).
+		WithContext("backend", backendName)
+
+	if len(availableBackends) > 0 {
+		err.WithContext("available_backends", strings.Join(availableBackends, ", "))
+		err.WithSuggestion("Use one of the available backends: " + strings.Join(availableBackends, ", "))
+	} else {
+		err.WithSuggestion("No backends are currently registered")
+		err.WithSuggestion("Check your configuration to enable backends")
+	}
+
+	return err.
+		WithSuggestion("Verify the backend name in your agent configuration").
+		WithSuggestion("Common backends: claudecode, loom")
+}
+
+// createDefaultAgentCreationError creates a structured error for default agent creation failures.
+func createDefaultAgentCreationError(agentType, name, backend string, cause error) *werrors.WeaverError {
+	// Check if cause is already a WeaverError
+	if we, ok := werrors.AsWeaverError(cause); ok {
+		// Wrap with additional context
+		return werrors.AgentWrap(we, werrors.ErrAgentCreationFailed, "failed to create default "+agentType+" agent").
+			WithContext("agent_type", agentType).
+			WithContext("agent", name).
+			WithContext("backend", backend)
+	}
+
+	return werrors.AgentWrap(cause, werrors.ErrAgentCreationFailed, "failed to create default "+agentType+" agent").
+		WithContext("agent_type", agentType).
+		WithContext("agent", name).
+		WithContext("backend", backend).
+		WithSuggestion("Check that the " + backend + " backend is available").
+		WithSuggestion("Verify your configuration settings")
+}
+
+// -----------------------------------------------------------------------------
+// Error Detection Helpers
+// -----------------------------------------------------------------------------
+
+// isConnectionRefused checks if the error indicates a connection refusal.
+func isConnectionRefused(errStr string) bool {
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "connection reset")
+}
+
+// isTimeout checks if the error indicates a timeout.
+func isTimeout(errStr string) bool {
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "deadline exceeded") ||
+		strings.Contains(errStr, "timed out")
+}
+
+// isAuthError checks if the error indicates an authentication problem.
+func isAuthError(errStr string) bool {
+	return strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "authentication") ||
+		strings.Contains(errStr, "auth failed") ||
+		strings.Contains(errStr, "invalid api key")
+}
+
+// isRateLimit checks if the error indicates rate limiting.
+func isRateLimit(errStr string) bool {
+	return strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "429") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "quota exceeded")
+}
+
+// isModelNotFound checks if the error indicates a missing model.
+func isModelNotFound(errStr string) bool {
+	return strings.Contains(errStr, "model not found") ||
+		strings.Contains(errStr, "unknown model") ||
+		strings.Contains(errStr, "model does not exist")
+}
+
+// isContextCanceled checks if the error indicates a cancelled context.
+func isContextCanceled(errStr string) bool {
+	return strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "context cancelled") ||
+		strings.Contains(errStr, "operation was canceled")
 }

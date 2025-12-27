@@ -1,25 +1,25 @@
 {
   "active": true,
-  "spec": "006-implement-tab-completion-for-commands-and-agent-na",
+  "spec": "007-enhance-error-messages-with-context-and-suggestion",
   "state": "building",
   "subtasks": {
-    "completed": 7,
-    "total": 8,
+    "completed": 17,
+    "total": 28,
     "in_progress": 1,
     "failed": 0
   },
   "phase": {
-    "current": "Testing and Polish",
+    "current": "Backend and Runtime Errors",
     "id": null,
-    "total": 3
+    "total": 4
   },
   "workers": {
     "active": 0,
     "max": 1
   },
   "session": {
-    "number": 9,
-    "started_at": "2025-12-25T22:22:43.010386"
+    "number": 19,
+    "started_at": "2025-12-25T22:22:20.221939"
   },
-  "last_update": "2025-12-25T22:40:27.307294"
+  "last_update": "2025-12-25T23:24:59.593829"
 }

@@ -417,6 +417,202 @@ class BootstrapCIResult:
         )
 
 
+@dataclass
+class ConveyanceMetricsResult:
+    """Complete conveyance metrics analysis result.
+
+    Combines all individual metric results (D_eff, Beta, C_pair) into a single
+    comprehensive report with overall assessment and serialization support.
+
+    This is the primary return type for full conveyance analysis, providing:
+    - Effective dimensionality analysis (semantic space utilization)
+    - Collapse indicator (semantic convergence/diversity)
+    - Pairwise conveyance metrics (bilateral transfer capacity)
+    - Overall health assessment and quality indicators
+
+    INTERPRETATION
+    ==============
+    - overall_health: Summary assessment of conveyance quality
+    - has_collapse: Quick check for semantic collapse (Beta >= 0.5)
+    - has_blocked_pairs: Quick check for blocked agent pairs
+
+    USAGE
+    =====
+    This dataclass is designed for:
+    1. Comprehensive analysis results from full pipeline
+    2. Serialization to JSON/dict for storage and API responses
+    3. Aggregation of multiple individual metric results
+
+    Integration: Follows the pattern of KakeyaGeometryReport from
+    kakeya_geometry.py for consistency across analysis modules.
+    """
+
+    d_eff_result: EffectiveDimensionalityResult  # Effective dimensionality analysis
+    beta_result: BetaResult  # Collapse indicator analysis
+    c_pair_results: list[CPairResult]  # Pairwise conveyance results (may be empty)
+    n_samples: int  # Number of embedding samples analyzed
+    ambient_dim: int  # Original/ambient dimensionality of embeddings
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_collapse(self) -> bool:
+        """Check if semantic collapse is detected (Beta >= 0.5)."""
+        return self.beta_result.is_collapsed
+
+    @property
+    def has_blocked_pairs(self) -> bool:
+        """Check if any agent pairs have blocked transfer (C_pair ≈ 0)."""
+        return any(cp.is_blocked for cp in self.c_pair_results)
+
+    @property
+    def mean_c_pair(self) -> float:
+        """Calculate mean pairwise conveyance across all pairs."""
+        if not self.c_pair_results:
+            return 0.0
+        return float(np.mean([cp.c_pair for cp in self.c_pair_results]))
+
+    @property
+    def min_c_pair(self) -> float:
+        """Get minimum pairwise conveyance (weakest link)."""
+        if not self.c_pair_results:
+            return 0.0
+        return float(min(cp.c_pair for cp in self.c_pair_results))
+
+    @property
+    def overall_health(self) -> str:
+        """Overall conveyance health assessment.
+
+        Returns a string classification based on the combination of
+        dimensionality quality, collapse severity, and transfer quality.
+
+        Categories:
+        - healthy: Good dimensionality, no collapse, strong transfer
+        - warning:<issue>: Single issue detected
+        - unhealthy:<issues>: Multiple issues detected
+        - critical: Severe collapse or all pairs blocked
+        """
+        issues = []
+
+        # Check dimensional health
+        if self.d_eff_result.dimensionality_quality == "degenerate":
+            issues.append("degenerate_space")
+        elif self.d_eff_result.is_low_dimensional:
+            issues.append("low_dimensional")
+
+        # Check collapse status
+        if self.beta_result.collapse_severity == "severe":
+            issues.append("severe_collapse")
+        elif self.beta_result.collapse_severity == "moderate":
+            issues.append("moderate_collapse")
+
+        # Check transfer quality
+        if self.has_blocked_pairs:
+            issues.append("blocked_pairs")
+        elif self.c_pair_results and self.mean_c_pair < 0.2:
+            issues.append("poor_transfer")
+
+        # Determine overall health
+        if not issues:
+            return "healthy"
+        elif "severe_collapse" in issues and "blocked_pairs" in issues:
+            return "critical"
+        elif len(issues) == 1:
+            return f"warning:{issues[0]}"
+        else:
+            return f"unhealthy:{','.join(issues)}"
+
+    @property
+    def quality_score(self) -> float:
+        """Compute overall quality score in range [0, 1].
+
+        Combines multiple indicators into a single quality metric:
+        - Dimensionality utilization (d_eff / ambient_dim)
+        - Collapse indicator (inverted: 1 - beta)
+        - Mean transfer quality (mean_c_pair)
+
+        Uses geometric mean to ensure any zero component propagates.
+        """
+        # Dimensionality score (clamped to [0, 1])
+        dim_score = max(0.0, min(1.0, self.d_eff_result.variance_ratio * 2))
+
+        # Collapse score (inverted: high beta = low score)
+        collapse_score = 1.0 - self.beta_result.beta
+
+        # Transfer score (clamped to [0, 1])
+        transfer_score = max(0.0, min(1.0, self.mean_c_pair))
+
+        # Geometric mean (zero-propagation)
+        if dim_score <= 0 or collapse_score <= 0:
+            return 0.0
+
+        if transfer_score <= 0 and self.c_pair_results:
+            return 0.0
+
+        # If no c_pair results, use only dim and collapse scores
+        if not self.c_pair_results:
+            return float(np.sqrt(dim_score * collapse_score))
+
+        return float(np.cbrt(dim_score * collapse_score * transfer_score))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization.
+
+        Returns a nested dictionary structure suitable for JSON serialization
+        or storage, containing all key metrics and assessments.
+        """
+        return {
+            "overall_health": self.overall_health,
+            "quality_score": self.quality_score,
+            "n_samples": self.n_samples,
+            "ambient_dim": self.ambient_dim,
+            "d_eff": {
+                "d_eff": self.d_eff_result.d_eff,
+                "ambient_dim": self.d_eff_result.ambient_dim,
+                "variance_ratio": self.d_eff_result.variance_ratio,
+                "quality": self.d_eff_result.dimensionality_quality,
+                "is_low_dimensional": self.d_eff_result.is_low_dimensional,
+            },
+            "beta": {
+                "beta": self.beta_result.beta,
+                "d_eff": self.beta_result.d_eff,
+                "d_max": self.beta_result.d_max,
+                "severity": self.beta_result.collapse_severity,
+                "is_collapsed": self.beta_result.is_collapsed,
+                "is_healthy": self.beta_result.is_healthy,
+                "eigenvalue_concentration": self.beta_result.eigenvalue_concentration,
+            },
+            "c_pair": {
+                "num_pairs": len(self.c_pair_results),
+                "mean_c_pair": self.mean_c_pair,
+                "min_c_pair": self.min_c_pair,
+                "has_blocked_pairs": self.has_blocked_pairs,
+                "pairs": [
+                    {
+                        "c_pair": cp.c_pair,
+                        "c_out": cp.c_out,
+                        "c_in": cp.c_in,
+                        "harmonic_mean": cp.harmonic_mean,
+                        "quality": cp.transfer_quality,
+                        "limiting_direction": cp.limiting_direction,
+                    }
+                    for cp in self.c_pair_results
+                ],
+            },
+            "metadata": self.metadata,
+        }
+
+    def __repr__(self) -> str:
+        """Human-readable representation."""
+        return (
+            f"ConveyanceMetricsResult("
+            f"health={self.overall_health!r}, "
+            f"d_eff={self.d_eff_result.d_eff}, "
+            f"beta={self.beta_result.beta:.4f}, "
+            f"n_pairs={len(self.c_pair_results)}, "
+            f"n_samples={self.n_samples})"
+        )
+
+
 # ============================================================================
 # Bootstrap Confidence Interval Calculation
 # ============================================================================

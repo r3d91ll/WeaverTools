@@ -198,7 +198,7 @@ func (c *Client) IsAvailable(ctx context.Context) bool {
 // createInsufficientVectorsError creates a structured error when not enough
 // vectors are provided for analysis.
 func createInsufficientVectorsError(operation string, provided, required int) *werrors.WeaverError {
-	return werrors.New(werrors.ErrConceptsInsufficientSamples,
+	return werrors.Validation(werrors.ErrConceptsInsufficientSamples,
 		fmt.Sprintf("%s requires at least %d vectors, but only %d provided", operation, required, provided)).
 		WithContext("operation", operation).
 		WithContext("provided_vectors", fmt.Sprintf("%d", provided)).
@@ -320,7 +320,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 	switch {
 	case statusCode == 400:
 		// Bad request - usually validation error
-		return werrors.New(werrors.ErrAnalysisInvalidResponse,
+		return werrors.Validation(werrors.ErrAnalysisInvalidResponse,
 			fmt.Sprintf("analysis server rejected request (HTTP %d)", statusCode)).
 			WithContext("analysis_type", analysisType).
 			WithContext("server_url", serverURL).
@@ -332,7 +332,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 
 	case statusCode == 404:
 		// Endpoint not found
-		return werrors.New(werrors.ErrAnalysisServerUnavailable,
+		return werrors.Network(werrors.ErrAnalysisServerUnavailable,
 			fmt.Sprintf("analysis endpoint not found (HTTP %d)", statusCode)).
 			WithContext("analysis_type", analysisType).
 			WithContext("server_url", serverURL).
@@ -343,7 +343,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 
 	case statusCode == 422:
 		// Validation error
-		return werrors.New(werrors.ErrAnalysisInvalidResponse,
+		return werrors.Validation(werrors.ErrAnalysisInvalidResponse,
 			fmt.Sprintf("analysis validation failed (HTTP %d)", statusCode)).
 			WithContext("analysis_type", analysisType).
 			WithContext("server_url", serverURL).
@@ -356,7 +356,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 	case statusCode == 500:
 		// Internal server error
 		if isAnalysisGPUError(respLower) {
-			return werrors.New(werrors.ErrAnalysisFailed,
+			return werrors.Internal(werrors.ErrAnalysisFailed,
 				"analysis server GPU error").
 				WithContext("analysis_type", analysisType).
 				WithContext("server_url", serverURL).
@@ -367,7 +367,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 				WithSuggestion("Restart TheLoom server to reset GPU state").
 				WithSuggestion("Consider using CPU-only mode if available")
 		}
-		return werrors.New(werrors.ErrAnalysisFailed,
+		return werrors.Internal(werrors.ErrAnalysisFailed,
 			fmt.Sprintf("analysis server internal error (HTTP %d)", statusCode)).
 			WithContext("analysis_type", analysisType).
 			WithContext("server_url", serverURL).
@@ -379,7 +379,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 
 	case statusCode == 502 || statusCode == 503 || statusCode == 504:
 		// Gateway/service unavailable errors
-		return werrors.New(werrors.ErrAnalysisServerUnavailable,
+		return werrors.Network(werrors.ErrAnalysisServerUnavailable,
 			fmt.Sprintf("analysis server unavailable (HTTP %d)", statusCode)).
 			WithContext("analysis_type", analysisType).
 			WithContext("server_url", serverURL).
@@ -390,7 +390,7 @@ func createHTTPError(statusCode int, responseBody, analysisType, serverURL strin
 
 	default:
 		// Generic HTTP error
-		return werrors.New(werrors.ErrAnalysisFailed,
+		return werrors.Internal(werrors.ErrAnalysisFailed,
 			fmt.Sprintf("analysis failed with HTTP status %d", statusCode)).
 			WithContext("analysis_type", analysisType).
 			WithContext("server_url", serverURL).

@@ -25,13 +25,15 @@ func (m *mockBackend) Capabilities() Capabilities   { return m.capabilities }
 func (m *mockBackend) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	return &ChatResponse{Content: "mock response"}, nil
 }
-func (m *mockBackend) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error) {
-	ch := make(chan StreamEvent)
+func (m *mockBackend) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamChunk, <-chan error) {
+	ch := make(chan StreamChunk)
+	errCh := make(chan error)
 	go func() {
-		ch <- StreamEvent{Content: "mock", Done: true}
+		ch <- StreamChunk{Content: "mock", Done: true}
 		close(ch)
+		close(errCh)
 	}()
-	return ch, nil
+	return ch, errCh
 }
 
 // -----------------------------------------------------------------------------
@@ -362,14 +364,14 @@ func TestRegistry_Status(t *testing.T) {
 	_ = r.Register("backend1", &mockBackend{
 		name:         "backend1",
 		available:    true,
-		backendType:  TypeLocal,
-		capabilities: Capabilities{Streaming: true, Tools: true},
+		backendType:  TypeLoom,
+		capabilities: Capabilities{SupportsStreaming: true, SupportsTools: true},
 	})
 	_ = r.Register("backend2", &mockBackend{
 		name:         "backend2",
 		available:    false,
-		backendType:  TypeRemote,
-		capabilities: Capabilities{Streaming: false, Tools: false},
+		backendType:  TypeClaudeCode,
+		capabilities: Capabilities{SupportsStreaming: false, SupportsTools: false},
 	})
 
 	ctx := context.Background()
@@ -387,10 +389,10 @@ func TestRegistry_Status(t *testing.T) {
 		if !s.Available {
 			t.Error("expected backend1 to be available")
 		}
-		if s.Type != TypeLocal {
-			t.Errorf("expected TypeLocal, got %v", s.Type)
+		if s.Type != TypeLoom {
+			t.Errorf("expected TypeLoom, got %v", s.Type)
 		}
-		if !s.Capabilities.Streaming {
+		if !s.Capabilities.SupportsStreaming {
 			t.Error("expected streaming capability")
 		}
 	} else {

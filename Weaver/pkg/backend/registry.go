@@ -210,6 +210,10 @@ func suggestSimilarBackends(name string, available []string) []string {
 
 		// Check for common typos or variations
 		// e.g., "claude" -> "claudecode", "loom-server" -> "loom"
+		// Skip exact matches (no suggestion needed)
+		if nameLower == backendLower {
+			continue
+		}
 		if strings.Contains(backendLower, nameLower) || strings.Contains(nameLower, backendLower) {
 			suggestions = append(suggestions, fmt.Sprintf("Did you mean %q?", backend))
 		}

@@ -66,7 +66,7 @@ type ExtractionResult struct {
 // Extract generates concept examples and stores their hidden states.
 func (e *Extractor) Extract(ctx context.Context, cfg ExtractionConfig) (*ExtractionResult, error) {
 	if !e.backend.Capabilities().SupportsHidden {
-		return nil, createBackendNoHiddenStateError(e.backend.Name(), e.backend.Type().String())
+		return nil, createBackendNoHiddenStateError(e.backend.Name(), string(e.backend.Type()))
 	}
 
 	start := time.Now()
@@ -237,7 +237,7 @@ func createChatExtractionError(cause error, concept, backendName, model string) 
 	errStr := strings.ToLower(cause.Error())
 
 	// Preserve WeaverErrors from the backend layer
-	if we := werrors.AsWeaverError(cause); we != nil {
+	if we, ok := werrors.AsWeaverError(cause); ok {
 		// Add extraction context to the existing error
 		we.WithContext("concept", concept)
 		if model != "" {
@@ -329,7 +329,7 @@ func createNoHiddenStateReturnedError(concept, backendName, model string) *werro
 // formatSampleError formats an extraction error for display in the result.
 // This provides a user-friendly string representation of the error.
 func formatSampleError(sampleNum int, err error) string {
-	if we := werrors.AsWeaverError(err); we != nil {
+	if we, ok := werrors.AsWeaverError(err); ok {
 		// Use the WeaverError message which is more descriptive
 		return fmt.Sprintf("sample %d: %s", sampleNum, we.Message)
 	}

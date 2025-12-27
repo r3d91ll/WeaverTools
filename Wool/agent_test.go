@@ -235,7 +235,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "backend",
-			wantMessage: "backend must be 'loom' or 'claudecode'",
+			wantMessage: "invalid backend",
 		},
 		{
 			name: "typo in backend",
@@ -246,7 +246,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "backend",
-			wantMessage: "backend must be 'loom' or 'claudecode'",
+			wantMessage: "invalid backend",
 		},
 		{
 			name: "capitalized backend is invalid",
@@ -257,7 +257,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "backend",
-			wantMessage: "backend must be 'loom' or 'claudecode'",
+			wantMessage: "invalid backend",
 		},
 		{
 			name: "tools enabled for role that does not support tools",
@@ -269,7 +269,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "tools_enabled",
-			wantMessage: "role does not support tools",
+			wantMessage: "role 'subject' does not support tools",
 		},
 		{
 			name: "tools enabled for conversant role",
@@ -281,7 +281,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "tools_enabled",
-			wantMessage: "role does not support tools",
+			wantMessage: "role 'conversant' does not support tools",
 		},
 		{
 			name: "tools enabled for observer role",
@@ -293,7 +293,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "tools_enabled",
-			wantMessage: "role does not support tools",
+			wantMessage: "role 'observer' does not support tools",
 		},
 		{
 			name: "negative temperature",
@@ -305,7 +305,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "temperature",
-			wantMessage: "temperature must be between 0 and 2.0",
+			wantMessage: "temperature must be between 0.0 and 2.0",
 		},
 		{
 			name: "temperature too high",
@@ -317,7 +317,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "temperature",
-			wantMessage: "temperature must be between 0 and 2.0",
+			wantMessage: "temperature must be between 0.0 and 2.0",
 		},
 		{
 			name: "negative top_p",
@@ -329,7 +329,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "top_p",
-			wantMessage: "top_p must be between 0 and 1.0",
+			wantMessage: "top_p must be between 0.0 and 1.0",
 		},
 		{
 			name: "top_p too high",
@@ -341,7 +341,7 @@ func TestAgentValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			wantField:   "top_p",
-			wantMessage: "top_p must be between 0 and 1.0",
+			wantMessage: "top_p must be between 0.0 and 1.0",
 		},
 	}
 

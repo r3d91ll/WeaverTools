@@ -38,6 +38,8 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy import stats
+from typing import Callable
 
 # ============================================================================
 # Constants
@@ -59,6 +61,18 @@ MIN_SAMPLES_FOR_BETA = 2
 # Used when computing pairwise conveyance to normalize D_eff.
 # 768 is chosen as typical hidden state dimensionality (GPT-2, BERT-base).
 DEFAULT_D_REF = 768
+
+# Default number of bootstrap resamples for confidence interval calculation.
+# 10,000 is standard for reliable CI estimation; 5,000 acceptable for speed.
+DEFAULT_BOOTSTRAP_RESAMPLES = 10000
+
+# Default confidence level for bootstrap confidence intervals.
+# 95% is the standard for scientific reporting.
+DEFAULT_CONFIDENCE_LEVEL = 0.95
+
+# Minimum samples required for meaningful bootstrap analysis.
+# With fewer samples, confidence intervals may be unreliable.
+MIN_SAMPLES_FOR_BOOTSTRAP = 10
 
 
 # ============================================================================
@@ -306,6 +320,378 @@ class CPairResult:
         if abs(self.c_out - self.c_in) / max(self.c_out, self.c_in, 0.01) < 0.1:
             return "balanced"
         return "outgoing" if self.c_out < self.c_in else "incoming"
+
+
+@dataclass
+class BootstrapCIResult:
+    """Results from bootstrap confidence interval calculation.
+
+    Bootstrap confidence intervals provide non-parametric uncertainty
+    quantification for any statistic, making them ideal for metrics like
+    D_eff, Beta, and C_pair where parametric assumptions may not hold.
+
+    MATHEMATICAL GROUNDING
+    ======================
+    Bootstrap resampling estimates the sampling distribution of a statistic by:
+    1. Drawing B samples with replacement from the original data
+    2. Computing the statistic on each bootstrap sample
+    3. Using the empirical distribution of bootstrap statistics for inference
+
+    The percentile method constructs CI as [Q_{α/2}, Q_{1-α/2}] of bootstrap
+    statistics, where α = 1 - confidence_level.
+
+    Reference: Efron & Tibshirani "An Introduction to the Bootstrap" (1993).
+    The percentile method is robust and distribution-agnostic, appropriate for
+    non-parametric settings common in embedding analysis.
+
+    INTERPRETATION
+    ==============
+    - point_estimate: The statistic computed on the original data
+    - ci_lower: Lower bound of confidence interval
+    - ci_upper: Upper bound of confidence interval
+    - ci_width: ci_upper - ci_lower (narrower = more precise)
+
+    A wider CI indicates more uncertainty, often due to:
+    - Small sample size
+    - High variability in the data
+    - Non-smooth statistic function
+
+    VALIDATION TARGET
+    =================
+    For well-behaved distributions, approximately 95% of true parameter values
+    should fall within 95% confidence intervals (coverage probability).
+    """
+
+    point_estimate: float  # Statistic computed on original data
+    ci_lower: float  # Lower bound of confidence interval
+    ci_upper: float  # Upper bound of confidence interval
+    confidence_level: float  # Confidence level (typically 0.95)
+    n_resamples: int  # Number of bootstrap resamples used
+    n_samples: int  # Number of original data points
+    standard_error: float  # Bootstrap standard error of the statistic
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ci_width(self) -> float:
+        """Width of the confidence interval."""
+        return self.ci_upper - self.ci_lower
+
+    @property
+    def relative_ci_width(self) -> float:
+        """CI width relative to point estimate (coefficient of variation)."""
+        if abs(self.point_estimate) < 1e-10:
+            return float('inf') if self.ci_width > 0 else 0.0
+        return self.ci_width / abs(self.point_estimate)
+
+    @property
+    def precision_quality(self) -> str:
+        """Classify the precision of the estimate based on CI width.
+
+        Categories:
+        - excellent: relative CI width < 0.1 (very narrow)
+        - good: 0.1 <= relative CI width < 0.3
+        - moderate: 0.3 <= relative CI width < 0.5
+        - poor: relative CI width >= 0.5 (wide uncertainty)
+        """
+        rel_width = self.relative_ci_width
+        if rel_width < 0.1:
+            return "excellent"
+        elif rel_width < 0.3:
+            return "good"
+        elif rel_width < 0.5:
+            return "moderate"
+        else:
+            return "poor"
+
+    @property
+    def is_reliable(self) -> bool:
+        """Check if the estimate is reliable (sufficient samples and narrow CI)."""
+        return self.n_samples >= MIN_SAMPLES_FOR_BOOTSTRAP and self.relative_ci_width < 0.5
+
+    def __repr__(self) -> str:
+        """Human-readable representation."""
+        return (
+            f"BootstrapCIResult(point={self.point_estimate:.4f}, "
+            f"CI=[{self.ci_lower:.4f}, {self.ci_upper:.4f}], "
+            f"n={self.n_samples})"
+        )
+
+
+# ============================================================================
+# Bootstrap Confidence Interval Calculation
+# ============================================================================
+
+
+def bootstrap_ci(
+    data: np.ndarray,
+    statistic: Callable[[np.ndarray], float] = np.mean,
+    n_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    confidence_level: float = DEFAULT_CONFIDENCE_LEVEL,
+    random_state: int | None = None,
+) -> tuple[float, float, float]:
+    """Calculate bootstrap confidence interval for a statistic.
+
+    Computes a non-parametric confidence interval using bootstrap resampling.
+    This is the recommended method for uncertainty quantification of conveyance
+    metrics (D_eff, Beta, C_pair) where parametric assumptions may not hold.
+
+    MATHEMATICAL GROUNDING
+    ======================
+    Bootstrap CI estimation works by:
+    1. Computing the statistic on original data → point estimate
+    2. Drawing B samples with replacement from data
+    3. Computing statistic on each bootstrap sample
+    4. Using percentile method: CI = [Q_{α/2}, Q_{1-α/2}]
+
+    The percentile method is chosen for robustness:
+    - No normality assumption required
+    - Works for bounded statistics (like Beta ∈ [0, 1])
+    - Distribution-agnostic
+
+    Parameters:
+        data: np.ndarray
+            1D array of data points to bootstrap from.
+        statistic: Callable[[np.ndarray], float], default=np.mean
+            Function that computes the statistic of interest.
+            Must accept a 1D array and return a scalar.
+        n_resamples: int, default=10000
+            Number of bootstrap resamples. 10,000 standard, 5,000 acceptable.
+        confidence_level: float, default=0.95
+            Confidence level for the interval (0 < level < 1).
+        random_state: int | None, default=None
+            Random seed for reproducibility.
+
+    Returns:
+        tuple[float, float, float]:
+            (point_estimate, ci_lower, ci_upper) where:
+            - point_estimate: Statistic computed on original data
+            - ci_lower: Lower bound of confidence interval
+            - ci_upper: Upper bound of confidence interval
+            Guaranteed: ci_lower <= point_estimate <= ci_upper
+
+    Raises:
+        ValueError: If data is empty, confidence_level out of range, or n_resamples < 1.
+
+    Example:
+        >>> import numpy as np
+        >>> data = np.random.randn(100)
+        >>> point, ci_low, ci_high = bootstrap_ci(data, statistic=np.mean)
+        >>> print(f"Mean: {point:.4f}, 95% CI: [{ci_low:.4f}, {ci_high:.4f}]")
+
+        >>> # Custom statistic: median absolute deviation
+        >>> from scipy.stats import median_abs_deviation
+        >>> point, ci_low, ci_high = bootstrap_ci(data, statistic=median_abs_deviation)
+
+    Notes:
+        - For small samples (n < 30), CI may be unreliable; consider increasing n_resamples
+        - Very narrow CI may indicate lack of variability in data
+        - Statistic function must be deterministic for reproducible results
+        - Uses SciPy's bootstrap with percentile method
+    """
+    # Input validation
+    data = np.asarray(data).flatten()
+
+    if len(data) == 0:
+        raise ValueError("data cannot be empty")
+
+    if not (0.0 < confidence_level < 1.0):
+        raise ValueError(
+            f"confidence_level must be in (0, 1), got {confidence_level}"
+        )
+
+    if n_resamples < 1:
+        raise ValueError(f"n_resamples must be >= 1, got {n_resamples}")
+
+    # Edge case: single data point
+    if len(data) == 1:
+        point = float(statistic(data))
+        # With single point, CI is just the point estimate
+        warnings.warn(
+            "Single data point: confidence interval equals point estimate",
+            UserWarning,
+            stacklevel=2,
+        )
+        return (point, point, point)
+
+    # Compute point estimate on original data
+    point_estimate = float(statistic(data))
+
+    # Handle edge case: all data identical
+    if np.std(data) < 1e-10:
+        # No variability - CI is just the point estimate
+        return (point_estimate, point_estimate, point_estimate)
+
+    # Perform bootstrap using scipy.stats.bootstrap
+    # CRITICAL: Data must be passed as tuple (data,) not raw array
+    rng = np.random.default_rng(random_state)
+
+    try:
+        result = stats.bootstrap(
+            (data,),  # CRITICAL: tuple format
+            statistic=statistic,
+            n_resamples=n_resamples,
+            confidence_level=confidence_level,
+            method='percentile',
+            random_state=rng,
+        )
+
+        ci_lower = float(result.confidence_interval.low)
+        ci_upper = float(result.confidence_interval.high)
+
+    except Exception as e:
+        # Fallback: if bootstrap fails, use normal approximation
+        warnings.warn(
+            f"Bootstrap failed ({e}), falling back to normal approximation",
+            UserWarning,
+            stacklevel=2,
+        )
+        std_err = np.std(data, ddof=1) / np.sqrt(len(data))
+        z = stats.norm.ppf((1 + confidence_level) / 2)
+        ci_lower = point_estimate - z * std_err
+        ci_upper = point_estimate + z * std_err
+
+    # Ensure CI bounds are ordered correctly
+    # (handles edge cases where bootstrap distribution is degenerate)
+    if ci_lower > ci_upper:
+        ci_lower, ci_upper = ci_upper, ci_lower
+
+    # Ensure point estimate is within CI bounds
+    # (can happen with skewed bootstrap distributions)
+    ci_lower = min(ci_lower, point_estimate)
+    ci_upper = max(ci_upper, point_estimate)
+
+    return (point_estimate, ci_lower, ci_upper)
+
+
+def bootstrap_ci_detailed(
+    data: np.ndarray,
+    statistic: Callable[[np.ndarray], float] = np.mean,
+    n_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    confidence_level: float = DEFAULT_CONFIDENCE_LEVEL,
+    random_state: int | None = None,
+) -> BootstrapCIResult:
+    """Calculate bootstrap confidence interval with full diagnostic information.
+
+    This is the detailed version of bootstrap_ci that returns complete
+    results including standard error, metadata, and quality indicators.
+
+    Parameters:
+        data: np.ndarray
+            1D array of data points to bootstrap from.
+        statistic: Callable[[np.ndarray], float], default=np.mean
+            Function that computes the statistic of interest.
+        n_resamples: int, default=10000
+            Number of bootstrap resamples.
+        confidence_level: float, default=0.95
+            Confidence level for the interval.
+        random_state: int | None, default=None
+            Random seed for reproducibility.
+
+    Returns:
+        BootstrapCIResult with full diagnostic information including:
+        - point_estimate, ci_lower, ci_upper: The confidence interval
+        - standard_error: Bootstrap standard error
+        - precision_quality: Classification of CI precision
+        - is_reliable: Whether the estimate is reliable
+
+    Example:
+        >>> result = bootstrap_ci_detailed(data, statistic=np.mean)
+        >>> print(f"Mean: {result.point_estimate:.4f}")
+        >>> print(f"95% CI: [{result.ci_lower:.4f}, {result.ci_upper:.4f}]")
+        >>> print(f"Precision: {result.precision_quality}")
+    """
+    # Input validation
+    data = np.asarray(data).flatten()
+    n_samples = len(data)
+
+    if n_samples == 0:
+        raise ValueError("data cannot be empty")
+
+    if not (0.0 < confidence_level < 1.0):
+        raise ValueError(
+            f"confidence_level must be in (0, 1), got {confidence_level}"
+        )
+
+    if n_resamples < 1:
+        raise ValueError(f"n_resamples must be >= 1, got {n_resamples}")
+
+    # Compute point estimate
+    point_estimate = float(statistic(data))
+
+    # Edge case: single data point
+    if n_samples == 1:
+        return BootstrapCIResult(
+            point_estimate=point_estimate,
+            ci_lower=point_estimate,
+            ci_upper=point_estimate,
+            confidence_level=confidence_level,
+            n_resamples=n_resamples,
+            n_samples=1,
+            standard_error=0.0,
+            metadata={"warning": "single_sample"},
+        )
+
+    # Edge case: no variability
+    if np.std(data) < 1e-10:
+        return BootstrapCIResult(
+            point_estimate=point_estimate,
+            ci_lower=point_estimate,
+            ci_upper=point_estimate,
+            confidence_level=confidence_level,
+            n_resamples=n_resamples,
+            n_samples=n_samples,
+            standard_error=0.0,
+            metadata={"warning": "no_variability"},
+        )
+
+    # Perform bootstrap
+    rng = np.random.default_rng(random_state)
+
+    try:
+        result = stats.bootstrap(
+            (data,),
+            statistic=statistic,
+            n_resamples=n_resamples,
+            confidence_level=confidence_level,
+            method='percentile',
+            random_state=rng,
+        )
+
+        ci_lower = float(result.confidence_interval.low)
+        ci_upper = float(result.confidence_interval.high)
+        standard_error = float(result.standard_error)
+        metadata: dict[str, Any] = {}
+
+    except Exception as e:
+        # Fallback to normal approximation
+        std_err = np.std(data, ddof=1) / np.sqrt(n_samples)
+        z = stats.norm.ppf((1 + confidence_level) / 2)
+        ci_lower = point_estimate - z * std_err
+        ci_upper = point_estimate + z * std_err
+        standard_error = std_err
+        metadata = {"warning": f"bootstrap_failed: {e}", "method": "normal_approximation"}
+
+    # Ensure proper ordering
+    if ci_lower > ci_upper:
+        ci_lower, ci_upper = ci_upper, ci_lower
+
+    ci_lower = min(ci_lower, point_estimate)
+    ci_upper = max(ci_upper, point_estimate)
+
+    # Add sample size warning if small
+    if n_samples < MIN_SAMPLES_FOR_BOOTSTRAP:
+        metadata["warning"] = metadata.get("warning", "") + "; small_sample_size"
+
+    return BootstrapCIResult(
+        point_estimate=point_estimate,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        confidence_level=confidence_level,
+        n_resamples=n_resamples,
+        n_samples=n_samples,
+        standard_error=standard_error,
+        metadata=metadata,
+    )
 
 
 # ============================================================================
@@ -1097,4 +1483,61 @@ if __name__ == "__main__":
     print(f"  Harmonic mean: {h_mean_sym:.4f} (equals inputs when symmetric)")
     assert abs(h_mean_sym - 0.7) < 1e-10, "Harmonic mean of equal values should equal that value"
 
-    print("\nAll D_eff, Beta, and C_pair tests passed!")
+    print("\n" + "=" * 60)
+    print("Testing Bootstrap Confidence Interval Calculation...")
+    print("=" * 60)
+
+    # Basic bootstrap CI with mean
+    test_data = np.random.randn(100)
+    ci_result = bootstrap_ci(test_data, statistic=np.mean, n_resamples=1000, random_state=42)
+    print(f"\nBasic Bootstrap CI for mean:")
+    print(f"  Result: {ci_result}")
+    print(f"  Point estimate: {ci_result[0]:.4f}")
+    print(f"  CI lower: {ci_result[1]:.4f}")
+    print(f"  CI upper: {ci_result[2]:.4f}")
+    assert len(ci_result) == 3, "bootstrap_ci should return 3 values"
+    assert ci_result[1] <= ci_result[0] <= ci_result[2], "CI bounds should contain point estimate"
+
+    # Test with np.std as statistic
+    ci_std = bootstrap_ci(test_data, statistic=np.std, n_resamples=1000, random_state=42)
+    print(f"\nBootstrap CI for std:")
+    print(f"  Point estimate: {ci_std[0]:.4f}")
+    print(f"  CI: [{ci_std[1]:.4f}, {ci_std[2]:.4f}]")
+    assert ci_std[1] <= ci_std[0] <= ci_std[2], "CI bounds should contain point estimate"
+
+    # Detailed bootstrap result
+    detailed_ci = bootstrap_ci_detailed(test_data, statistic=np.mean, n_resamples=1000, random_state=42)
+    print(f"\nDetailed Bootstrap CI:")
+    print(f"  Point estimate: {detailed_ci.point_estimate:.4f}")
+    print(f"  CI: [{detailed_ci.ci_lower:.4f}, {detailed_ci.ci_upper:.4f}]")
+    print(f"  Standard error: {detailed_ci.standard_error:.4f}")
+    print(f"  CI width: {detailed_ci.ci_width:.4f}")
+    print(f"  Precision quality: {detailed_ci.precision_quality}")
+    print(f"  Is reliable: {detailed_ci.is_reliable}")
+
+    # Edge case: small sample
+    small_data = np.random.randn(5)
+    ci_small = bootstrap_ci(small_data, statistic=np.mean, n_resamples=500, random_state=42)
+    print(f"\nSmall sample (n=5) CI: [{ci_small[1]:.4f}, {ci_small[2]:.4f}]")
+    assert ci_small[1] <= ci_small[0] <= ci_small[2], "Small sample CI should still be valid"
+
+    # Edge case: constant data
+    constant_data = np.ones(50)
+    ci_const = bootstrap_ci(constant_data, statistic=np.mean, random_state=42)
+    print(f"\nConstant data CI: [{ci_const[1]:.4f}, {ci_const[2]:.4f}]")
+    assert ci_const[0] == ci_const[1] == ci_const[2] == 1.0, "Constant data should have zero-width CI"
+
+    # Verify the spec requirement: result[1] < result[0] < result[2] for variable data
+    variable_data = np.random.randn(100)
+    ci_verify = bootstrap_ci(variable_data, statistic=np.mean, random_state=123)
+    print(f"\nVerification test (variable data):")
+    print(f"  CI: [{ci_verify[1]:.4f}, {ci_verify[0]:.4f}, {ci_verify[2]:.4f}]")
+    print(f"  Check: ci_lower < point < ci_upper: {ci_verify[1] < ci_verify[0] < ci_verify[2]}")
+    # For variable data, strict inequality should hold
+    assert ci_verify[1] < ci_verify[0] < ci_verify[2], "Variable data should have strict CI bounds"
+
+    print("\nAll Bootstrap CI tests passed!")
+
+    print("\n" + "=" * 60)
+    print("All D_eff, Beta, C_pair, and Bootstrap CI tests passed!")
+    print("=" * 60)

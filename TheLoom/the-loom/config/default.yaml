@@ -19,7 +19,7 @@ models:
   preload: []               # Models to load at startup (empty = load on demand)
   max_loaded: 3             # Maximum concurrent models in memory
   default_dtype: auto       # auto, float16, bfloat16, float32
-  trust_remote_code: true   # Allow remote code for custom architectures
+  trust_remote_code: false  # Security: disabled by default, enable per-model in overrides
 
 # Loader configuration
 loaders:

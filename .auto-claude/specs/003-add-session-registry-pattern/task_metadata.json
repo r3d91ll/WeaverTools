@@ -1,0 +1,14 @@
+{
+  "sourceType": "ideation",
+  "ideationType": "code_improvements",
+  "ideaId": "ci-005",
+  "rationale": "The Backend Registry in backend/registry.go provides a clean pattern for managing named resources: Register(), Get(), List(), Status(), with sync.RWMutex for concurrency. Sessions are currently standalone, but research workflows would benefit from a registry to manage multiple concurrent sessions.",
+  "category": "feature",
+  "estimatedEffort": "small",
+  "complexity": "small",
+  "affectedFiles": [
+    "Yarn/registry.go (new)",
+    "Yarn/registry_test.go (new)",
+    "Yarn/session.go"
+  ]
+}

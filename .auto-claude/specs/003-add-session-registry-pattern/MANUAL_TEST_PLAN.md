@@ -1,0 +1,69 @@
+# Manual Test Plan - 003-add-session-registry-pattern
+
+**Generated**: 2025-12-26T04:56:41.457346+00:00
+**Purpose**: Manual verification checklist to supplement automated tests
+
+## Overview
+
+This checklist supplements the automated Go test suite with manual verification
+steps. Run automated tests first with `go test -race ./Yarn/...` or `make test`.
+
+## Pre-Test Setup
+
+1. [ ] Ensure all dependencies are installed
+2. [ ] Start any required services
+3. [ ] Set up test environment variables
+
+## Acceptance Criteria Verification
+
+1. [ ] Core functionality works as expected
+2. [ ] Edge cases are handled
+3. [ ] Error states are handled gracefully
+4. [ ] UI/UX meets requirements (if applicable)
+
+
+## Functional Tests
+
+### Happy Path
+- [ ] Primary use case works correctly
+- [ ] Expected outputs are generated
+- [ ] No console errors
+
+### Edge Cases
+- [ ] Empty input handling
+- [ ] Invalid input handling
+- [ ] Boundary conditions
+
+### Error Handling
+- [ ] Errors display appropriate messages
+- [ ] System recovers gracefully from errors
+- [ ] No data loss on failure
+
+## Non-Functional Tests
+
+### Performance
+- [ ] Response time is acceptable
+- [ ] No memory leaks observed
+- [ ] No excessive resource usage
+
+### Security
+- [ ] Input is properly sanitized
+- [ ] No sensitive data exposed
+- [ ] Authentication works correctly (if applicable)
+
+## Browser/Environment Testing (if applicable)
+
+- [ ] Chrome
+- [ ] Firefox
+- [ ] Safari
+- [ ] Mobile viewport
+
+## Sign-off
+
+**Tester**: _______________
+**Date**: _______________
+**Result**: [ ] PASS  [ ] FAIL
+
+### Notes
+_Add any observations or issues found during testing_
+

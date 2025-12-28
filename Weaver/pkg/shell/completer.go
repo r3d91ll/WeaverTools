@@ -30,6 +30,15 @@ var commands = []string{
 	"clear_concepts",
 }
 
+// conceptCommands is the list of commands that expect concept names as arguments.
+// These commands will trigger concept name tab completion for their arguments.
+var conceptCommands = []string{
+	"analyze",
+	"compare",
+	"validate",
+	"metrics",
+}
+
 // ShellCompleter provides tab completion for commands and agent names.
 // It implements the readline.AutoCompleter interface.
 type ShellCompleter struct {

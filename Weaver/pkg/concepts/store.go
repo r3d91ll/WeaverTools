@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,75 @@ type Concept struct {
 	Samples   []Sample  `json:"samples"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ConceptStats holds detailed statistics for a single concept.
+type ConceptStats struct {
+	// Name is the concept name.
+	Name string `json:"name"`
+
+	// SampleCount is the number of samples for this concept.
+	SampleCount int `json:"sample_count"`
+
+	// Dimension is the hidden state dimension (0 if no samples with hidden states).
+	Dimension int `json:"dimension"`
+
+	// MismatchedIDs contains IDs of samples with dimensions different from the expected.
+	// Empty if all dimensions are consistent.
+	MismatchedIDs []string `json:"mismatched_ids,omitempty"`
+
+	// CreatedAt is when the concept was first created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the concept was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Models lists unique model identifiers used to extract samples.
+	Models []string `json:"models,omitempty"`
+
+	// OldestSampleAt is the timestamp of the oldest sample extraction.
+	// Zero time if no samples.
+	OldestSampleAt time.Time `json:"oldest_sample_at,omitempty"`
+
+	// NewestSampleAt is the timestamp of the newest sample extraction.
+	// Zero time if no samples.
+	NewestSampleAt time.Time `json:"newest_sample_at,omitempty"`
+}
+
+// StoreStats holds aggregate statistics for the entire concept store.
+// It provides a snapshot of store-wide metrics that is safe to use after
+// the store lock has been released.
+type StoreStats struct {
+	// ConceptCount is the total number of concepts in the store.
+	ConceptCount int `json:"concept_count"`
+
+	// TotalSamples is the total number of samples across all concepts.
+	TotalSamples int `json:"total_samples"`
+
+	// Dimensions maps hidden state dimensions to their frequency count.
+	// Key is the dimension, value is the number of concepts with that dimension.
+	Dimensions map[int]int `json:"dimensions"`
+
+	// Models maps model identifiers to their usage count across all samples.
+	// Key is the model name, value is the number of samples using that model.
+	Models map[string]int `json:"models"`
+
+	// HealthyConcepts is the count of concepts with consistent dimensions.
+	HealthyConcepts int `json:"healthy_concepts"`
+
+	// ConceptsWithIssues is the count of concepts with dimension mismatches.
+	ConceptsWithIssues int `json:"concepts_with_issues"`
+
+	// OldestExtraction is the timestamp of the oldest sample extraction
+	// across all concepts. Zero time if no samples exist.
+	OldestExtraction time.Time `json:"oldest_extraction,omitempty"`
+
+	// NewestExtraction is the timestamp of the newest sample extraction
+	// across all concepts. Zero time if no samples exist.
+	NewestExtraction time.Time `json:"newest_extraction,omitempty"`
+
+	// Concepts maps concept names to their detailed statistics.
+	Concepts map[string]ConceptStats `json:"concepts"`
 }
 
 // Dimension returns the hidden state dimension for this concept.
@@ -100,6 +170,110 @@ func (c *Concept) VectorsAsFloat64() [][]float64 {
 		}
 	}
 	return result
+}
+
+// Models returns a sorted slice of unique model names used for samples.
+// Iterates through samples, collects non-empty Model fields, deduplicates,
+// and returns them sorted for consistent ordering.
+// Returns nil if no models are found.
+func (c *Concept) Models() []string {
+	if len(c.Samples) == 0 {
+		return nil
+	}
+
+	// Collect unique model names using a map
+	modelSet := make(map[string]struct{})
+	for _, sample := range c.Samples {
+		if sample.Model != "" {
+			modelSet[sample.Model] = struct{}{}
+		}
+	}
+
+	// Return nil if no models found
+	if len(modelSet) == 0 {
+		return nil
+	}
+
+	// Convert to slice and sort for consistent ordering
+	models := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+
+	return models
+}
+
+// Stats returns detailed statistics for this concept.
+// It computes sample counts, dimension validation, unique models, and time ranges.
+// Handles nil HiddenState and empty samples gracefully.
+func (c *Concept) Stats() ConceptStats {
+	stats := ConceptStats{
+		Name:      c.Name,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+	}
+
+	// Handle empty samples case
+	if len(c.Samples) == 0 {
+		stats.SampleCount = 0
+		stats.Dimension = 0
+		return stats
+	}
+
+	stats.SampleCount = len(c.Samples)
+
+	// Use ValidateDimensions to get dimension and find mismatches
+	dim, mismatched := c.ValidateDimensions()
+	stats.Dimension = dim
+	stats.MismatchedIDs = mismatched
+
+	// Collect unique model names and find time ranges
+	modelSet := make(map[string]struct{})
+	var oldest, newest time.Time
+	firstTime := true
+
+	for _, sample := range c.Samples {
+		// Collect non-empty model names
+		if sample.Model != "" {
+			modelSet[sample.Model] = struct{}{}
+		}
+
+		// Track oldest and newest extraction times
+		if !sample.ExtractedAt.IsZero() {
+			if firstTime {
+				oldest = sample.ExtractedAt
+				newest = sample.ExtractedAt
+				firstTime = false
+			} else {
+				if sample.ExtractedAt.Before(oldest) {
+					oldest = sample.ExtractedAt
+				}
+				if sample.ExtractedAt.After(newest) {
+					newest = sample.ExtractedAt
+				}
+			}
+		}
+	}
+
+	// Convert model set to sorted slice for consistent output
+	if len(modelSet) > 0 {
+		models := make([]string, 0, len(modelSet))
+		for model := range modelSet {
+			models = append(models, model)
+		}
+		// Sort for consistent ordering
+		sort.Strings(models)
+		stats.Models = models
+	}
+
+	// Set time ranges if we found valid times
+	if !firstTime {
+		stats.OldestSampleAt = oldest
+		stats.NewestSampleAt = newest
+	}
+
+	return stats
 }
 
 // Store manages concepts in memory with optional persistence.
@@ -225,6 +399,89 @@ func (s *Store) Count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.concepts)
+}
+
+// Stats returns detailed statistics for all concepts in the store.
+// It holds the read lock for the entire computation to prevent data races
+// with concurrent Add() operations that modify concept samples.
+//
+// This method is safe for concurrent use.
+func (s *Store) Stats() StoreStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Initialize aggregate stats
+	stats := StoreStats{
+		ConceptCount: len(s.concepts),
+		Dimensions:   make(map[int]int),
+		Models:       make(map[string]int),
+		Concepts:     make(map[string]ConceptStats),
+	}
+
+	// Handle empty store case
+	if len(s.concepts) == 0 {
+		return stats
+	}
+
+	// Iterate concepts to compute stats for each
+	var oldestExtraction, newestExtraction time.Time
+	firstTime := true
+
+	for name, concept := range s.concepts {
+		if concept == nil {
+			continue
+		}
+
+		// Compute per-concept stats
+		cs := concept.Stats()
+		stats.Concepts[name] = cs
+
+		// Aggregate sample counts
+		stats.TotalSamples += cs.SampleCount
+
+		// Track dimension distribution
+		if cs.Dimension > 0 {
+			stats.Dimensions[cs.Dimension]++
+		}
+
+		// Track healthy vs unhealthy concepts
+		if len(cs.MismatchedIDs) > 0 {
+			stats.ConceptsWithIssues++
+		} else {
+			stats.HealthyConcepts++
+		}
+
+		// Count model usage across all samples
+		for _, sample := range concept.Samples {
+			if sample.Model != "" {
+				stats.Models[sample.Model]++
+			}
+		}
+
+		// Track overall time ranges from per-concept stats
+		if !cs.OldestSampleAt.IsZero() {
+			if firstTime {
+				oldestExtraction = cs.OldestSampleAt
+				newestExtraction = cs.NewestSampleAt
+				firstTime = false
+			} else {
+				if cs.OldestSampleAt.Before(oldestExtraction) {
+					oldestExtraction = cs.OldestSampleAt
+				}
+				if cs.NewestSampleAt.After(newestExtraction) {
+					newestExtraction = cs.NewestSampleAt
+				}
+			}
+		}
+	}
+
+	// Set time ranges if we found valid times
+	if !firstTime {
+		stats.OldestExtraction = oldestExtraction
+		stats.NewestExtraction = newestExtraction
+	}
+
+	return stats
 }
 
 // Save persists all concepts to a directory.

@@ -135,24 +135,14 @@ def analyze_layer_hidden_states(
         Dictionary mapping layer index to analysis results
     """
     # Request hidden states for specified layers
+    # API accepts "all" string directly, no need for double-request
     result = client.generate(
         model=model,
         prompt=prompt,
         max_tokens=20,  # Short generation for analysis
         return_hidden_states=True,
-        hidden_state_layers=layers if isinstance(layers, list) else None,
+        hidden_state_layers=layers,  # API accepts "all" string or list[int]
     )
-
-    # Handle "all" layers case - the API returns all if None passed
-    if layers == "all":
-        # Re-request with all layers
-        result = client.generate(
-            model=model,
-            prompt=prompt,
-            max_tokens=20,
-            return_hidden_states=True,
-            hidden_state_layers=None,  # Server returns all layers
-        )
 
     hidden_states = result.get("hidden_states", {})
     analysis_results: dict[int, dict[str, Any]] = {}

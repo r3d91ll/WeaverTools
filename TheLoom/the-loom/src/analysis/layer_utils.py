@@ -397,6 +397,9 @@ def compute_layer_trajectory(
             trend = "increasing"
         elif monotonicity < -0.5:
             trend = "decreasing"
+        elif mean_d_eff == 0:
+            # Handle zero-mean case: use absolute threshold
+            trend = "stable" if std_d_eff < 1e-8 else "variable"
         elif std_d_eff < 0.1 * mean_d_eff:
             trend = "stable"
         else:

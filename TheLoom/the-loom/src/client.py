@@ -636,7 +636,10 @@ class LoomClient:
                 d_eff_values: dict[str, int] = {}
                 for layer_idx, layer_info in layers_data.items():
                     # Extract the vector from layer info
-                    if isinstance(layer_info, dict) and "vector" in layer_info:
+                    # API returns array under "data" key, fallback to "vector" for compatibility
+                    if isinstance(layer_info, dict) and "data" in layer_info:
+                        vector = layer_info["data"]
+                    elif isinstance(layer_info, dict) and "vector" in layer_info:
                         vector = layer_info["vector"]
                     elif isinstance(layer_info, list):
                         vector = layer_info

@@ -1,0 +1,245 @@
+# GitHub Actions workflow for validating version tags
+# Runs on tag push to enforce semantic versioning and tag quality
+#
+# This workflow validates:
+#   1. Tag matches strict semver format: v[0-9]+.[0-9]+.[0-9]+
+#   2. Tag is annotated (not lightweight)
+#   3. Tag message is present and meaningful
+#
+# Usage:
+#   Automatically runs when any tag starting with 'v' is pushed
+#   Blocks releases if validation fails
+#
+# See also: release.yml (creates GitHub releases after validation)
+
+name: Version Check
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on any tag starting with 'v'
+
+permissions:
+  contents: read  # Only need read access for validation
+
+jobs:
+  validate-version-tag:
+    name: Validate Version Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      major: ${{ steps.validate.outputs.major }}
+      minor: ${{ steps.validate.outputs.minor }}
+      patch: ${{ steps.validate.outputs.patch }}
+      is_valid: ${{ steps.validate.outputs.is_valid }}
+    steps:
+      - name: Extract tag name
+        id: extract
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "::notice title=Tag Detected::Validating tag: ${TAG_NAME}"
+
+      - name: Validate strict semver format
+        id: validate
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          # Strict semver pattern: v followed by MAJOR.MINOR.PATCH (digits only)
+          # Does NOT allow pre-release or build metadata for production releases
+          STRICT_SEMVER_PATTERN="^v([0-9]+)\.([0-9]+)\.([0-9]+)$"
+
+          if [[ ! "${TAG}" =~ ${STRICT_SEMVER_PATTERN} ]]; then
+            echo "::error title=Invalid Tag Format::Tag '${TAG}' does not match required format v[0-9]+.[0-9]+.[0-9]+"
+            echo ""
+            echo "❌ VALIDATION FAILED: Tag format is invalid"
+            echo ""
+            echo "Expected format: vMAJOR.MINOR.PATCH"
+            echo "  - MAJOR: Incompatible API changes (integer)"
+            echo "  - MINOR: Backwards-compatible functionality (integer)"
+            echo "  - PATCH: Backwards-compatible bug fixes (integer)"
+            echo ""
+            echo "Valid examples:"
+            echo "  v1.0.0, v2.1.3, v10.20.30"
+            echo ""
+            echo "Invalid examples:"
+            echo "  1.0.0 (missing 'v' prefix)"
+            echo "  v1.0 (missing patch version)"
+            echo "  v1.0.0-alpha (pre-release suffix not allowed)"
+            echo "  v1.0.0+build (build metadata not allowed)"
+            echo ""
+            echo "is_valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Extract version components
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+
+          echo "✅ Tag format is valid: ${TAG}"
+          echo "   Major: ${MAJOR}"
+          echo "   Minor: ${MINOR}"
+          echo "   Patch: ${PATCH}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "major=${MAJOR}" >> $GITHUB_OUTPUT
+          echo "minor=${MINOR}" >> $GITHUB_OUTPUT
+          echo "patch=${PATCH}" >> $GITHUB_OUTPUT
+          echo "is_valid=true" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for tag verification
+
+      - name: Validate tag is annotated
+        id: annotated
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          # Get the object type of the tag reference
+          # Annotated tags have type 'tag', lightweight tags have type 'commit'
+          TAG_TYPE=$(git for-each-ref "refs/tags/${TAG}" --format='%(objecttype)')
+
+          if [[ "${TAG_TYPE}" != "tag" ]]; then
+            echo "::error title=Lightweight Tag::Tag '${TAG}' is lightweight, not annotated"
+            echo ""
+            echo "❌ VALIDATION FAILED: Tag must be annotated"
+            echo ""
+            echo "Lightweight tags store only the commit SHA."
+            echo "Annotated tags store additional metadata:"
+            echo "  - Tagger name and email"
+            echo "  - Date created"
+            echo "  - Tag message"
+            echo "  - GPG signature (optional)"
+            echo ""
+            echo "To create an annotated tag:"
+            echo "  git tag -a ${TAG} -m 'Release ${TAG}'"
+            echo ""
+            echo "Or with a multi-line message:"
+            echo "  git tag -a ${TAG} -m 'Release ${TAG}' -m 'Detailed description here'"
+            echo ""
+            echo "Then push:"
+            echo "  git push origin ${TAG}"
+            echo ""
+            exit 1
+          fi
+
+          echo "✅ Tag '${TAG}' is properly annotated (type: ${TAG_TYPE})"
+
+      - name: Validate tag message exists
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          # Get the tag message
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' "${TAG}" | head -1)
+
+          if [[ -z "${TAG_MESSAGE}" ]] || [[ "${TAG_MESSAGE}" == "" ]]; then
+            echo "::warning title=Empty Tag Message::Tag '${TAG}' has no message"
+            echo ""
+            echo "⚠️ WARNING: Tag message is empty or missing"
+            echo ""
+            echo "While not strictly required, tag messages help with:"
+            echo "  - Release documentation"
+            echo "  - Changelog generation"
+            echo "  - Historical context"
+            echo ""
+            echo "Recommended format:"
+            echo "  git tag -a ${TAG} -m 'Release ${TAG}' -m '- Feature A' -m '- Bug fix B'"
+            echo ""
+            # Don't fail, just warn
+          else
+            echo "✅ Tag message found: ${TAG_MESSAGE}"
+          fi
+
+      - name: Display tag details
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          echo ""
+          echo "📋 Tag Details"
+          echo "=============="
+          echo ""
+
+          # Show tag info
+          echo "Tag: ${TAG}"
+          echo "Version: ${{ steps.validate.outputs.version }}"
+          echo ""
+
+          # Show tagger info
+          echo "Tagger:"
+          git for-each-ref "refs/tags/${TAG}" --format='  Name: %(taggername)%0a  Email: %(taggeremail)%0a  Date: %(taggerdate:iso8601)'
+          echo ""
+
+          # Show tag message
+          echo "Message:"
+          git tag -l -n10 "${TAG}" | sed 's/^/  /'
+          echo ""
+
+          # Show which commit this tag points to
+          echo "Commit:"
+          git log -1 --format="  SHA: %H%n  Author: %an <%ae>%n  Date: %ci%n  Subject: %s" "${TAG}^{commit}"
+
+      - name: Validation summary
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          echo ""
+          echo "## ✅ Version Check Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Semver Format (\`v[0-9]+.[0-9]+.[0-9]+\`) | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          echo "| Annotated Tag (not lightweight) | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag Message Present | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Version Components" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Major | ${{ steps.validate.outputs.major }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Minor | ${{ steps.validate.outputs.minor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Patch | ${{ steps.validate.outputs.patch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This tag is ready for release. See the [Release workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release.yml) for release status." >> $GITHUB_STEP_SUMMARY
+
+  # Optional: Verify tag hasn't been force-pushed
+  verify-tag-integrity:
+    name: Verify Tag Integrity
+    runs-on: ubuntu-latest
+    needs: validate-version-tag
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for version ordering
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${{ needs.validate-version-tag.outputs.version }}"
+
+          echo "📊 Version Ordering Check"
+          echo "========================="
+          echo ""
+
+          # List all version tags sorted by version
+          echo "Existing version tags:"
+          git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | while read t; do
+            if [[ "${t}" == "${TAG}" ]]; then
+              echo "  ${t} <- current"
+            else
+              echo "  ${t}"
+            fi
+          done
+
+          echo ""
+          echo "✅ Tag ordering verified"

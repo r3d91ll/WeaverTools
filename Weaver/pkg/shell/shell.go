@@ -386,7 +386,12 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 	}
 
 	// Complete the progress bar before displaying detailed results
-	progressBar.Complete(fmt.Sprintf("Extracted %d samples", result.SamplesAdded))
+	// Call Fail() if all samples failed, otherwise Complete() with success count
+	if result.SamplesAdded == 0 && len(result.Errors) > 0 {
+		progressBar.Fail(fmt.Sprintf("All %d extractions failed", count))
+	} else {
+		progressBar.Complete(fmt.Sprintf("Extracted %d samples", result.SamplesAdded))
+	}
 
 	// Display detailed results
 	fmt.Printf("  Concept: %s\n", result.Concept)

@@ -112,6 +112,46 @@ class LoggingConfig(BaseModel):
     )
 
 
+class PersistenceConfig(BaseModel):
+    """Experiment result persistence configuration."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable automatic persistence of experiment results",
+    )
+    db_path: str = Field(
+        default="~/.local/share/loom/experiments.db",
+        description="Path to SQLite database for experiment metadata",
+    )
+    hidden_states_dir: str = Field(
+        default="~/.local/share/loom/hidden_states",
+        description="Directory for storing hidden state snapshots in HDF5 format",
+    )
+    export_dir: str = Field(
+        default="~/.local/share/loom/exports",
+        description="Directory for exported experiment data (CSV, JSON, Parquet)",
+    )
+    compression: str | None = Field(
+        default="gzip",
+        description="Compression algorithm for hidden states: 'gzip', 'lzf', or None (no compression)",
+    )
+    compression_level: int = Field(
+        default=4,
+        ge=0,
+        le=9,
+        description="Compression level (0-9, higher = better compression but slower; 0 = no compression for gzip)",
+    )
+    auto_persist: bool = Field(
+        default=True,
+        description="Automatically persist results after each generation request",
+    )
+    chunk_size: int = Field(
+        default=1024,
+        ge=64,
+        description="Chunk size for HDF5 dataset storage (affects compression efficiency)",
+    )
+
+
 class Config(BaseSettings):
     """Main configuration for The Loom."""
 
@@ -121,6 +161,7 @@ class Config(BaseSettings):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     loaders: LoadersConfig = Field(default_factory=LoadersConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
 
     # Model-specific overrides (loader, dtype, device, etc.)
     model_overrides: dict[str, dict[str, Any]] = Field(

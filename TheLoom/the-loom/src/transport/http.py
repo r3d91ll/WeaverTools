@@ -7,6 +7,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -45,6 +46,17 @@ from ..utils.metrics import (
     set_models_loaded,
 )
 from ..utils.serialization import serialize_hidden_states, tensor_to_base64, tensor_to_list
+from ..persistence import (
+    ConversationRecord,
+    ExperimentExporter,
+    ExperimentPersistence,
+    ExperimentQuery,
+    ExperimentRecord,
+    ExperimentSummary,
+    ExportError,
+    HiddenStateRecord,
+    MetricRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +230,19 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Force specific loader (auto-detect if None): transformers, sentence_transformers, custom",
     )
+    # Persistence options
+    persist: bool = Field(
+        default=False,
+        description="Persist this generation as an experiment. Requires persistence to be enabled.",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Custom experiment ID for persistence. Auto-generated if not provided.",
+    )
+    experiment_notes: str | None = Field(
+        default=None,
+        description="Optional notes or description for the persisted experiment.",
+    )
 
 
 class HiddenStateResponse(BaseModel):
@@ -248,6 +273,11 @@ class GenerateResponse(BaseModel):
     # Full sequence hidden states for manifold/boundary object analysis
     sequence_hidden_states: dict[str, SequenceHiddenStateResponse] | None = None
     metadata: dict[str, Any]
+    # Persistence result
+    experiment_id: str | None = Field(
+        default=None,
+        description="Experiment ID if persistence was enabled and successful.",
+    )
 
 
 class StreamingGenerateRequest(BaseModel):
@@ -502,6 +532,19 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
     )
+    # Persistence options
+    persist: bool = Field(
+        default=False,
+        description="Persist this chat completion as an experiment. Requires persistence to be enabled.",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Custom experiment ID for persistence. Auto-generated if not provided.",
+    )
+    experiment_notes: str | None = Field(
+        default=None,
+        description="Optional notes or description for the persisted experiment.",
+    )
 
 
 class StreamingChatCompletionRequest(BaseModel):
@@ -604,6 +647,11 @@ class ChatCompletionResponse(BaseModel):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Generation metadata"
+    )
+    # Persistence result
+    experiment_id: str | None = Field(
+        default=None,
+        description="Experiment ID if persistence was enabled and successful.",
     )
 
 
@@ -726,6 +774,193 @@ class ModelLoadResponse(BaseModel):
     load_time_seconds: float
     loader_type: str = Field(description="Which loader was used")
     quantization: str = Field(default="none", description="Quantization mode used")
+
+
+# ============================================================================
+# Experiment Persistence Query Models
+# ============================================================================
+
+
+class ExperimentResponse(BaseModel):
+    """Response model for experiment metadata."""
+
+    id: str = Field(description="Unique experiment identifier")
+    created_at: datetime = Field(description="Experiment creation timestamp")
+    model: str = Field(description="Model identifier used in the experiment")
+    config: dict[str, Any] = Field(description="Experiment configuration")
+    status: str = Field(description="Experiment status (running, completed, failed)")
+    notes: str | None = Field(default=None, description="Optional notes or description")
+
+
+class ExperimentSummaryResponse(BaseModel):
+    """Response model for experiment summary statistics."""
+
+    experiment_id: str = Field(description="Unique experiment identifier")
+    model: str = Field(description="Model identifier")
+    created_at: datetime = Field(description="Experiment creation timestamp")
+    status: str = Field(description="Experiment status")
+    conversation_count: int = Field(description="Number of conversation messages")
+    metric_count: int = Field(description="Number of metrics recorded")
+    hidden_state_count: int = Field(description="Number of hidden state snapshots")
+
+
+class ExperimentListResponse(BaseModel):
+    """Response model for listing experiments."""
+
+    experiments: list[ExperimentResponse] = Field(description="List of experiments")
+    total: int = Field(description="Total count of matching experiments")
+    limit: int = Field(description="Limit used in the query")
+    offset: int = Field(description="Offset used in the query")
+
+
+class ConversationResponse(BaseModel):
+    """Response model for a conversation message."""
+
+    id: int | None = Field(default=None, description="Conversation record ID")
+    experiment_id: str = Field(description="Parent experiment identifier")
+    sequence_num: int = Field(description="Message sequence number")
+    timestamp: datetime = Field(description="Message timestamp")
+    role: str = Field(description="Message role (user, assistant, system)")
+    content: str = Field(description="Message content")
+
+
+class ConversationsListResponse(BaseModel):
+    """Response model for listing conversations."""
+
+    experiment_id: str = Field(description="Parent experiment identifier")
+    conversations: list[ConversationResponse] = Field(description="List of conversation messages")
+    total: int = Field(description="Total count of messages")
+
+
+class HiddenStateRecordResponse(BaseModel):
+    """Response model for hidden state record from persistence."""
+
+    id: int | None = Field(default=None, description="Hidden state record ID")
+    experiment_id: str = Field(description="Parent experiment identifier")
+    layer: int = Field(description="Layer index")
+    file_path: str = Field(description="Path to HDF5 file")
+    shape: list[int] = Field(description="Tensor shape")
+    dtype: str = Field(description="Data type")
+    timestamp: datetime = Field(description="Record timestamp")
+
+
+class HiddenStatesListResponse(BaseModel):
+    """Response model for listing hidden states."""
+
+    experiment_id: str = Field(description="Parent experiment identifier")
+    hidden_states: list[HiddenStateRecordResponse] = Field(description="List of hidden state records")
+    layers: list[int] = Field(description="Available layer indices")
+    total: int = Field(description="Total count of hidden state records")
+
+
+class MetricResponse(BaseModel):
+    """Response model for a metric record."""
+
+    id: int | None = Field(default=None, description="Metric record ID")
+    experiment_id: str = Field(description="Parent experiment identifier")
+    name: str = Field(description="Metric name")
+    value: float = Field(description="Metric value")
+    unit: str | None = Field(default=None, description="Unit of measurement")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    timestamp: datetime = Field(description="Record timestamp")
+
+
+class ExperimentDetailResponse(BaseModel):
+    """Response model for detailed experiment data."""
+
+    experiment: ExperimentResponse = Field(description="Experiment metadata")
+    conversations: list[ConversationResponse] = Field(description="Conversation messages")
+    hidden_states: list[HiddenStateRecordResponse] = Field(description="Hidden state records")
+    metrics: list[MetricResponse] = Field(description="Metric records")
+    summary: ExperimentSummaryResponse = Field(description="Summary statistics")
+
+
+# ============================================================================
+# Experiment Export Models
+# ============================================================================
+
+
+class ExperimentExportRequest(BaseModel):
+    """Request model for exporting experiment data."""
+
+    experiment_id: str = Field(description="The experiment identifier to export")
+    format: str = Field(
+        default="json",
+        description="Export format: 'json', 'csv', or 'parquet'",
+    )
+    output_path: str | None = Field(
+        default=None,
+        description="Optional custom output path. If not provided, uses configured export directory.",
+    )
+    include_hidden_states: bool = Field(
+        default=False,
+        description="Include actual hidden state data (JSON only). Warning: can produce large files.",
+    )
+
+
+class ExperimentExportResponse(BaseModel):
+    """Response model for experiment export operation."""
+
+    experiment_id: str = Field(description="The exported experiment identifier")
+    format: str = Field(description="Export format used")
+    output_files: dict[str, str] = Field(
+        description="Mapping of data type to file path for the exported files"
+    )
+    total_files: int = Field(description="Total number of files created")
+
+
+class ExperimentBatchExportRequest(BaseModel):
+    """Request model for exporting multiple experiments."""
+
+    experiment_ids: list[str] = Field(
+        description="List of experiment identifiers to export",
+        min_length=1,
+    )
+    format: str = Field(
+        default="json",
+        description="Export format: 'json', 'csv', or 'parquet'",
+    )
+    output_dir: str | None = Field(
+        default=None,
+        description="Optional output directory. If not provided, uses configured export directory.",
+    )
+
+
+class ExperimentBatchExportResponse(BaseModel):
+    """Response model for batch experiment export."""
+
+    exported: dict[str, dict[str, str]] = Field(
+        description="Mapping of experiment_id to their exported file paths"
+    )
+    total_experiments: int = Field(description="Number of experiments exported")
+    format: str = Field(description="Export format used")
+
+
+class ExperimentSummaryExportRequest(BaseModel):
+    """Request model for exporting experiment summary."""
+
+    format: str = Field(
+        default="csv",
+        description="Export format: 'json', 'csv', or 'parquet'",
+    )
+    output_path: str | None = Field(
+        default=None,
+        description="Optional custom output path.",
+    )
+    limit: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+        description="Maximum number of experiments to include in summary",
+    )
+
+
+class ExperimentSummaryExportResponse(BaseModel):
+    """Response model for experiment summary export."""
+
+    output_path: str = Field(description="Path to the created summary file")
+    total_experiments: int = Field(description="Number of experiments in summary")
+    format: str = Field(description="Export format used")
 
 
 # ============================================================================
@@ -1036,6 +1271,21 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         auto_unload_minutes=config.models.auto_unload_minutes,
     )
 
+    # Initialize persistence layer if enabled
+    persistence: ExperimentPersistence | None = None
+    if config.persistence.enabled:
+        persistence = ExperimentPersistence(
+            db_path=config.persistence.db_path,
+            storage_dir=config.persistence.hidden_states_dir,
+            compression=config.persistence.compression,
+            compression_level=config.persistence.compression_level,
+            chunk_size=config.persistence.chunk_size,
+        )
+        logger.info(
+            f"Persistence enabled: db={config.persistence.db_path}, "
+            f"storage={config.persistence.hidden_states_dir}"
+        )
+
     # Background task state
     auto_unload_task: asyncio.Task[None] | None = None
 
@@ -1073,6 +1323,10 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 await auto_unload_task
             except asyncio.CancelledError:
                 pass
+        # Close persistence layer if enabled
+        if persistence is not None:
+            persistence.close()
+            logger.info("Persistence layer closed")
 
     app = FastAPI(
         title="The Loom",
@@ -1101,6 +1355,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     app.state.gpu_manager = gpu_manager
     app.state.model_manager = model_manager
     app.state.registry = registry
+    app.state.persistence = persistence
 
     # ========================================================================
     # Streaming Chat Completions Helper
@@ -1635,6 +1890,99 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     ),
                 )
 
+            # Handle optional persistence
+            persisted_experiment_id: str | None = None
+            if request.persist:
+                if persistence is None:
+                    logger.warning(
+                        "Persistence requested but not enabled. "
+                        "Set persistence.enabled=true in config."
+                    )
+                else:
+                    try:
+                        import numpy as np
+
+                        # Build config from request parameters
+                        exp_config = {
+                            "max_tokens": request.max_tokens,
+                            "temperature": request.temperature,
+                            "top_p": request.top_p,
+                            "hidden_state_layers": (
+                                hidden_state_layers
+                                if isinstance(request.hidden_state_layers, list)
+                                else request.hidden_state_layers
+                            ),
+                            "return_hidden_states": request.return_hidden_states,
+                            "return_attention": request.return_attention,
+                            "return_full_sequence": request.return_full_sequence,
+                        }
+
+                        # Create the experiment record
+                        experiment = persistence.create_experiment(
+                            model=request.model,
+                            config=exp_config,
+                            experiment_id=request.experiment_id,
+                            status="running",
+                            notes=request.experiment_notes,
+                        )
+                        persisted_experiment_id = experiment.id
+
+                        # Persist conversation (prompt and response)
+                        persistence.persist_conversations(
+                            experiment_id=experiment.id,
+                            messages=[
+                                {"role": "user", "content": request.prompt},
+                                {"role": "assistant", "content": output.text},
+                            ],
+                        )
+
+                        # Persist hidden states if available
+                        if output.hidden_states:
+                            # Convert tensors to numpy arrays for storage
+                            hidden_states_np: dict[int, np.ndarray] = {}
+                            for layer_idx, tensor in output.hidden_states.items():
+                                if hasattr(tensor, "cpu"):
+                                    arr = tensor.cpu().detach().float().numpy()
+                                else:
+                                    arr = np.asarray(tensor, dtype=np.float32)
+                                hidden_states_np[layer_idx] = arr
+
+                            persistence.persist_hidden_states(
+                                experiment_id=experiment.id,
+                                hidden_states=hidden_states_np,
+                                metadata={
+                                    "model": request.model,
+                                    "prompt_length": len(request.prompt),
+                                    "token_count": len(output.token_ids),
+                                },
+                            )
+
+                        # Persist generation metrics
+                        persistence.persist_metrics(
+                            experiment_id=experiment.id,
+                            metrics={
+                                "latency_ms": gen_latency * 1000,
+                                "token_count": float(len(output.token_ids)),
+                                "tokens_per_second": (
+                                    len(output.token_ids) / gen_latency
+                                    if gen_latency > 0
+                                    else 0.0
+                                ),
+                            },
+                        )
+
+                        # Mark experiment as completed
+                        persistence.complete_experiment(experiment.id, status="completed")
+                        logger.info(f"Persisted generation as experiment: {experiment.id}")
+
+                    except Exception as persist_error:
+                        # Log error but don't fail the request
+                        logger.exception(
+                            f"Failed to persist generation: {persist_error}"
+                        )
+                        # Still include the experiment_id if it was created
+                        # so user knows to check for partial data
+
             return GenerateResponse(
                 text=output.text,
                 token_count=len(output.token_ids),
@@ -1642,6 +1990,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 attention_weights=attention_response,
                 sequence_hidden_states=sequence_hidden_states_response,
                 metadata=output.metadata,
+                experiment_id=persisted_experiment_id,
             )
 
         except Exception as e:
@@ -1768,6 +2117,103 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                         dtype=dtype_str,
                     )
 
+            # Handle optional persistence
+            persisted_experiment_id: str | None = None
+            if request.persist:
+                if persistence is None:
+                    logger.warning(
+                        "Persistence requested but not enabled. "
+                        "Set persistence.enabled=true in config."
+                    )
+                else:
+                    try:
+                        import numpy as np
+
+                        # Build config from request parameters
+                        exp_config = {
+                            "max_tokens": request.max_tokens,
+                            "temperature": request.temperature,
+                            "top_p": request.top_p,
+                            "return_hidden_states": request.return_hidden_states,
+                            "stream": request.stream,
+                        }
+
+                        # Create the experiment record
+                        experiment = persistence.create_experiment(
+                            model=request.model,
+                            config=exp_config,
+                            experiment_id=request.experiment_id,
+                            status="running",
+                            notes=request.experiment_notes,
+                        )
+                        persisted_experiment_id = experiment.id
+
+                        # Persist conversation messages (input messages + assistant response)
+                        messages_to_persist = []
+                        for msg in request.messages:
+                            messages_to_persist.append({
+                                "role": msg.role,
+                                "content": msg.content,
+                            })
+                        # Add assistant response
+                        messages_to_persist.append({
+                            "role": "assistant",
+                            "content": output.text,
+                        })
+                        persistence.persist_conversations(
+                            experiment_id=experiment.id,
+                            messages=messages_to_persist,
+                        )
+
+                        # Persist hidden states if available
+                        if output.hidden_states:
+                            # Convert tensors to numpy arrays for storage
+                            hidden_states_np: dict[int, np.ndarray] = {}
+                            for layer_idx, tensor in output.hidden_states.items():
+                                if hasattr(tensor, "cpu"):
+                                    arr = tensor.cpu().detach().float().numpy()
+                                else:
+                                    arr = np.asarray(tensor, dtype=np.float32)
+                                hidden_states_np[layer_idx] = arr
+
+                            persistence.persist_hidden_states(
+                                experiment_id=experiment.id,
+                                hidden_states=hidden_states_np,
+                                metadata={
+                                    "model": request.model,
+                                    "message_count": len(request.messages),
+                                    "token_count": completion_tokens,
+                                },
+                            )
+
+                        # Persist generation metrics
+                        persistence.persist_metrics(
+                            experiment_id=experiment.id,
+                            metrics={
+                                "latency_ms": gen_latency * 1000,
+                                "prompt_tokens": float(prompt_tokens),
+                                "completion_tokens": float(completion_tokens),
+                                "total_tokens": float(prompt_tokens + completion_tokens),
+                                "tokens_per_second": (
+                                    completion_tokens / gen_latency
+                                    if gen_latency > 0
+                                    else 0.0
+                                ),
+                            },
+                        )
+
+                        # Mark experiment as completed
+                        persistence.complete_experiment(experiment.id, status="completed")
+                        logger.info(f"Persisted chat completion as experiment: {experiment.id}")
+
+                    except Exception as persist_error:
+                        # Log error but don't fail the request
+                        logger.exception(
+                            f"Failed to persist chat completion: {persist_error}"
+                        )
+                        # Still include the experiment_id if it was created
+                        # so user knows to check for partial data
+
             return ChatCompletionResponse(
                 text=output.text,
                 usage=usage,
@@ -1779,6 +2225,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     if gen_latency > 0
                     else 0,
                 },
+                experiment_id=persisted_experiment_id,
             )
 
         except HTTPException:
@@ -2263,6 +2710,624 @@ def create_http_app(config: Config | None = None) -> FastAPI:
 
         except Exception as e:
             logger.exception(f"Batch embedding failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    # ========================================================================
+    # Experiment Persistence Query Endpoints
+    # ========================================================================
+
+    def _experiment_record_to_response(record: ExperimentRecord) -> ExperimentResponse:
+        """Convert an ExperimentRecord to ExperimentResponse."""
+        return ExperimentResponse(
+            id=record.id,
+            created_at=record.created_at,
+            model=record.model,
+            config=record.config,
+            status=record.status,
+            notes=record.notes,
+        )
+
+    def _conversation_record_to_response(record: ConversationRecord) -> ConversationResponse:
+        """Convert a ConversationRecord to ConversationResponse."""
+        return ConversationResponse(
+            id=record.id,
+            experiment_id=record.experiment_id,
+            sequence_num=record.sequence_num,
+            timestamp=record.timestamp,
+            role=record.role,
+            content=record.content,
+        )
+
+    def _hidden_state_record_to_response(record: HiddenStateRecord) -> HiddenStateRecordResponse:
+        """Convert a HiddenStateRecord to HiddenStateRecordResponse."""
+        return HiddenStateRecordResponse(
+            id=record.id,
+            experiment_id=record.experiment_id,
+            layer=record.layer,
+            file_path=record.file_path,
+            shape=list(record.shape),
+            dtype=record.dtype,
+            timestamp=record.timestamp,
+        )
+
+    def _metric_record_to_response(record: MetricRecord) -> MetricResponse:
+        """Convert a MetricRecord to MetricResponse."""
+        return MetricResponse(
+            id=record.id,
+            experiment_id=record.experiment_id,
+            name=record.name,
+            value=record.value,
+            unit=record.unit,
+            metadata=record.metadata,
+            timestamp=record.timestamp,
+        )
+
+    @app.get("/experiments", response_model=ExperimentListResponse)
+    async def list_experiments(
+        limit: int = 100,
+        offset: int = 0,
+        model: str | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> ExperimentListResponse:
+        """List persisted experiments with optional filtering.
+
+        Query experiments stored in the persistence layer. Supports filtering
+        by model, status, and date range with pagination.
+
+        Parameters:
+            limit: Maximum number of experiments to return (default: 100).
+            offset: Number of experiments to skip for pagination (default: 0).
+            model: Filter by model identifier.
+            status: Filter by experiment status (running, completed, failed).
+            date_from: Filter experiments created on or after this datetime.
+            date_to: Filter experiments created on or before this datetime.
+
+        Returns:
+            ExperimentListResponse with experiments and pagination info.
+
+        Raises:
+            HTTPException: 503 if persistence is not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Create query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                experiments = query.list_experiments(
+                    limit=limit,
+                    offset=offset,
+                    model=model,
+                    status=status,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                total = query.count_experiments(model=model, status=status)
+            finally:
+                query.close()
+
+            return ExperimentListResponse(
+                experiments=[_experiment_record_to_response(exp) for exp in experiments],
+                total=total,
+                limit=limit,
+                offset=offset,
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to list experiments: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}", response_model=ExperimentDetailResponse)
+    async def get_experiment(experiment_id: str) -> ExperimentDetailResponse:
+        """Get detailed information about a specific experiment.
+
+        Retrieves the experiment metadata along with all associated
+        conversations, hidden state records, metrics, and summary statistics.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+
+        Returns:
+            ExperimentDetailResponse with full experiment data.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Get experiment data
+            data = persistence.get_experiment_data(experiment_id, include_hidden_states=False)
+
+            if data is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            experiment: ExperimentRecord = data["experiment"]
+            conversations: list[ConversationRecord] = data["conversations"]
+            hidden_state_records: list[HiddenStateRecord] = data["hidden_state_records"]
+            metrics: list[MetricRecord] = data["metrics"]
+
+            # Build summary
+            summary = ExperimentSummaryResponse(
+                experiment_id=experiment.id,
+                model=experiment.model,
+                created_at=experiment.created_at,
+                status=experiment.status,
+                conversation_count=len(conversations),
+                metric_count=len(metrics),
+                hidden_state_count=len(hidden_state_records),
+            )
+
+            return ExperimentDetailResponse(
+                experiment=_experiment_record_to_response(experiment),
+                conversations=[_conversation_record_to_response(c) for c in conversations],
+                hidden_states=[_hidden_state_record_to_response(hs) for hs in hidden_state_records],
+                metrics=[_metric_record_to_response(m) for m in metrics],
+                summary=summary,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get experiment {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}/conversations", response_model=ConversationsListResponse)
+    async def get_experiment_conversations(
+        experiment_id: str,
+        role: str | None = None,
+    ) -> ConversationsListResponse:
+        """Get conversation messages for an experiment.
+
+        Retrieves all conversation messages associated with the experiment,
+        optionally filtered by role.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+            role: Optional filter for specific role (user, assistant, system).
+
+        Returns:
+            ConversationsListResponse with conversation messages.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Get conversations using query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                conversations = query.get_conversations(experiment_id, role=role)
+            finally:
+                query.close()
+
+            return ConversationsListResponse(
+                experiment_id=experiment_id,
+                conversations=[_conversation_record_to_response(c) for c in conversations],
+                total=len(conversations),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get conversations for {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}/hidden_states", response_model=HiddenStatesListResponse)
+    async def get_experiment_hidden_states(
+        experiment_id: str,
+        layer: int | None = None,
+    ) -> HiddenStatesListResponse:
+        """Get hidden state records for an experiment.
+
+        Retrieves hidden state metadata for the experiment. The actual tensor
+        data can be loaded separately using the file paths returned.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+            layer: Optional filter for specific layer index.
+
+        Returns:
+            HiddenStatesListResponse with hidden state records and layer info.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Get hidden states using query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                hidden_states = query.get_hidden_states(experiment_id, layer=layer)
+                available_layers = query.get_hidden_state_layers(experiment_id)
+            finally:
+                query.close()
+
+            return HiddenStatesListResponse(
+                experiment_id=experiment_id,
+                hidden_states=[_hidden_state_record_to_response(hs) for hs in hidden_states],
+                layers=available_layers,
+                total=len(hidden_states),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get hidden states for {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}/metrics")
+    async def get_experiment_metrics(
+        experiment_id: str,
+        metric_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Get metrics for an experiment.
+
+        Retrieves all metrics recorded for the experiment, optionally
+        filtered by metric name.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+            metric_name: Optional filter for specific metric type.
+
+        Returns:
+            Dict with experiment_id, metrics list, and metric names.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Get metrics using query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                metrics = query.get_metrics(experiment_id, metric_name=metric_name)
+                metric_names = query.get_metric_names(experiment_id)
+            finally:
+                query.close()
+
+            return {
+                "experiment_id": experiment_id,
+                "metrics": [_metric_record_to_response(m) for m in metrics],
+                "metric_names": metric_names,
+                "total": len(metrics),
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get metrics for {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    # ========================================================================
+    # Experiment Export Endpoints
+    # ========================================================================
+
+    @app.post("/experiments/export", response_model=ExperimentExportResponse)
+    async def export_experiment(
+        request: ExperimentExportRequest,
+    ) -> ExperimentExportResponse:
+        """Export an experiment to the specified format.
+
+        Exports experiment data to JSON, CSV, or Parquet format. The exported
+        files include experiment metadata, conversations, metrics, and hidden
+        state references.
+
+        Parameters:
+            request: Export request with experiment_id, format, and options.
+
+        Returns:
+            ExperimentExportResponse with paths to created files.
+
+        Raises:
+            HTTPException: 400 if invalid format, 404 if experiment not found,
+                          503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        # Validate format
+        valid_formats = ("json", "csv", "parquet")
+        if request.format not in valid_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid format: {request.format}. Must be one of {valid_formats}.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(request.experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {request.experiment_id}",
+                )
+
+            # Create exporter
+            exporter = ExperimentExporter(
+                db_path=persistence.db._db_path,
+                storage_dir=persistence.storage._storage_dir,
+            )
+
+            try:
+                # Determine output path
+                output_dir = request.output_path or str(config.persistence.export_dir)
+
+                output_files: dict[str, str] = {}
+
+                if request.format == "json":
+                    from pathlib import Path
+                    output_path = Path(output_dir) / f"{request.experiment_id}.json"
+                    result_path = exporter.export_json(
+                        experiment_id=request.experiment_id,
+                        output_path=output_path,
+                        include_hidden_state_data=request.include_hidden_states,
+                    )
+                    output_files["json"] = str(result_path)
+
+                elif request.format == "csv":
+                    from pathlib import Path
+                    base_path = Path(output_dir) / request.experiment_id
+                    result_paths = exporter.export_csv(
+                        experiment_id=request.experiment_id,
+                        output_path=base_path,
+                    )
+                    output_files = {k: str(v) for k, v in result_paths.items()}
+
+                elif request.format == "parquet":
+                    from pathlib import Path
+                    base_path = Path(output_dir) / request.experiment_id
+                    result_paths = exporter.export_parquet(
+                        experiment_id=request.experiment_id,
+                        output_path=base_path,
+                    )
+                    output_files = {k: str(v) for k, v in result_paths.items()}
+
+            finally:
+                exporter.close()
+
+            logger.info(
+                f"Exported experiment {request.experiment_id} to {request.format}: "
+                f"{len(output_files)} files"
+            )
+
+            return ExperimentExportResponse(
+                experiment_id=request.experiment_id,
+                format=request.format,
+                output_files=output_files,
+                total_files=len(output_files),
+            )
+
+        except ExportError as e:
+            logger.error(f"Export failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to export experiment {request.experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.post("/experiments/export/batch", response_model=ExperimentBatchExportResponse)
+    async def export_experiments_batch(
+        request: ExperimentBatchExportRequest,
+    ) -> ExperimentBatchExportResponse:
+        """Export multiple experiments to the specified format.
+
+        Exports multiple experiments at once, creating a separate file (or set
+        of files for CSV/Parquet) for each experiment in the output directory.
+
+        Parameters:
+            request: Batch export request with experiment_ids, format, and output_dir.
+
+        Returns:
+            ExperimentBatchExportResponse with paths to all created files.
+
+        Raises:
+            HTTPException: 400 if invalid format, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        # Validate format
+        valid_formats = ("json", "csv", "parquet")
+        if request.format not in valid_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid format: {request.format}. Must be one of {valid_formats}.",
+            )
+
+        try:
+            # Create exporter
+            exporter = ExperimentExporter(
+                db_path=persistence.db._db_path,
+                storage_dir=persistence.storage._storage_dir,
+            )
+
+            try:
+                # Determine output directory
+                output_dir = request.output_dir or str(config.persistence.export_dir)
+
+                # Export all experiments
+                results = exporter.export_experiments(
+                    experiment_ids=request.experiment_ids,
+                    output_dir=output_dir,
+                    format=request.format,
+                )
+
+                # Convert Path objects to strings
+                exported: dict[str, dict[str, str]] = {}
+                for exp_id, paths in results.items():
+                    if isinstance(paths, dict):
+                        exported[exp_id] = {k: str(v) for k, v in paths.items()}
+                    else:
+                        exported[exp_id] = {"file": str(paths)}
+
+            finally:
+                exporter.close()
+
+            logger.info(
+                f"Batch exported {len(exported)} experiments to {request.format}"
+            )
+
+            return ExperimentBatchExportResponse(
+                exported=exported,
+                total_experiments=len(exported),
+                format=request.format,
+            )
+
+        except ExportError as e:
+            logger.error(f"Batch export failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to batch export experiments: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.post("/experiments/export/summary", response_model=ExperimentSummaryExportResponse)
+    async def export_experiments_summary(
+        request: ExperimentSummaryExportRequest,
+    ) -> ExperimentSummaryExportResponse:
+        """Export a summary of all experiments.
+
+        Creates a summary file containing basic information about all experiments
+        without detailed conversations or hidden states. Useful for quick overview
+        and analysis.
+
+        Parameters:
+            request: Summary export request with format, output_path, and limit.
+
+        Returns:
+            ExperimentSummaryExportResponse with path to created file.
+
+        Raises:
+            HTTPException: 400 if invalid format, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        # Validate format
+        valid_formats = ("json", "csv", "parquet")
+        if request.format not in valid_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid format: {request.format}. Must be one of {valid_formats}.",
+            )
+
+        try:
+            # Create exporter
+            exporter = ExperimentExporter(
+                db_path=persistence.db._db_path,
+                storage_dir=persistence.storage._storage_dir,
+            )
+
+            try:
+                # Determine output path
+                from pathlib import Path
+
+                if request.output_path:
+                    output_path = request.output_path
+                else:
+                    export_dir = Path(config.persistence.export_dir)
+                    extension = "json" if request.format == "json" else request.format
+                    output_path = str(export_dir / f"experiments_summary.{extension}")
+
+                # Export summary
+                result_path = exporter.export_summary(
+                    output_path=output_path,
+                    format=request.format,
+                    limit=request.limit,
+                )
+
+                # Count experiments in the summary
+                query = ExperimentQuery(persistence.db._db_path)
+                try:
+                    total = query.count_experiments()
+                    total = min(total, request.limit)
+                finally:
+                    query.close()
+
+            finally:
+                exporter.close()
+
+            logger.info(
+                f"Exported experiments summary to {request.format}: {result_path}"
+            )
+
+            return ExperimentSummaryExportResponse(
+                output_path=str(result_path),
+                total_experiments=total,
+                format=request.format,
+            )
+
+        except ExportError as e:
+            logger.error(f"Summary export failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to export experiments summary: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     return app

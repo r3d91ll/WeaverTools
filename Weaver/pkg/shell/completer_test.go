@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/r3d91ll/weaver/pkg/backend"
+	"github.com/r3d91ll/weaver/pkg/concepts"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/wool"
 )
@@ -50,6 +52,21 @@ func newTestManager(agentNames ...string) *runtime.Manager {
 	return manager
 }
 
+// newTestConceptStore creates a concept store with test concepts.
+// Each concept is created with a single sample for testing purposes.
+func newTestConceptStore(conceptNames ...string) *concepts.Store {
+	store := concepts.NewStore()
+	for i, name := range conceptNames {
+		sample := concepts.Sample{
+			ID:          name + "-sample-" + string(rune('0'+i)),
+			Content:     "test content for " + name,
+			ExtractedAt: time.Now(),
+		}
+		store.Add(name, sample)
+	}
+	return store
+}
+
 // TestNewShellCompleter tests completer creation.
 func TestNewShellCompleter(t *testing.T) {
 	t.Run("with nil manager", func(t *testing.T) {
@@ -70,6 +87,32 @@ func TestNewShellCompleter(t *testing.T) {
 		}
 		if c.agents != m {
 			t.Error("expected agents field to match provided manager")
+		}
+	})
+
+	t.Run("with concept store", func(t *testing.T) {
+		cs := newTestConceptStore("honor", "integrity")
+		c := NewShellCompleter(nil, cs)
+		if c == nil {
+			t.Fatal("expected non-nil completer")
+		}
+		if c.concepts != cs {
+			t.Error("expected concepts field to match provided store")
+		}
+	})
+
+	t.Run("with both manager and concept store", func(t *testing.T) {
+		m := newTestManager("agent1")
+		cs := newTestConceptStore("honor")
+		c := NewShellCompleter(m, cs)
+		if c == nil {
+			t.Fatal("expected non-nil completer")
+		}
+		if c.agents != m {
+			t.Error("expected agents field to match provided manager")
+		}
+		if c.concepts != cs {
+			t.Error("expected concepts field to match provided store")
 		}
 	})
 }

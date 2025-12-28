@@ -38,6 +38,7 @@ dist/
 # Environment files
 # All .env variations - these commonly contain secrets
 .env
+*.env
 .env.local
 .env.development
 .env.development.local

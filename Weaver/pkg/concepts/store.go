@@ -64,6 +64,42 @@ type ConceptStats struct {
 	NewestSampleAt time.Time `json:"newest_sample_at,omitempty"`
 }
 
+// StoreStats holds aggregate statistics for the entire concept store.
+// It provides a snapshot of store-wide metrics that is safe to use after
+// the store lock has been released.
+type StoreStats struct {
+	// ConceptCount is the total number of concepts in the store.
+	ConceptCount int `json:"concept_count"`
+
+	// TotalSamples is the total number of samples across all concepts.
+	TotalSamples int `json:"total_samples"`
+
+	// Dimensions maps hidden state dimensions to their frequency count.
+	// Key is the dimension, value is the number of concepts with that dimension.
+	Dimensions map[int]int `json:"dimensions"`
+
+	// Models maps model identifiers to their usage count across all samples.
+	// Key is the model name, value is the number of samples using that model.
+	Models map[string]int `json:"models"`
+
+	// HealthyConcepts is the count of concepts with consistent dimensions.
+	HealthyConcepts int `json:"healthy_concepts"`
+
+	// ConceptsWithIssues is the count of concepts with dimension mismatches.
+	ConceptsWithIssues int `json:"concepts_with_issues"`
+
+	// OldestExtraction is the timestamp of the oldest sample extraction
+	// across all concepts. Zero time if no samples exist.
+	OldestExtraction time.Time `json:"oldest_extraction,omitempty"`
+
+	// NewestExtraction is the timestamp of the newest sample extraction
+	// across all concepts. Zero time if no samples exist.
+	NewestExtraction time.Time `json:"newest_extraction,omitempty"`
+
+	// Concepts maps concept names to their detailed statistics.
+	Concepts map[string]ConceptStats `json:"concepts"`
+}
+
 // Dimension returns the hidden state dimension for this concept.
 // Returns 0 if no samples or no hidden states.
 func (c *Concept) Dimension() int {

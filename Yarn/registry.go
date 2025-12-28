@@ -54,6 +54,38 @@ func (e *SessionNotFoundError) Error() string {
 	return sb.String()
 }
 
+// SessionAlreadyRegisteredError is returned when attempting to register a session
+// with a name that is already in use.
+// It provides helpful context including the conflicting name and registered sessions
+// to help users resolve the conflict.
+type SessionAlreadyRegisteredError struct {
+	// Name is the session name that was already registered.
+	Name string
+	// RegisteredSessions lists all currently registered session names.
+	RegisteredSessions []string
+}
+
+// Error implements the error interface.
+// It formats a helpful message that includes the conflicting session name,
+// currently registered sessions, and actionable suggestions for resolution.
+func (e *SessionAlreadyRegisteredError) Error() string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("session %q is already registered", e.Name))
+
+	// Add registered sessions context
+	if len(e.RegisteredSessions) > 0 {
+		sb.WriteString(fmt.Sprintf("; registered: [%s]", strings.Join(e.RegisteredSessions, ", ")))
+	}
+
+	// Add actionable suggestions
+	sb.WriteString(fmt.Sprintf("; choose a different name (not %q)", e.Name))
+	sb.WriteString("; or use Get() to retrieve the existing session")
+	sb.WriteString("; or use GetOrCreate() to reuse existing sessions")
+
+	return sb.String()
+}
+
 // SessionRegistry manages multiple research sessions with thread-safe access.
 // It provides a registry pattern for storing, retrieving, and managing sessions
 // by name. All methods are safe for concurrent use by multiple goroutines.
@@ -76,8 +108,10 @@ func NewSessionRegistry() *SessionRegistry {
 // Register adds a session to the registry with the given name.
 // The session can later be retrieved using Get with the same name.
 //
-// Register returns an error if a session with the given name is already
-// registered. Use GetOrCreate if you want to reuse existing sessions.
+// Register returns a SessionAlreadyRegisteredError if a session with the given
+// name is already registered. The error includes the list of registered sessions
+// and actionable suggestions for resolving the conflict.
+// Use GetOrCreate if you want to reuse existing sessions.
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) Register(name string, session *Session) error {
@@ -85,7 +119,10 @@ func (r *SessionRegistry) Register(name string, session *Session) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.sessions[name]; exists {
-		return fmt.Errorf("session %q already registered", name)
+		return &SessionAlreadyRegisteredError{
+			Name:               name,
+			RegisteredSessions: r.listSessionNamesLocked(),
+		}
 	}
 	r.sessions[name] = session
 	return nil

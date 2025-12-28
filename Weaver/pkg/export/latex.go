@@ -62,6 +62,10 @@ func Escape(s string) string {
 	return DefaultLaTeXEscaper().Escape(s)
 }
 
+// EscapeLaTeX is an alias for Escape for clarity in contexts where
+// the LaTeX-specific nature of the escaping should be explicit.
+var EscapeLaTeX = Escape
+
 // Escape converts a string to be safely included in LaTeX documents.
 // Respects the escaper's configuration for newlines and math mode.
 func (e *LaTeXEscaper) Escape(s string) string {
@@ -214,6 +218,14 @@ func (tb *TableBuilder) SetHeaders(headers ...string) *TableBuilder {
 	return tb
 }
 
+// SetHeadersRaw sets the column headers without escaping.
+// Use this when headers contain pre-formatted LaTeX (e.g., math mode like $D_{eff}$).
+func (tb *TableBuilder) SetHeadersRaw(headers ...string) *TableBuilder {
+	tb.headers = make([]string, len(headers))
+	copy(tb.headers, headers)
+	return tb
+}
+
 // AddRow adds a data row to the table.
 // All values are escaped for safe LaTeX output.
 func (tb *TableBuilder) AddRow(values ...string) *TableBuilder {
@@ -221,6 +233,15 @@ func (tb *TableBuilder) AddRow(values ...string) *TableBuilder {
 	for i, v := range values {
 		row[i] = EscapeForCell(v)
 	}
+	tb.rows = append(tb.rows, row)
+	return tb
+}
+
+// AddRowRaw adds a data row without escaping.
+// Use this when values contain pre-formatted LaTeX (e.g., math mode like $\beta$).
+func (tb *TableBuilder) AddRowRaw(values ...string) *TableBuilder {
+	row := make([]string, len(values))
+	copy(row, values)
 	tb.rows = append(tb.rows, row)
 	return tb
 }
@@ -270,7 +291,7 @@ func (tb *TableBuilder) Build() string {
 	// Data rows
 	for i, row := range tb.rows {
 		if tb.config.IncludeRowNumbers {
-			numberedRow := append([]string{Escape(string(rune('0' + i + 1)))}, row...)
+			numberedRow := append([]string{fmt.Sprintf("%d", i+1)}, row...)
 			tb.writeRow(&sb, numberedRow, numCols)
 		} else {
 			tb.writeRow(&sb, row, numCols)
@@ -475,7 +496,8 @@ func (mtb *MeasurementTableBuilder) Build() string {
 
 	// Create table builder
 	tb := NewTableBuilder(tableConfig)
-	tb.SetHeaders(headers...)
+	// Use SetHeadersRaw since headers contain LaTeX math ($D_{eff}$, $\beta$, etc.)
+	tb.SetHeadersRaw(headers...)
 
 	// Add data rows
 	for _, row := range mtb.rows {
@@ -667,14 +689,15 @@ func GenerateSummaryTable(stats SummaryStats, config *SummaryTableConfig) string
 	precision := config.Precision
 
 	tb.AddRow("Measurements", fmt.Sprintf("%d", stats.MeasurementCount))
-	tb.AddRow("Avg. $D_{eff}$", FormatNumber(stats.AvgDEff, precision))
-	tb.AddRow("Avg. $\\beta$", FormatNumber(stats.AvgBeta, precision))
+	// Use AddRowRaw for rows containing LaTeX math in metric labels
+	tb.AddRowRaw("Avg. $D_{eff}$", FormatNumber(stats.AvgDEff, precision))
+	tb.AddRowRaw("Avg. $\\beta$", FormatNumber(stats.AvgBeta, precision))
 	tb.AddRow("Avg. Alignment", FormatNumber(stats.AvgAlignment, precision))
-	tb.AddRow("Avg. $C_{pair}$", FormatNumber(stats.AvgCPair, precision))
+	tb.AddRowRaw("Avg. $C_{pair}$", FormatNumber(stats.AvgCPair, precision))
 
 	if config.IncludeMinMax {
-		tb.AddRow("Min $\\beta$", FormatNumber(stats.MinBeta, precision))
-		tb.AddRow("Max $\\beta$", FormatNumber(stats.MaxBeta, precision))
+		tb.AddRowRaw("Min $\\beta$", FormatNumber(stats.MinBeta, precision))
+		tb.AddRowRaw("Max $\\beta$", FormatNumber(stats.MaxBeta, precision))
 	}
 
 	if config.IncludeBilateralCount {

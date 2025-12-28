@@ -44,8 +44,8 @@ func TestBibTeXValidation(t *testing.T) {
 		t.Error("Missing url field")
 	}
 
-	// Write to temp file for external validation
-	tmpPath := filepath.Join(os.TempDir(), "test_export.bib")
+	// Write to temp file for external validation (auto-cleaned up by t.TempDir())
+	tmpPath := filepath.Join(t.TempDir(), "test_export.bib")
 	err := ExportBibTeXToFile(tmpPath, entry, nil)
 	if err != nil {
 		t.Errorf("Failed to write BibTeX file: %v", err)
@@ -650,9 +650,9 @@ func TestBibTeXFileOutput(t *testing.T) {
 
 	content := GenerateBibTeXFile(entries, nil)
 
-	// Write to file
-	tmpPath := filepath.Join(os.TempDir(), "test_export.bib")
-	err := os.WriteFile(tmpPath, []byte(content), 0644)
+	// Write to file (auto-cleaned up by t.TempDir())
+	tmpPath := filepath.Join(t.TempDir(), "test_export.bib")
+	err := os.WriteFile(tmpPath, []byte(content), 0o644)
 	if err != nil {
 		t.Errorf("Failed to write BibTeX file: %v", err)
 	}

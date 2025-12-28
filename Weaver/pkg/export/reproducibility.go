@@ -828,9 +828,17 @@ func ExportReportToFile(path string, report *ReproducibilityReport, config *Repr
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer file.Close()
 
-	return ExportReportToWriter(file, report, config)
+	writeErr := ExportReportToWriter(file, report, config)
+	closeErr := file.Close()
+
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return fmt.Errorf("failed to close file: %w", closeErr)
+	}
+	return nil
 }
 
 // GenerateReproducibilityReport is a convenience function to generate a complete report.

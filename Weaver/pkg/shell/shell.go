@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/r3d91ll/weaver/pkg/analysis"
@@ -1772,9 +1771,6 @@ func createExportMultipleError(failedFormats []string, firstError error) *werror
 		WithSuggestion("Fix the issues and run /export_all again").
 		WithSuggestion("Or run individual export commands for specific formats")
 }
-
-// Suppress unused import warnings for time package
-var _ = time.Now
 
 // Close closes the shell.
 func (s *Shell) Close() error {

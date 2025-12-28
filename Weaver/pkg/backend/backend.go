@@ -48,18 +48,20 @@ type ChatRequest struct {
 	Temperature        float64       `json:"temperature,omitempty"`
 	Stream             bool          `json:"stream,omitempty"`
 	ReturnHiddenStates bool          `json:"return_hidden_states,omitempty"`
-	Device             string        `json:"device,omitempty"` // GPU device: "auto", "cuda:0", "cuda:1", etc.
+	HiddenStateLayers  interface{}   `json:"hidden_state_layers,omitempty"` // Layer selection: "all", int, or []int
+	Device             string        `json:"device,omitempty"`              // GPU device: "auto", "cuda:0", "cuda:1", etc.
 }
 
 // ChatResponse contains the model's response.
 type ChatResponse struct {
-	Content      string            `json:"content"`
-	Usage        TokenUsage        `json:"usage"`
-	HiddenState  *yarn.HiddenState `json:"hidden_state,omitempty"`
-	Metadata     map[string]any    `json:"metadata,omitempty"`
-	LatencyMS    float64           `json:"latency_ms"`
-	Model        string            `json:"model"`
-	FinishReason string            `json:"finish_reason"`
+	Content      string                       `json:"content"`
+	Usage        TokenUsage                   `json:"usage"`
+	HiddenState  *yarn.HiddenState            `json:"hidden_state,omitempty"`  // Single layer (legacy)
+	HiddenStates map[int]*yarn.HiddenState    `json:"hidden_states,omitempty"` // Multi-layer: layer index -> state
+	Metadata     map[string]any               `json:"metadata,omitempty"`
+	LatencyMS    float64                      `json:"latency_ms"`
+	Model        string                       `json:"model"`
+	FinishReason string                       `json:"finish_reason"`
 }
 
 // StreamChunk represents a chunk of streamed response.

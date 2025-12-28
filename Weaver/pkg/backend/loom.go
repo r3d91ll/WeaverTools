@@ -90,7 +90,8 @@ type loomRequest struct {
 	MaxTokens          int           `json:"max_tokens,omitempty"`
 	Temperature        float64       `json:"temperature,omitempty"`
 	ReturnHiddenStates bool          `json:"return_hidden_states,omitempty"`
-	Device             string        `json:"device,omitempty"` // GPU: "auto", "cuda:0", "cuda:1"
+	HiddenStateLayers  interface{}   `json:"hidden_state_layers,omitempty"` // Layer selection: "all", int, or []int
+	Device             string        `json:"device,omitempty"`              // GPU: "auto", "cuda:0", "cuda:1"
 }
 
 // loomStreamingRequest extends loomRequest with streaming flag.
@@ -100,6 +101,7 @@ type loomStreamingRequest struct {
 	MaxTokens          int           `json:"max_tokens,omitempty"`
 	Temperature        float64       `json:"temperature,omitempty"`
 	ReturnHiddenStates bool          `json:"return_hidden_states,omitempty"`
+	HiddenStateLayers  interface{}   `json:"hidden_state_layers,omitempty"` // Layer selection: "all", int, or []int
 	Device             string        `json:"device,omitempty"`
 	Stream             bool          `json:"stream"`
 }
@@ -117,7 +119,19 @@ type loomResponse struct {
 		Layer int       `json:"layer"`
 		DType string    `json:"dtype"`
 	} `json:"hidden_state,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	// HiddenStates contains per-layer hidden states when multiple layers are requested.
+	// Key is layer index (as string due to JSON), value contains the hidden state for that layer.
+	HiddenStates map[string]*loomLayerHiddenState `json:"hidden_states,omitempty"`
+	Metadata     map[string]any                   `json:"metadata,omitempty"`
+}
+
+// loomLayerHiddenState represents a hidden state from a specific layer.
+type loomLayerHiddenState struct {
+	Vector []float32 `json:"vector"` // Hidden state vector for this layer
+	Shape  []int     `json:"shape"`  // Tensor shape
+	Layer  int       `json:"layer"`  // Layer index
+	DType  string    `json:"dtype"`  // Data type
+	DEff   float64   `json:"d_eff"`  // Effective dimensionality (if computed)
 }
 
 // sseEvent represents a parsed Server-Sent Event from The Loom server.
@@ -276,6 +290,7 @@ func (l *Loom) buildStreamingRequest(ctx context.Context, req ChatRequest) (*htt
 		MaxTokens:          req.MaxTokens,
 		Temperature:        req.Temperature,
 		ReturnHiddenStates: req.ReturnHiddenStates,
+		HiddenStateLayers:  req.HiddenStateLayers,
 		Device:             req.Device,
 		Stream:             true,
 	}
@@ -318,6 +333,7 @@ func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 		MaxTokens:          req.MaxTokens,
 		Temperature:        req.Temperature,
 		ReturnHiddenStates: req.ReturnHiddenStates,
+		HiddenStateLayers:  req.HiddenStateLayers,
 		Device:             req.Device,
 	}
 	if loomReq.MaxTokens == 0 {
@@ -371,12 +387,41 @@ func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 		Metadata: loomResp.Metadata,
 	}
 
+	// Handle single-layer hidden state (legacy)
 	if loomResp.HiddenState != nil {
 		result.HiddenState = &yarn.HiddenState{
 			Vector: loomResp.HiddenState.Final,
 			Shape:  loomResp.HiddenState.Shape,
 			Layer:  loomResp.HiddenState.Layer,
 			DType:  loomResp.HiddenState.DType,
+		}
+	}
+
+	// Handle multi-layer hidden states
+	if len(loomResp.HiddenStates) > 0 {
+		result.HiddenStates = make(map[int]*yarn.HiddenState, len(loomResp.HiddenStates))
+		for layerKey, layerState := range loomResp.HiddenStates {
+			if layerState != nil {
+				layerIdx := layerState.Layer // Use the layer index from the state itself
+				result.HiddenStates[layerIdx] = &yarn.HiddenState{
+					Vector: layerState.Vector,
+					Shape:  layerState.Shape,
+					Layer:  layerState.Layer,
+					DType:  layerState.DType,
+				}
+				// Store D_eff in metadata if computed
+				if layerState.DEff > 0 {
+					if result.Metadata == nil {
+						result.Metadata = make(map[string]any)
+					}
+					if _, ok := result.Metadata["layer_d_eff"]; !ok {
+						result.Metadata["layer_d_eff"] = make(map[string]float64)
+					}
+					if deffMap, ok := result.Metadata["layer_d_eff"].(map[string]float64); ok {
+						deffMap[layerKey] = layerState.DEff
+					}
+				}
+			}
 		}
 	}
 
@@ -495,6 +540,190 @@ func (l *Loom) Model() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.model
+}
+
+// -----------------------------------------------------------------------------
+// Layer Analysis Helper Functions
+// -----------------------------------------------------------------------------
+// These functions provide utilities for working with layer-by-layer hidden states
+// for interpretability research and multi-agent analysis.
+
+// LayerAnalysisResult contains the result of analyzing hidden states across layers.
+type LayerAnalysisResult struct {
+	Layers       []int               `json:"layers"`        // Layer indices analyzed
+	DEff         map[int]float64     `json:"d_eff"`         // D_eff per layer
+	HiddenStates map[int][]float32   `json:"hidden_states"` // Hidden state vectors per layer
+	Shape        []int               `json:"shape"`         // Common shape (if uniform)
+	Model        string              `json:"model"`         // Model used
+}
+
+// ExtractLayerStates is a convenience method to request hidden states from specific layers.
+// layers can be: "all" for all layers, a single int, or a slice of ints.
+// Returns the response with HiddenStates populated for the requested layers.
+func (l *Loom) ExtractLayerStates(ctx context.Context, text string, layers interface{}) (*ChatResponse, error) {
+	req := ChatRequest{
+		Messages: []ChatMessage{
+			{Role: "user", Content: text},
+		},
+		ReturnHiddenStates: true,
+		HiddenStateLayers:  layers,
+	}
+	return l.Chat(ctx, req)
+}
+
+// GetLayerDEff extracts D_eff values from a response's HiddenStates metadata.
+// Returns a map of layer index to D_eff value.
+func GetLayerDEff(resp *ChatResponse) map[int]float64 {
+	result := make(map[int]float64)
+
+	if resp == nil || resp.Metadata == nil {
+		return result
+	}
+
+	if deffData, ok := resp.Metadata["layer_d_eff"]; ok {
+		if deffMap, ok := deffData.(map[string]float64); ok {
+			for layerStr, deff := range deffMap {
+				var layerIdx int
+				if _, err := fmt.Sscanf(layerStr, "%d", &layerIdx); err == nil {
+					result[layerIdx] = deff
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// CompareLayerStates compares hidden states between two responses at specified layers.
+// Returns a comparison result with per-layer similarity metrics.
+type LayerComparisonResult struct {
+	Layers           []int              `json:"layers"`             // Layers compared
+	CosineSimilarity map[int]float64    `json:"cosine_similarity"`  // Per-layer cosine similarity
+	DEffDiff         map[int]float64    `json:"d_eff_diff"`         // Per-layer D_eff difference
+	MeanSimilarity   float64            `json:"mean_similarity"`    // Average similarity across layers
+}
+
+// CompareLayerStates computes similarity metrics between two responses' hidden states.
+func CompareLayerStates(resp1, resp2 *ChatResponse) *LayerComparisonResult {
+	result := &LayerComparisonResult{
+		Layers:           make([]int, 0),
+		CosineSimilarity: make(map[int]float64),
+		DEffDiff:         make(map[int]float64),
+	}
+
+	if resp1 == nil || resp2 == nil {
+		return result
+	}
+
+	// Find common layers
+	if resp1.HiddenStates == nil || resp2.HiddenStates == nil {
+		return result
+	}
+
+	for layer := range resp1.HiddenStates {
+		if _, ok := resp2.HiddenStates[layer]; ok {
+			result.Layers = append(result.Layers, layer)
+		}
+	}
+
+	// Compute similarity for each common layer
+	deff1 := GetLayerDEff(resp1)
+	deff2 := GetLayerDEff(resp2)
+
+	var totalSim float64
+	for _, layer := range result.Layers {
+		hs1 := resp1.HiddenStates[layer]
+		hs2 := resp2.HiddenStates[layer]
+
+		if hs1 != nil && hs2 != nil && len(hs1.Vector) > 0 && len(hs2.Vector) > 0 {
+			sim := cosineSimilarity(hs1.Vector, hs2.Vector)
+			result.CosineSimilarity[layer] = sim
+			totalSim += sim
+		}
+
+		// D_eff difference
+		if d1, ok := deff1[layer]; ok {
+			if d2, ok := deff2[layer]; ok {
+				result.DEffDiff[layer] = d1 - d2
+			}
+		}
+	}
+
+	if len(result.Layers) > 0 {
+		result.MeanSimilarity = totalSim / float64(len(result.Layers))
+	}
+
+	return result
+}
+
+// cosineSimilarity computes the cosine similarity between two float32 vectors.
+func cosineSimilarity(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+
+	var dotProduct, normA, normB float64
+	for i := range a {
+		dotProduct += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	// Import math for Sqrt is already available
+	normA = sqrt(normA)
+	normB = sqrt(normB)
+
+	return dotProduct / (normA * normB)
+}
+
+// sqrt computes the square root using Newton's method to avoid math import dependency.
+func sqrt(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	z := x / 2
+	for i := 0; i < 20; i++ {
+		z = z - (z*z-x)/(2*z)
+	}
+	return z
+}
+
+// ParseLayerSelection parses a layer selection value and returns a normalized slice of layer indices.
+// Supports: "all", single int, []int, or []interface{} (from JSON unmarshal).
+func ParseLayerSelection(layers interface{}) ([]int, bool, error) {
+	if layers == nil {
+		return nil, false, nil
+	}
+
+	switch v := layers.(type) {
+	case string:
+		if v == "all" {
+			return nil, true, nil // true indicates "all" was specified
+		}
+		return nil, false, fmt.Errorf("invalid layer selection string: %s", v)
+	case int:
+		return []int{v}, false, nil
+	case []int:
+		return v, false, nil
+	case []interface{}:
+		result := make([]int, 0, len(v))
+		for _, item := range v {
+			if num, ok := item.(float64); ok {
+				result = append(result, int(num))
+			} else if num, ok := item.(int); ok {
+				result = append(result, num)
+			}
+		}
+		return result, false, nil
+	case float64:
+		return []int{int(v)}, false, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported layer selection type: %T", layers)
+	}
 }
 
 // -----------------------------------------------------------------------------

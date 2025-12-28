@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	yarn "github.com/r3d91ll/yarn"
 )
 
 // TestParseSSE_ValidEvents tests that parseSSE correctly parses valid SSE events.
@@ -658,4 +660,450 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"promp
 // jsonUnmarshal is a test helper to avoid importing encoding/json in test file.
 func jsonUnmarshal(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
+}
+
+// -----------------------------------------------------------------------------
+// Layer Extraction Tests
+// -----------------------------------------------------------------------------
+
+// TestLoomLayerExtraction tests the layer-by-layer hidden state extraction functionality.
+func TestLoomLayerExtraction(t *testing.T) {
+	t.Run("ParseLayerSelection_all", func(t *testing.T) {
+		layers, isAll, err := ParseLayerSelection("all")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !isAll {
+			t.Error("expected isAll to be true")
+		}
+		if layers != nil {
+			t.Error("expected layers to be nil for 'all'")
+		}
+	})
+
+	t.Run("ParseLayerSelection_single_int", func(t *testing.T) {
+		layers, isAll, err := ParseLayerSelection(5)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isAll {
+			t.Error("expected isAll to be false")
+		}
+		if len(layers) != 1 || layers[0] != 5 {
+			t.Errorf("expected [5], got %v", layers)
+		}
+	})
+
+	t.Run("ParseLayerSelection_slice_int", func(t *testing.T) {
+		layers, isAll, err := ParseLayerSelection([]int{0, 5, 11})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isAll {
+			t.Error("expected isAll to be false")
+		}
+		if len(layers) != 3 {
+			t.Errorf("expected 3 layers, got %d", len(layers))
+		}
+		if layers[0] != 0 || layers[1] != 5 || layers[2] != 11 {
+			t.Errorf("expected [0, 5, 11], got %v", layers)
+		}
+	})
+
+	t.Run("ParseLayerSelection_slice_interface", func(t *testing.T) {
+		// Simulate JSON unmarshal result
+		layers, isAll, err := ParseLayerSelection([]interface{}{float64(0), float64(5), float64(11)})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isAll {
+			t.Error("expected isAll to be false")
+		}
+		if len(layers) != 3 {
+			t.Errorf("expected 3 layers, got %d", len(layers))
+		}
+	})
+
+	t.Run("ParseLayerSelection_float64", func(t *testing.T) {
+		// JSON numbers are float64
+		layers, isAll, err := ParseLayerSelection(float64(7))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isAll {
+			t.Error("expected isAll to be false")
+		}
+		if len(layers) != 1 || layers[0] != 7 {
+			t.Errorf("expected [7], got %v", layers)
+		}
+	})
+
+	t.Run("ParseLayerSelection_invalid_string", func(t *testing.T) {
+		_, _, err := ParseLayerSelection("invalid")
+		if err == nil {
+			t.Error("expected error for invalid string")
+		}
+	})
+
+	t.Run("ParseLayerSelection_nil", func(t *testing.T) {
+		layers, isAll, err := ParseLayerSelection(nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isAll {
+			t.Error("expected isAll to be false for nil")
+		}
+		if layers != nil {
+			t.Error("expected layers to be nil")
+		}
+	})
+}
+
+// TestCosineSimilarity tests the cosine similarity helper function.
+func TestCosineSimilarity(t *testing.T) {
+	t.Run("identical_vectors", func(t *testing.T) {
+		a := []float32{1.0, 0.0, 0.0}
+		b := []float32{1.0, 0.0, 0.0}
+		sim := cosineSimilarity(a, b)
+		if sim < 0.999 || sim > 1.001 {
+			t.Errorf("expected similarity ~1.0, got %f", sim)
+		}
+	})
+
+	t.Run("orthogonal_vectors", func(t *testing.T) {
+		a := []float32{1.0, 0.0, 0.0}
+		b := []float32{0.0, 1.0, 0.0}
+		sim := cosineSimilarity(a, b)
+		if sim < -0.001 || sim > 0.001 {
+			t.Errorf("expected similarity ~0.0, got %f", sim)
+		}
+	})
+
+	t.Run("opposite_vectors", func(t *testing.T) {
+		a := []float32{1.0, 0.0, 0.0}
+		b := []float32{-1.0, 0.0, 0.0}
+		sim := cosineSimilarity(a, b)
+		if sim < -1.001 || sim > -0.999 {
+			t.Errorf("expected similarity ~-1.0, got %f", sim)
+		}
+	})
+
+	t.Run("empty_vectors", func(t *testing.T) {
+		a := []float32{}
+		b := []float32{}
+		sim := cosineSimilarity(a, b)
+		if sim != 0 {
+			t.Errorf("expected similarity 0 for empty vectors, got %f", sim)
+		}
+	})
+
+	t.Run("mismatched_lengths", func(t *testing.T) {
+		a := []float32{1.0, 2.0}
+		b := []float32{1.0, 2.0, 3.0}
+		sim := cosineSimilarity(a, b)
+		if sim != 0 {
+			t.Errorf("expected similarity 0 for mismatched lengths, got %f", sim)
+		}
+	})
+
+	t.Run("zero_vector", func(t *testing.T) {
+		a := []float32{0.0, 0.0, 0.0}
+		b := []float32{1.0, 2.0, 3.0}
+		sim := cosineSimilarity(a, b)
+		if sim != 0 {
+			t.Errorf("expected similarity 0 for zero vector, got %f", sim)
+		}
+	})
+}
+
+// TestSqrt tests the sqrt helper function.
+func TestSqrt(t *testing.T) {
+	tests := []struct {
+		input    float64
+		expected float64
+	}{
+		{4.0, 2.0},
+		{9.0, 3.0},
+		{16.0, 4.0},
+		{2.0, 1.4142135623730951},
+		{0.0, 0.0},
+		{-1.0, 0.0},
+	}
+
+	for _, tt := range tests {
+		result := sqrt(tt.input)
+		diff := result - tt.expected
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 0.0001 {
+			t.Errorf("sqrt(%f) = %f, expected %f", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// TestCompareLayerStates tests the layer comparison functionality.
+func TestCompareLayerStates(t *testing.T) {
+	t.Run("nil_responses", func(t *testing.T) {
+		result := CompareLayerStates(nil, nil)
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+		if len(result.Layers) != 0 {
+			t.Error("expected empty layers")
+		}
+	})
+
+	t.Run("common_layers", func(t *testing.T) {
+		resp1 := &ChatResponse{
+			HiddenStates: map[int]*yarn.HiddenState{
+				0: {Vector: []float32{1.0, 0.0, 0.0}, Layer: 0},
+				5: {Vector: []float32{0.0, 1.0, 0.0}, Layer: 5},
+			},
+		}
+		resp2 := &ChatResponse{
+			HiddenStates: map[int]*yarn.HiddenState{
+				0: {Vector: []float32{1.0, 0.0, 0.0}, Layer: 0},
+				5: {Vector: []float32{0.0, 0.0, 1.0}, Layer: 5},
+				10: {Vector: []float32{1.0, 1.0, 1.0}, Layer: 10},
+			},
+		}
+
+		result := CompareLayerStates(resp1, resp2)
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+		if len(result.Layers) != 2 {
+			t.Errorf("expected 2 common layers, got %d", len(result.Layers))
+		}
+
+		// Layer 0 should have similarity ~1.0 (identical vectors)
+		if sim, ok := result.CosineSimilarity[0]; ok {
+			if sim < 0.999 {
+				t.Errorf("expected high similarity for layer 0, got %f", sim)
+			}
+		} else {
+			t.Error("expected similarity for layer 0")
+		}
+
+		// Layer 5 should have similarity ~0.0 (orthogonal vectors)
+		if sim, ok := result.CosineSimilarity[5]; ok {
+			if sim > 0.001 || sim < -0.001 {
+				t.Errorf("expected ~0 similarity for layer 5, got %f", sim)
+			}
+		} else {
+			t.Error("expected similarity for layer 5")
+		}
+	})
+
+	t.Run("no_common_layers", func(t *testing.T) {
+		resp1 := &ChatResponse{
+			HiddenStates: map[int]*yarn.HiddenState{
+				0: {Vector: []float32{1.0, 0.0}, Layer: 0},
+			},
+		}
+		resp2 := &ChatResponse{
+			HiddenStates: map[int]*yarn.HiddenState{
+				5: {Vector: []float32{0.0, 1.0}, Layer: 5},
+			},
+		}
+
+		result := CompareLayerStates(resp1, resp2)
+		if len(result.Layers) != 0 {
+			t.Errorf("expected 0 common layers, got %d", len(result.Layers))
+		}
+	})
+}
+
+// TestGetLayerDEff tests extracting D_eff values from response metadata.
+func TestGetLayerDEff(t *testing.T) {
+	t.Run("nil_response", func(t *testing.T) {
+		result := GetLayerDEff(nil)
+		if len(result) != 0 {
+			t.Error("expected empty map for nil response")
+		}
+	})
+
+	t.Run("no_metadata", func(t *testing.T) {
+		resp := &ChatResponse{}
+		result := GetLayerDEff(resp)
+		if len(result) != 0 {
+			t.Error("expected empty map for no metadata")
+		}
+	})
+
+	t.Run("with_deff_data", func(t *testing.T) {
+		resp := &ChatResponse{
+			Metadata: map[string]any{
+				"layer_d_eff": map[string]float64{
+					"0":  128.5,
+					"5":  256.0,
+					"11": 512.3,
+				},
+			},
+		}
+		result := GetLayerDEff(resp)
+		if len(result) != 3 {
+			t.Errorf("expected 3 D_eff values, got %d", len(result))
+		}
+		if result[0] != 128.5 {
+			t.Errorf("expected D_eff[0] = 128.5, got %f", result[0])
+		}
+		if result[5] != 256.0 {
+			t.Errorf("expected D_eff[5] = 256.0, got %f", result[5])
+		}
+		if result[11] != 512.3 {
+			t.Errorf("expected D_eff[11] = 512.3, got %f", result[11])
+		}
+	})
+}
+
+// TestLoomRequestLayerSerialization tests that layer selection is properly serialized in requests.
+func TestLoomRequestLayerSerialization(t *testing.T) {
+	t.Run("layers_all", func(t *testing.T) {
+		req := loomRequest{
+			Model:              "test-model",
+			Messages:           []ChatMessage{{Role: "user", Content: "test"}},
+			ReturnHiddenStates: true,
+			HiddenStateLayers:  "all",
+		}
+		data, err := json.Marshal(req)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		if !strings.Contains(string(data), `"hidden_state_layers":"all"`) {
+			t.Errorf("expected hidden_state_layers to be 'all', got: %s", string(data))
+		}
+	})
+
+	t.Run("layers_slice", func(t *testing.T) {
+		req := loomRequest{
+			Model:              "test-model",
+			Messages:           []ChatMessage{{Role: "user", Content: "test"}},
+			ReturnHiddenStates: true,
+			HiddenStateLayers:  []int{0, 5, 11},
+		}
+		data, err := json.Marshal(req)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		if !strings.Contains(string(data), `"hidden_state_layers":[0,5,11]`) {
+			t.Errorf("expected hidden_state_layers to be [0,5,11], got: %s", string(data))
+		}
+	})
+
+	t.Run("no_layers", func(t *testing.T) {
+		req := loomRequest{
+			Model:              "test-model",
+			Messages:           []ChatMessage{{Role: "user", Content: "test"}},
+			ReturnHiddenStates: true,
+		}
+		data, err := json.Marshal(req)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		// hidden_state_layers should be omitted when nil
+		if strings.Contains(string(data), "hidden_state_layers") {
+			t.Errorf("expected hidden_state_layers to be omitted, got: %s", string(data))
+		}
+	})
+}
+
+// TestLoomResponseMultiLayerParsing tests parsing of multi-layer hidden state responses.
+func TestLoomResponseMultiLayerParsing(t *testing.T) {
+	t.Run("parse_multi_layer_response", func(t *testing.T) {
+		jsonData := `{
+			"text": "Hello world",
+			"usage": {
+				"prompt_tokens": 10,
+				"completion_tokens": 5,
+				"total_tokens": 15
+			},
+			"hidden_states": {
+				"0": {
+					"vector": [0.1, 0.2, 0.3],
+					"shape": [1, 3],
+					"layer": 0,
+					"dtype": "float32",
+					"d_eff": 2.5
+				},
+				"5": {
+					"vector": [0.4, 0.5, 0.6],
+					"shape": [1, 3],
+					"layer": 5,
+					"dtype": "float32",
+					"d_eff": 3.0
+				}
+			}
+		}`
+
+		var resp loomResponse
+		if err := json.Unmarshal([]byte(jsonData), &resp); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+
+		if resp.Text != "Hello world" {
+			t.Errorf("expected text 'Hello world', got '%s'", resp.Text)
+		}
+
+		if len(resp.HiddenStates) != 2 {
+			t.Fatalf("expected 2 hidden states, got %d", len(resp.HiddenStates))
+		}
+
+		// Check layer 0
+		hs0 := resp.HiddenStates["0"]
+		if hs0 == nil {
+			t.Fatal("expected hidden state for layer 0")
+		}
+		if hs0.Layer != 0 {
+			t.Errorf("expected layer 0, got %d", hs0.Layer)
+		}
+		if len(hs0.Vector) != 3 {
+			t.Errorf("expected 3 vector elements, got %d", len(hs0.Vector))
+		}
+		if hs0.DEff != 2.5 {
+			t.Errorf("expected d_eff 2.5, got %f", hs0.DEff)
+		}
+
+		// Check layer 5
+		hs5 := resp.HiddenStates["5"]
+		if hs5 == nil {
+			t.Fatal("expected hidden state for layer 5")
+		}
+		if hs5.Layer != 5 {
+			t.Errorf("expected layer 5, got %d", hs5.Layer)
+		}
+	})
+}
+
+// TestLayerAnalysisResult tests the LayerAnalysisResult structure.
+func TestLayerAnalysisResult(t *testing.T) {
+	result := LayerAnalysisResult{
+		Layers:       []int{0, 5, 11},
+		DEff:         map[int]float64{0: 128.0, 5: 256.0, 11: 512.0},
+		HiddenStates: map[int][]float32{0: {0.1, 0.2}, 5: {0.3, 0.4}, 11: {0.5, 0.6}},
+		Shape:        []int{1, 2},
+		Model:        "test-model",
+	}
+
+	// Verify JSON serialization
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var parsed LayerAnalysisResult
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if len(parsed.Layers) != 3 {
+		t.Errorf("expected 3 layers, got %d", len(parsed.Layers))
+	}
+	if parsed.Model != "test-model" {
+		t.Errorf("expected model 'test-model', got '%s'", parsed.Model)
+	}
+	if parsed.DEff[5] != 256.0 {
+		t.Errorf("expected D_eff[5] = 256.0, got %f", parsed.DEff[5])
+	}
 }

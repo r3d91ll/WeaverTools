@@ -171,6 +171,38 @@ func (c *Concept) VectorsAsFloat64() [][]float64 {
 	return result
 }
 
+// Models returns a sorted slice of unique model names used for samples.
+// Iterates through samples, collects non-empty Model fields, deduplicates,
+// and returns them sorted for consistent ordering.
+// Returns nil if no models are found.
+func (c *Concept) Models() []string {
+	if len(c.Samples) == 0 {
+		return nil
+	}
+
+	// Collect unique model names using a map
+	modelSet := make(map[string]struct{})
+	for _, sample := range c.Samples {
+		if sample.Model != "" {
+			modelSet[sample.Model] = struct{}{}
+		}
+	}
+
+	// Return nil if no models found
+	if len(modelSet) == 0 {
+		return nil
+	}
+
+	// Convert to slice and sort for consistent ordering
+	models := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		models = append(models, model)
+	}
+	sortStrings(models)
+
+	return models
+}
+
 // Stats returns detailed statistics for this concept.
 // It computes sample counts, dimension validation, unique models, and time ranges.
 // Handles nil HiddenState and empty samples gracefully.

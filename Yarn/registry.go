@@ -4,6 +4,7 @@ package yarn
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,79 @@ import (
 
 // ErrEmptySessionName is returned when a session name is empty or whitespace-only.
 var ErrEmptySessionName = errors.New("session name cannot be empty")
+
+// -----------------------------------------------------------------------------
+// Error Types
+// -----------------------------------------------------------------------------
+
+// SessionNotFoundError is returned when a session lookup fails.
+// It provides helpful context including the requested session name,
+// available sessions, and suggestions for similar names.
+// This follows the structured error pattern used by Yarn's ValidationError.
+type SessionNotFoundError struct {
+	// Name is the session name that was requested but not found.
+	Name string
+	// AvailableSessions lists all currently registered session names.
+	AvailableSessions []string
+	// Suggestions contains helpful hints like "Did you mean X?".
+	Suggestions []string
+}
+
+// Error implements the error interface.
+// It formats a helpful message that includes the session name, available sessions,
+// and suggestions for similar names when applicable.
+func (e *SessionNotFoundError) Error() string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("session %q not found", e.Name))
+
+	// Add available sessions context
+	if len(e.AvailableSessions) > 0 {
+		sb.WriteString(fmt.Sprintf("; available: [%s]", strings.Join(e.AvailableSessions, ", ")))
+	} else {
+		sb.WriteString("; no sessions registered")
+	}
+
+	// Add suggestions if any
+	for _, suggestion := range e.Suggestions {
+		sb.WriteString("; ")
+		sb.WriteString(suggestion)
+	}
+
+	return sb.String()
+}
+
+// SessionAlreadyRegisteredError is returned when attempting to register a session
+// with a name that is already in use.
+// It provides helpful context including the conflicting name and registered sessions
+// to help users resolve the conflict.
+type SessionAlreadyRegisteredError struct {
+	// Name is the session name that was already registered.
+	Name string
+	// RegisteredSessions lists all currently registered session names.
+	RegisteredSessions []string
+}
+
+// Error implements the error interface.
+// It formats a helpful message that includes the conflicting session name,
+// currently registered sessions, and actionable suggestions for resolution.
+func (e *SessionAlreadyRegisteredError) Error() string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("session %q is already registered", e.Name))
+
+	// Add registered sessions context
+	if len(e.RegisteredSessions) > 0 {
+		sb.WriteString(fmt.Sprintf("; registered: [%s]", strings.Join(e.RegisteredSessions, ", ")))
+	}
+
+	// Add actionable suggestions
+	sb.WriteString(fmt.Sprintf("; choose a different name (not %q)", e.Name))
+	sb.WriteString("; or use Get() to retrieve the existing session")
+	sb.WriteString("; or use GetOrCreate() to reuse existing sessions")
+
+	return sb.String()
+}
 
 // SessionRegistry manages multiple research sessions with thread-safe access.
 // It provides a registry pattern for storing, retrieving, and managing sessions
@@ -34,8 +108,10 @@ func NewSessionRegistry() *SessionRegistry {
 // Register adds a session to the registry with the given name.
 // The session can later be retrieved using Get with the same name.
 //
-// Register returns an error if a session with the given name is already
-// registered. Use GetOrCreate if you want to reuse existing sessions.
+// Register returns a SessionAlreadyRegisteredError if a session with the given
+// name is already registered. The error includes the list of registered sessions
+// and actionable suggestions for resolving the conflict.
+// Use GetOrCreate if you want to reuse existing sessions.
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) Register(name string, session *Session) error {
@@ -43,7 +119,10 @@ func (r *SessionRegistry) Register(name string, session *Session) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.sessions[name]; exists {
-		return fmt.Errorf("session %q already registered", name)
+		return &SessionAlreadyRegisteredError{
+			Name:               name,
+			RegisteredSessions: r.listSessionNamesLocked(),
+		}
 	}
 	r.sessions[name] = session
 	return nil
@@ -59,6 +138,28 @@ func (r *SessionRegistry) Get(name string) (*Session, bool) {
 	defer r.mu.RUnlock()
 	session, ok := r.sessions[name]
 	return session, ok
+}
+
+// GetWithError retrieves a session by name, returning a structured error if not found.
+// Use this when you want detailed error information for user-facing error messages.
+// The returned error includes available session names and suggestions for similar names
+// (case mismatches, substring matches) to help users identify typos.
+//
+// This method is safe for concurrent use.
+func (r *SessionRegistry) GetWithError(name string) (*Session, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	session, ok := r.sessions[name]
+	if !ok {
+		available := r.listSessionNamesLocked()
+		return nil, &SessionNotFoundError{
+			Name:              name,
+			AvailableSessions: available,
+			Suggestions:       suggestSimilarSessions(name, available),
+		}
+	}
+	return session, nil
 }
 
 // List returns the names of all registered sessions.
@@ -159,7 +260,9 @@ func (r *SessionRegistry) Active() []*Session {
 // the registry. After unregistration, the same name can be used to register
 // a new session.
 //
-// Unregister returns an error if no session with the given name is registered.
+// Unregister returns a SessionNotFoundError if no session with the given name
+// is registered. The error includes available session names and suggestions
+// for similar names to help identify typos.
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) Unregister(name string) error {
@@ -167,7 +270,12 @@ func (r *SessionRegistry) Unregister(name string) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.sessions[name]; !exists {
-		return fmt.Errorf("session %q not registered", name)
+		available := r.listSessionNamesLocked()
+		return &SessionNotFoundError{
+			Name:              name,
+			AvailableSessions: available,
+			Suggestions:       suggestSimilarSessions(name, available),
+		}
 	}
 	delete(r.sessions, name)
 	return nil
@@ -192,7 +300,10 @@ func (r *SessionRegistry) Create(name, description string) (*Session, error) {
 	defer r.mu.Unlock()
 
 	if _, exists := r.sessions[name]; exists {
-		return nil, fmt.Errorf("session %q already registered", name)
+		return nil, &SessionAlreadyRegisteredError{
+			Name:               name,
+			RegisteredSessions: r.listSessionNamesLocked(),
+		}
 	}
 
 	session := NewSession(name, description)
@@ -239,4 +350,50 @@ func (r *SessionRegistry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.sessions)
+}
+
+// -----------------------------------------------------------------------------
+// Helper Functions
+// -----------------------------------------------------------------------------
+
+// listSessionNamesLocked returns a sorted list of registered session names.
+// Must be called while holding at least a read lock on r.mu.
+func (r *SessionRegistry) listSessionNamesLocked() []string {
+	names := make([]string, 0, len(r.sessions))
+	for name := range r.sessions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// suggestSimilarSessions returns suggestions for similar session names.
+// It checks for case-insensitive matches and substring/partial matches.
+// This helps users identify typos or find sessions with similar names.
+func suggestSimilarSessions(name string, available []string) []string {
+	var suggestions []string
+	nameLower := strings.ToLower(name)
+
+	// Check for common variations
+	for _, session := range available {
+		sessionLower := strings.ToLower(session)
+
+		// Check for case-insensitive match
+		if nameLower == sessionLower && name != session {
+			suggestions = append(suggestions, fmt.Sprintf("Did you mean %q? (case mismatch)", session))
+			continue
+		}
+
+		// Check for common typos or variations
+		// e.g., "experiment" -> "experiment-2024", "my-session" -> "my"
+		// Skip exact matches (no suggestion needed)
+		if nameLower == sessionLower {
+			continue
+		}
+		if strings.Contains(sessionLower, nameLower) || strings.Contains(nameLower, sessionLower) {
+			suggestions = append(suggestions, fmt.Sprintf("Did you mean %q?", session))
+		}
+	}
+
+	return suggestions
 }

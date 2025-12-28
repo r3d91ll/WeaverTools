@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,16 +41,22 @@ class GPUManager:
     ):
         """
         Create a GPUManager configured with which CUDA devices may be used and the maximum fraction of GPU memory to consume.
-        
+
         Parameters:
             allowed_devices (list[int] | None): Specific CUDA device indices to allow. If None, all detected CUDA devices are allowed.
             memory_fraction (float): Fraction (0.0-1.0) of each GPU's memory that the manager should consider available for workloads.
-        
+
         Behavior:
             - If CUDA is not available, logs a warning and sets both `available_devices` and `allowed_devices` to empty lists.
             - When CUDA is available, detects all CUDA devices, populates `available_devices`, and sets `allowed_devices` to the intersection of the provided list and detected devices (or all detected devices if `allowed_devices` is None).
         """
         self.memory_fraction = memory_fraction
+
+        # Thread-safety lock for configuration changes
+        self._config_lock = threading.Lock()
+
+        # Internal state for explicit default device override (None = use first allowed device)
+        self._explicit_default_device: int | None = None
 
         # Check CUDA availability
         if not torch.cuda.is_available():

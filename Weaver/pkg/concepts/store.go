@@ -171,6 +171,92 @@ func (c *Concept) VectorsAsFloat64() [][]float64 {
 	return result
 }
 
+// Stats returns detailed statistics for this concept.
+// It computes sample counts, dimension validation, unique models, and time ranges.
+// Handles nil HiddenState and empty samples gracefully.
+func (c *Concept) Stats() ConceptStats {
+	stats := ConceptStats{
+		Name:      c.Name,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+	}
+
+	// Handle empty samples case
+	if len(c.Samples) == 0 {
+		stats.SampleCount = 0
+		stats.Dimension = 0
+		return stats
+	}
+
+	stats.SampleCount = len(c.Samples)
+
+	// Use ValidateDimensions to get dimension and find mismatches
+	dim, mismatched := c.ValidateDimensions()
+	stats.Dimension = dim
+	stats.MismatchedIDs = mismatched
+
+	// Collect unique model names and find time ranges
+	modelSet := make(map[string]struct{})
+	var oldest, newest time.Time
+	firstTime := true
+
+	for _, sample := range c.Samples {
+		// Collect non-empty model names
+		if sample.Model != "" {
+			modelSet[sample.Model] = struct{}{}
+		}
+
+		// Track oldest and newest extraction times
+		if !sample.ExtractedAt.IsZero() {
+			if firstTime {
+				oldest = sample.ExtractedAt
+				newest = sample.ExtractedAt
+				firstTime = false
+			} else {
+				if sample.ExtractedAt.Before(oldest) {
+					oldest = sample.ExtractedAt
+				}
+				if sample.ExtractedAt.After(newest) {
+					newest = sample.ExtractedAt
+				}
+			}
+		}
+	}
+
+	// Convert model set to sorted slice for consistent output
+	if len(modelSet) > 0 {
+		models := make([]string, 0, len(modelSet))
+		for model := range modelSet {
+			models = append(models, model)
+		}
+		// Sort for consistent ordering
+		sortStrings(models)
+		stats.Models = models
+	}
+
+	// Set time ranges if we found valid times
+	if !firstTime {
+		stats.OldestSampleAt = oldest
+		stats.NewestSampleAt = newest
+	}
+
+	return stats
+}
+
+// sortStrings sorts a slice of strings in place using simple insertion sort.
+// Used for small slices where importing "sort" package is not desired.
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		key := s[i]
+		j := i - 1
+		for j >= 0 && s[j] > key {
+			s[j+1] = s[j]
+			j--
+		}
+		s[j+1] = key
+	}
+}
+
 // Store manages concepts in memory with optional persistence.
 type Store struct {
 	mu       sync.RWMutex

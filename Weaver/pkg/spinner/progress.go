@@ -342,3 +342,191 @@ func (p *ProgressBar) clearLine() {
 		p.lastOutput = 0
 	}
 }
+
+// Start begins progress tracking and displays the initial progress bar.
+// It is safe to call Start on an already running progress bar (no-op).
+// In non-TTY mode, prints the initial status on a new line.
+// Thread-safe: uses mutex to protect state changes.
+func (p *ProgressBar) Start() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Guard against double-start: if already active, do nothing
+	if p.active {
+		return
+	}
+
+	// Initialize state
+	p.active = true
+	p.startTime = time.Now()
+	p.current = 0
+
+	// Display initial progress
+	if p.isTTY {
+		// TTY mode: hide cursor and render inline
+		fmt.Fprint(p.config.Writer, hideCursor)
+		output := p.buildOutput()
+		p.clearAndWrite(output)
+	} else {
+		// Non-TTY mode: print on new line
+		p.renderNonTTY()
+	}
+}
+
+// Increment advances the progress by 1.
+// Does nothing if the progress bar is not active.
+// Thread-safe: uses mutex to protect state changes.
+func (p *ProgressBar) Increment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Do nothing if not active
+	if !p.active {
+		return
+	}
+
+	// Increment but don't exceed total
+	if p.current < p.config.Total {
+		p.current++
+	}
+
+	// Update display
+	if p.isTTY {
+		output := p.buildOutput()
+		p.clearAndWrite(output)
+	} else {
+		// Non-TTY: only output on significant progress or completion
+		// Output every 10% or on completion
+		if p.current == p.config.Total || (p.current%(p.config.Total/10+1)) == 0 {
+			p.renderNonTTY()
+		}
+	}
+}
+
+// Set sets the progress to a specific value.
+// If n is negative, it is clamped to 0. If n exceeds total, it is clamped to total.
+// Does nothing if the progress bar is not active.
+// Thread-safe: uses mutex to protect state changes.
+func (p *ProgressBar) Set(n int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Do nothing if not active
+	if !p.active {
+		return
+	}
+
+	// Clamp value to valid range
+	if n < 0 {
+		n = 0
+	}
+	if n > p.config.Total {
+		n = p.config.Total
+	}
+
+	// Track if we made significant progress for non-TTY output
+	oldCurrent := p.current
+	p.current = n
+
+	// Update display
+	if p.isTTY {
+		output := p.buildOutput()
+		p.clearAndWrite(output)
+	} else {
+		// Non-TTY: output if we've made meaningful progress (crossed 10% threshold)
+		oldPct := 0
+		newPct := 0
+		if p.config.Total > 0 {
+			oldPct = (oldCurrent * 10) / p.config.Total
+			newPct = (p.current * 10) / p.config.Total
+		}
+		if newPct > oldPct || p.current == p.config.Total {
+			p.renderNonTTY()
+		}
+	}
+}
+
+// Complete stops the progress bar and displays a success message.
+// If message is empty, a default completion message is used.
+// Displays: ✓ message (elapsed) in green.
+// Does nothing if called on an inactive progress bar (but still shows message).
+// Thread-safe: uses mutex to protect state changes.
+func (p *ProgressBar) Complete(message string) {
+	p.complete(message, symbolSuccess, colorGreen)
+}
+
+// Fail stops the progress bar and displays a failure message.
+// If message is empty, a default failure message is used.
+// Displays: ✗ message (elapsed) in red.
+// Does nothing if called on an inactive progress bar (but still shows message).
+// Thread-safe: uses mutex to protect state changes.
+func (p *ProgressBar) Fail(message string) {
+	p.complete(message, symbolFailure, colorRed)
+}
+
+// complete is the internal implementation for Complete and Fail.
+// It stops the progress bar and displays a final status with the given symbol and color.
+// In non-TTY mode, displays a simple status message without ANSI codes.
+func (p *ProgressBar) complete(message, symbol, color string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Use default message if empty
+	if message == "" {
+		message = fmt.Sprintf("%s complete", p.config.Message)
+	}
+
+	// Capture elapsed time
+	var elapsed time.Duration
+	if !p.startTime.IsZero() {
+		elapsed = time.Since(p.startTime)
+	}
+
+	// If not active, just display the final message
+	if !p.active {
+		var output string
+		if p.isTTY {
+			// TTY mode: use colors
+			if p.config.ShowElapsed && elapsed > 0 {
+				output = fmt.Sprintf("%s%s%s %s %s\n", color, symbol, colorReset, message, p.formatElapsed(elapsed))
+			} else {
+				output = fmt.Sprintf("%s%s%s %s\n", color, symbol, colorReset, message)
+			}
+		} else {
+			// Non-TTY mode: plain text without colors
+			if p.config.ShowElapsed && elapsed > 0 {
+				output = fmt.Sprintf("%s %s %s\n", symbol, message, p.formatElapsed(elapsed))
+			} else {
+				output = fmt.Sprintf("%s %s\n", symbol, message)
+			}
+		}
+		fmt.Fprint(p.config.Writer, output)
+		return
+	}
+
+	// Mark as inactive
+	p.active = false
+
+	// Build final output
+	var output string
+	if p.isTTY {
+		// Clear the progress bar line first
+		p.clearLine()
+		fmt.Fprint(p.config.Writer, showCursor)
+
+		// TTY mode: use colors and elapsed time
+		if p.config.ShowElapsed {
+			output = fmt.Sprintf("%s%s%s %s %s\n", color, symbol, colorReset, message, p.formatElapsed(elapsed))
+		} else {
+			output = fmt.Sprintf("%s%s%s %s\n", color, symbol, colorReset, message)
+		}
+	} else {
+		// Non-TTY mode: plain text without colors
+		if p.config.ShowElapsed {
+			output = fmt.Sprintf("%s %s %s\n", symbol, message, p.formatElapsed(elapsed))
+		} else {
+			output = fmt.Sprintf("%s %s\n", symbol, message)
+		}
+	}
+	fmt.Fprint(p.config.Writer, output)
+}

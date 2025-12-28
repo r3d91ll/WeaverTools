@@ -324,6 +324,97 @@ func (r *SessionRegistry) Save(dir string) error {
 	return nil
 }
 
+// Load restores sessions from a directory of JSON files.
+// It reads the manifest.json for name mappings, or falls back to using
+// filenames (without .json extension) as registry names.
+//
+// Load follows the copy-under-lock pattern: files are read and unmarshaled
+// outside the lock, then the lock is acquired only for updating the map.
+// This minimizes lock contention during potentially slow file operations.
+//
+// If the directory doesn't exist, Load returns nil (no error) to handle
+// the case where no sessions have been saved yet.
+//
+// Loaded sessions are merged into the registry; existing sessions with
+// the same names are overwritten.
+//
+// This method is safe for concurrent use.
+func (r *SessionRegistry) Load(dir string) error {
+	// Perform I/O outside the lock
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No saved sessions - this is not an error
+		}
+		return fmt.Errorf("failed to read directory %q: %w", dir, err)
+	}
+
+	// Try to load the manifest for name mappings
+	var manifest registryManifest
+	manifestPath := filepath.Join(dir, manifestFilename)
+	manifestData, err := os.ReadFile(manifestPath)
+	if err == nil {
+		// Manifest exists - parse it
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			return fmt.Errorf("failed to parse manifest %q: %w", manifestPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		// Manifest exists but couldn't be read - that's an error
+		return fmt.Errorf("failed to read manifest %q: %w", manifestPath, err)
+	}
+	// If manifest doesn't exist, manifest.Sessions will be nil (fallback to filenames)
+
+	// Build reverse lookup: filename -> registry name
+	filenameToName := make(map[string]string)
+	for name, filename := range manifest.Sessions {
+		filenameToName[filename] = name
+	}
+
+	// Read and unmarshal session files outside the lock
+	loaded := make(map[string]*Session)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if filepath.Ext(name) != ".json" || name == manifestFilename {
+			continue
+		}
+
+		// Read the session file
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read session file %q: %w", path, err)
+		}
+
+		// Unmarshal the session
+		var session Session
+		if err := json.Unmarshal(data, &session); err != nil {
+			return fmt.Errorf("failed to parse session file %q: %w", path, err)
+		}
+
+		// Determine the registry name
+		baseFilename := strings.TrimSuffix(name, ".json")
+		registryName := baseFilename
+		if mappedName, ok := filenameToName[baseFilename]; ok {
+			registryName = mappedName
+		}
+
+		loaded[registryName] = &session
+	}
+
+	// Acquire lock only for map update
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, session := range loaded {
+		r.sessions[name] = session
+	}
+
+	return nil
+}
+
 // unsafeFilenameChars matches characters that are unsafe for filenames.
 // This includes: / \ : * ? " < > | and control characters.
 var unsafeFilenameChars = regexp.MustCompile(`[/\\:*?"<>|\x00-\x1f]`)

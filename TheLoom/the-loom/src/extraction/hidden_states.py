@@ -786,11 +786,23 @@ def collect_streaming_results(
         )
 
     layer_chunks: dict[int, list[torch.Tensor]] = {}
+    overlap = 0  # Will be set from first chunk's metadata
 
     for chunk_result in streaming_generator:
+        # Get overlap from metadata (set on first chunk, consistent across all)
+        if chunk_result.chunk_index == 0:
+            overlap = chunk_result.metadata.get("overlap", 0)
+
         for layer_idx, tensor in chunk_result.hidden_states.items():
             if layer_idx not in layer_chunks:
                 layer_chunks[layer_idx] = []
+
+            # For chunks after the first, slice off the overlap region
+            # to avoid duplicating tokens in the concatenated result
+            if chunk_result.chunk_index > 0 and overlap > 0:
+                # Slice from overlap position onward (dim=1 is sequence dimension)
+                tensor = tensor[:, overlap:, ...]
+
             layer_chunks[layer_idx].append(tensor)
 
     # Concatenate chunks along sequence dimension (dim=1)
@@ -907,8 +919,6 @@ def extract_with_checkpointing(
             "Install with: pip install transformer-lens"
         ) from e
 
-    from torch.utils.checkpoint import checkpoint
-
     # Ensure tokens has batch dimension
     if tokens.dim() == 1:
         tokens = tokens.unsqueeze(0)
@@ -923,38 +933,26 @@ def extract_with_checkpointing(
     # Build hook filter for selective caching
     names_filter = build_hook_filter(layers=target_layers)
 
-    # Define checkpointed forward function
-    def checkpointed_forward(input_tokens: torch.Tensor) -> torch.Tensor:
-        """Forward pass wrapped for checkpointing."""
-        return model(input_tokens, return_type="logits")
-
-    # Run with gradient checkpointing enabled
     # Note: torch.utils.checkpoint requires gradients to be enabled
     # for the checkpointing to actually work (it's a no-op otherwise)
     requires_grad = torch.is_grad_enabled()
 
-    if requires_grad:
-        # Use checkpointing when gradients are enabled (training mode)
-        logits = checkpoint(
-            checkpointed_forward,
-            tokens,
-            use_reentrant=use_reentrant,
-        )
-        checkpointing_enabled = True
-    else:
-        # Fall back to normal forward when gradients disabled (inference)
-        # Checkpointing provides no benefit without backward pass
-        logits = model(tokens, return_type="logits")
-        checkpointing_enabled = False
-
-    # Now extract hidden states with selective caching
-    # We run again with selective caching to get the hidden states
-    # This is necessary because checkpoint() doesn't easily expose intermediates
+    # Use run_with_cache for a single forward pass that captures both
+    # logits and hidden states. This avoids the double forward pass issue.
+    #
+    # For gradient checkpointing benefits during training, configure
+    # checkpointing at the model level (e.g., model.cfg.use_checkpointing)
+    # rather than wrapping our extraction function.
     with torch.set_grad_enabled(requires_grad):
-        _, cache = model.run_with_cache(
+        logits, cache = model.run_with_cache(
             tokens,
             names_filter=names_filter,
+            return_type="logits",
         )
+
+    # Gradient checkpointing is enabled at model config level, not here
+    # This flag indicates if gradients are enabled (training mode)
+    checkpointing_enabled = requires_grad
 
     # Extract hidden states from cache
     hidden_states: dict[int, torch.Tensor] = {}

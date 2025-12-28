@@ -241,7 +241,7 @@ from src.utils.gpu import GPUManager
 gpu = GPUManager()
 
 # Check if allocation is safe before large operations
-if gpu.can_allocate(required_gb=10.0, device=0):
+if gpu.can_allocate(required_memory_gb=10.0, device=0):
     # Safe to proceed
     result = extract_hidden_states(model, tokens)
 else:
@@ -250,9 +250,8 @@ else:
 
 # Monitor memory during extraction
 status = gpu.check_memory_threshold(threshold=0.85)
-for device_status in status:
-    if device_status["exceeds_threshold"]:
-        print(f"Warning: GPU {device_status['device']} at {device_status['utilization']:.1%}")
+for device_warning in status["warnings"]:
+    print(f"Warning: GPU {device_warning['device']} at {device_warning['usage_percent']:.1f}%")
 ```
 
 ## Inference vs. Training Optimizations
@@ -386,8 +385,9 @@ nvidia-smi
 python -c "
 from src.utils.gpu import GPUManager
 gpu = GPUManager()
-for info in gpu.get_all_gpu_info():
-    print(f'GPU {info.device}: {info.used_memory_gb:.1f}/{info.total_memory_gb:.1f} GB ({info.utilization:.1%})')
+gpu_info = gpu.get_gpu_info()
+for info in (gpu_info if isinstance(gpu_info, list) else [gpu_info]):
+    print(f'GPU {info.index}: {info.used_memory_gb:.1f}/{info.total_memory_gb:.1f} GB')
     print(f'  Peak: {info.peak_memory_gb:.1f} GB')
 "
 ```

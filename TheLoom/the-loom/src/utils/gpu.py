@@ -21,7 +21,6 @@ class GPUInfo:
     total_memory_gb: float
     free_memory_gb: float
     used_memory_gb: float
-    peak_memory_gb: float  # Peak memory allocated by PyTorch tensors
     utilization_percent: float | None  # Requires pynvml for accurate reading
     compute_capability: tuple[int, int]
 
@@ -243,12 +242,12 @@ class GPUManager:
     def _get_single_gpu_info(self, device_idx: int) -> GPUInfo:
         """
         Return detailed information about a single GPU device identified by index.
-
+        
         Parameters:
             device_idx (int): Index of the CUDA device to query.
-
+        
         Returns:
-            GPUInfo: Information for the specified GPU including index, name, total_memory_gb, free_memory_gb, used_memory_gb, peak_memory_gb, utilization_percent (`None` if unavailable), and compute_capability as a (major, minor) tuple.
+            GPUInfo: Information for the specified GPU including index, name, total_memory_gb, free_memory_gb, used_memory_gb, utilization_percent (`None` if unavailable), and compute_capability as a (major, minor) tuple.
         """
         props = torch.cuda.get_device_properties(device_idx)
 
@@ -259,17 +258,12 @@ class GPUManager:
         free_memory_gb = free_memory / (1024**3)
         used_memory_gb = total_memory - free_memory_gb
 
-        # Get peak memory allocated by PyTorch tensors
-        peak_memory = torch.cuda.max_memory_allocated(device_idx)
-        peak_memory_gb = peak_memory / (1024**3)
-
         return GPUInfo(
             index=device_idx,
             name=props.name,
             total_memory_gb=total_memory,
             free_memory_gb=free_memory_gb,
             used_memory_gb=used_memory_gb,
-            peak_memory_gb=peak_memory_gb,
             utilization_percent=None,  # Would need pynvml
             compute_capability=(props.major, props.minor),
         )
@@ -364,164 +358,6 @@ class GPUManager:
         # Add ~20% overhead for activations, optimizer states, etc.
         return base_memory * 1.2
 
-    def check_memory_threshold(
-        self,
-        threshold: float = 0.85,
-        device: int | None = None,
-    ) -> dict[str, Any]:
-        """
-        Check GPU memory usage against a threshold and emit warnings for devices exceeding it.
-
-        Parameters:
-            threshold (float): Memory usage fraction (0.0-1.0) that triggers a warning.
-                Default is 0.85 (85% usage).
-            device (int | None): Specific device index to check. If None, checks all allowed devices.
-
-        Returns:
-            dict[str, Any]: Dictionary containing:
-                - threshold (float): The threshold that was checked.
-                - warnings (list[dict]): List of warnings for devices exceeding threshold, each containing:
-                    - device (int): Device index.
-                    - usage_percent (float): Current memory usage percentage.
-                    - used_gb (float): Used memory in GB.
-                    - total_gb (float): Total memory in GB.
-                    - free_gb (float): Free memory in GB.
-                - devices_checked (int): Number of devices checked.
-                - devices_over_threshold (int): Number of devices exceeding threshold.
-        """
-        if not self.has_gpu:
-            return {
-                "threshold": threshold,
-                "warnings": [],
-                "devices_checked": 0,
-                "devices_over_threshold": 0,
-            }
-
-        warnings: list[dict[str, Any]] = []
-        devices_to_check = [device] if device is not None else self.allowed_devices
-
-        for idx in devices_to_check:
-            if idx not in self.allowed_devices:
-                continue
-
-            info = self._get_single_gpu_info(idx)
-            usage_fraction = info.used_memory_gb / info.total_memory_gb if info.total_memory_gb > 0 else 0.0
-            usage_percent = usage_fraction * 100
-
-            if usage_fraction >= threshold:
-                warning_info = {
-                    "device": idx,
-                    "usage_percent": round(usage_percent, 1),
-                    "used_gb": round(info.used_memory_gb, 2),
-                    "total_gb": round(info.total_memory_gb, 2),
-                    "free_gb": round(info.free_memory_gb, 2),
-                }
-                warnings.append(warning_info)
-                logger.warning(
-                    f"GPU {idx} memory usage at {usage_percent:.1f}% "
-                    f"({info.used_memory_gb:.2f}/{info.total_memory_gb:.2f} GB) - "
-                    f"exceeds {threshold * 100:.0f}% threshold"
-                )
-
-        return {
-            "threshold": threshold,
-            "warnings": warnings,
-            "devices_checked": len(devices_to_check),
-            "devices_over_threshold": len(warnings),
-        }
-
-    def get_memory_status(self, device: int | None = None) -> dict[str, Any]:
-        """
-        Get current memory status for one or all allowed devices.
-
-        Parameters:
-            device (int | None): Specific device index. If None, returns status for all allowed devices.
-
-        Returns:
-            dict[str, Any]: Dictionary containing:
-                - has_gpu (bool): Whether GPU is available.
-                - devices (list[dict]): List of device statuses, each containing:
-                    - index (int): Device index.
-                    - name (str): Device name.
-                    - used_gb (float): Used memory in GB.
-                    - free_gb (float): Free memory in GB.
-                    - total_gb (float): Total memory in GB.
-                    - usage_percent (float): Current memory usage percentage.
-                    - peak_gb (float): Peak memory allocated in GB.
-        """
-        if not self.has_gpu:
-            return {"has_gpu": False, "devices": []}
-
-        devices_to_check = [device] if device is not None else self.allowed_devices
-        device_statuses = []
-
-        for idx in devices_to_check:
-            if idx not in self.allowed_devices:
-                continue
-
-            info = self._get_single_gpu_info(idx)
-            usage_percent = (info.used_memory_gb / info.total_memory_gb * 100) if info.total_memory_gb > 0 else 0.0
-
-            device_statuses.append({
-                "index": idx,
-                "name": info.name,
-                "used_gb": round(info.used_memory_gb, 2),
-                "free_gb": round(info.free_memory_gb, 2),
-                "total_gb": round(info.total_memory_gb, 2),
-                "usage_percent": round(usage_percent, 1),
-                "peak_gb": round(info.peak_memory_gb, 2),
-            })
-
-        return {"has_gpu": True, "devices": device_statuses}
-
-    def can_allocate(
-        self,
-        required_memory_gb: float,
-        device: int | None = None,
-    ) -> bool:
-        """
-        Check if the specified amount of memory can be allocated on a GPU device.
-
-        This method performs a pre-allocation check to determine if there is
-        sufficient free memory available, accounting for the configured memory_fraction.
-
-        Parameters:
-            required_memory_gb (float): Amount of memory required in gigabytes.
-            device (int | None): Specific device index to check. If None, checks
-                the default device (first allowed device).
-
-        Returns:
-            bool: True if the required memory can be allocated, False otherwise.
-                Returns False if no GPU is available.
-        """
-        if not self.has_gpu:
-            return False
-
-        # Determine which device to check
-        device_idx = device if device is not None else self.allowed_devices[0]
-
-        if device_idx not in self.allowed_devices:
-            logger.warning(f"Device {device_idx} not in allowed devices")
-            return False
-
-        info = self._get_single_gpu_info(device_idx)
-
-        # Calculate available memory considering memory_fraction
-        # Only use memory_fraction of total memory to leave headroom
-        usable_memory_gb = info.total_memory_gb * self.memory_fraction
-        available_memory_gb = usable_memory_gb - info.used_memory_gb
-
-        can_alloc = available_memory_gb >= required_memory_gb
-
-        if not can_alloc:
-            logger.debug(
-                f"Cannot allocate {required_memory_gb:.2f}GB on device {device_idx}: "
-                f"available={available_memory_gb:.2f}GB (free={info.free_memory_gb:.2f}GB, "
-                f"usable={usable_memory_gb:.2f}GB)"
-            )
-
-        return can_alloc
-
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the GPUManager state and per-GPU information into a dictionary for API responses.
@@ -541,7 +377,6 @@ class GPUManager:
                     - total_memory_gb (float): Total memory in gigabytes (rounded to 2 decimals).
                     - free_memory_gb (float): Free memory in gigabytes (rounded to 2 decimals).
                     - used_memory_gb (float): Used memory in gigabytes (rounded to 2 decimals).
-                    - peak_memory_gb (float): Peak memory allocated in gigabytes (rounded to 2 decimals).
                     - compute_capability (str): Compute capability formatted as "major.minor".
         """
         # Acquire lock for consistent read of runtime-configurable values
@@ -568,7 +403,6 @@ class GPUManager:
                     "total_memory_gb": round(gpu.total_memory_gb, 2),
                     "free_memory_gb": round(gpu.free_memory_gb, 2),
                     "used_memory_gb": round(gpu.used_memory_gb, 2),
-                    "peak_memory_gb": round(gpu.peak_memory_gb, 2),
                     "compute_capability": f"{gpu.compute_capability[0]}.{gpu.compute_capability[1]}",
                 }
                 for gpu in gpu_list

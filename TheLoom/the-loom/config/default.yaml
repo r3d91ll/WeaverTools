@@ -44,14 +44,6 @@ logging:
   file: null                # null = stdout only, or path like ~/.local/log/loom.log
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-# Memory optimization settings for GPU memory management
-memory:
-  precision_mode: auto      # auto, fp32, fp16, bf16 (bf16 requires Ampere+ GPU)
-  enable_gradient_checkpointing: false  # Only for training with backward passes
-  streaming_chunk_size: 512             # Chunk size for streaming extraction
-  memory_warning_threshold: 0.85        # Warn at 85% GPU utilization
-  activation_cache_filter: []           # TransformerLens hooks to cache (empty = all)
-
 # Per-model configuration overrides
 # Use this to force specific loaders or settings for certain models
 #

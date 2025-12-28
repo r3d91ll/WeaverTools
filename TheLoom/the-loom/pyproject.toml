@@ -15,7 +15,6 @@ loom = "src.server:main"
 python = ">=3.10,<3.14"
 torch = "^2.0.0"
 transformers = "^4.57.3"
-transformer-lens = "^2.0.0"
 sentence-transformers = "^2.2.0"
 fastapi = "^0.104.0"
 uvicorn = {extras = ["standard"], version = "^0.24.0"}

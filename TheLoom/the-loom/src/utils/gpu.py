@@ -93,11 +93,52 @@ class GPUManager:
         Selects the default device used for computations.
 
         Returns:
-            str: `"cuda:<index>"` for the first allowed GPU, `"cpu"` if no GPUs are available.
+            str: `"cuda:<index>"` for the explicitly set default device, the first
+                allowed GPU if no explicit default is set, or `"cpu"` if no GPUs are available.
         """
         if self.has_gpu:
+            # Use explicit default if set and still valid, otherwise first allowed
+            if (
+                self._explicit_default_device is not None
+                and self._explicit_default_device in self.allowed_devices
+            ):
+                return f"cuda:{self._explicit_default_device}"
             return f"cuda:{self.allowed_devices[0]}"
         return "cpu"
+
+    def set_default_device(self, device_idx: int) -> None:
+        """
+        Set the default GPU device for computations.
+
+        Thread-safe method to explicitly set which GPU device should be used
+        as the default. The device must be in `allowed_devices`.
+
+        Parameters:
+            device_idx (int): CUDA device index to set as default. Must be
+                present in `self.allowed_devices`.
+
+        Raises:
+            ValueError: If `device_idx` is not in `allowed_devices`.
+
+        Example:
+            >>> gm = GPUManager(allowed_devices=[0, 1, 2])
+            >>> gm.set_default_device(1)  # Use GPU 1 as default
+            >>> gm.default_device
+            'cuda:1'
+        """
+        with self._config_lock:
+            # Validate device is in allowed_devices
+            if device_idx not in self.allowed_devices:
+                raise ValueError(
+                    f"Device {device_idx} not in allowed_devices: {self.allowed_devices}"
+                )
+
+            old_default = self._explicit_default_device
+            self._explicit_default_device = device_idx
+
+            logger.info(
+                f"Updated default_device: {old_default} -> {self._explicit_default_device}"
+            )
 
     def set_allowed_devices(self, devices: list[int]) -> None:
         """

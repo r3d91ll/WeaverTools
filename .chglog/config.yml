@@ -1,0 +1,57 @@
+# git-chglog configuration for WeaverTools
+# Install: go install github.com/git-chglog/git-chglog/cmd/git-chglog@latest
+# Usage: git-chglog -o CHANGELOG.md
+# Docs: https://github.com/git-chglog/git-chglog
+
+style: github
+template: CHANGELOG.tpl.md
+info:
+  title: CHANGELOG
+  repository_url: https://github.com/r3d91ll/WeaverTools
+
+options:
+  commits:
+    # Filters commits to include based on patterns
+    filters:
+      Type:
+        - feat
+        - fix
+        - perf
+        - refactor
+        - docs
+        - style
+        - test
+        - build
+        - ci
+        - chore
+        - revert
+    # Sort commits by date (descending)
+    sort_by: Scope
+  commit_groups:
+    # Group commits by type
+    group_by: Type
+    sort_by: Title
+    # Map commit types to section headers
+    title_maps:
+      feat: Added
+      fix: Fixed
+      perf: Performance
+      refactor: Changed
+      docs: Documentation
+      style: Style
+      test: Tests
+      build: Build
+      ci: CI/CD
+      chore: Chores
+      revert: Reverted
+  header:
+    pattern: "^(\\w*)(?:\\(([\\w\\$\\.\\-\\*\\s]*)\\))?\\:\\s(.*)$"
+    pattern_maps:
+      - Type
+      - Scope
+      - Subject
+  notes:
+    # Extract breaking changes and deprecations
+    keywords:
+      - BREAKING CHANGE
+      - Deprecated

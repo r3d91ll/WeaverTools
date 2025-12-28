@@ -364,6 +364,116 @@ class GPUManager:
         # Add ~20% overhead for activations, optimizer states, etc.
         return base_memory * 1.2
 
+    def check_memory_threshold(
+        self,
+        threshold: float = 0.85,
+        device: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Check GPU memory usage against a threshold and emit warnings for devices exceeding it.
+
+        Parameters:
+            threshold (float): Memory usage fraction (0.0-1.0) that triggers a warning.
+                Default is 0.85 (85% usage).
+            device (int | None): Specific device index to check. If None, checks all allowed devices.
+
+        Returns:
+            dict[str, Any]: Dictionary containing:
+                - threshold (float): The threshold that was checked.
+                - warnings (list[dict]): List of warnings for devices exceeding threshold, each containing:
+                    - device (int): Device index.
+                    - usage_percent (float): Current memory usage percentage.
+                    - used_gb (float): Used memory in GB.
+                    - total_gb (float): Total memory in GB.
+                    - free_gb (float): Free memory in GB.
+                - devices_checked (int): Number of devices checked.
+                - devices_over_threshold (int): Number of devices exceeding threshold.
+        """
+        if not self.has_gpu:
+            return {
+                "threshold": threshold,
+                "warnings": [],
+                "devices_checked": 0,
+                "devices_over_threshold": 0,
+            }
+
+        warnings: list[dict[str, Any]] = []
+        devices_to_check = [device] if device is not None else self.allowed_devices
+
+        for idx in devices_to_check:
+            if idx not in self.allowed_devices:
+                continue
+
+            info = self._get_single_gpu_info(idx)
+            usage_fraction = info.used_memory_gb / info.total_memory_gb if info.total_memory_gb > 0 else 0.0
+            usage_percent = usage_fraction * 100
+
+            if usage_fraction >= threshold:
+                warning_info = {
+                    "device": idx,
+                    "usage_percent": round(usage_percent, 1),
+                    "used_gb": round(info.used_memory_gb, 2),
+                    "total_gb": round(info.total_memory_gb, 2),
+                    "free_gb": round(info.free_memory_gb, 2),
+                }
+                warnings.append(warning_info)
+                logger.warning(
+                    f"GPU {idx} memory usage at {usage_percent:.1f}% "
+                    f"({info.used_memory_gb:.2f}/{info.total_memory_gb:.2f} GB) - "
+                    f"exceeds {threshold * 100:.0f}% threshold"
+                )
+
+        return {
+            "threshold": threshold,
+            "warnings": warnings,
+            "devices_checked": len(devices_to_check),
+            "devices_over_threshold": len(warnings),
+        }
+
+    def get_memory_status(self, device: int | None = None) -> dict[str, Any]:
+        """
+        Get current memory status for one or all allowed devices.
+
+        Parameters:
+            device (int | None): Specific device index. If None, returns status for all allowed devices.
+
+        Returns:
+            dict[str, Any]: Dictionary containing:
+                - has_gpu (bool): Whether GPU is available.
+                - devices (list[dict]): List of device statuses, each containing:
+                    - index (int): Device index.
+                    - name (str): Device name.
+                    - used_gb (float): Used memory in GB.
+                    - free_gb (float): Free memory in GB.
+                    - total_gb (float): Total memory in GB.
+                    - usage_percent (float): Current memory usage percentage.
+                    - peak_gb (float): Peak memory allocated in GB.
+        """
+        if not self.has_gpu:
+            return {"has_gpu": False, "devices": []}
+
+        devices_to_check = [device] if device is not None else self.allowed_devices
+        device_statuses = []
+
+        for idx in devices_to_check:
+            if idx not in self.allowed_devices:
+                continue
+
+            info = self._get_single_gpu_info(idx)
+            usage_percent = (info.used_memory_gb / info.total_memory_gb * 100) if info.total_memory_gb > 0 else 0.0
+
+            device_statuses.append({
+                "index": idx,
+                "name": info.name,
+                "used_gb": round(info.used_memory_gb, 2),
+                "free_gb": round(info.free_memory_gb, 2),
+                "total_gb": round(info.total_memory_gb, 2),
+                "usage_percent": round(usage_percent, 1),
+                "peak_gb": round(info.peak_memory_gb, 2),
+            })
+
+        return {"has_gpu": True, "devices": device_statuses}
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the GPUManager state and per-GPU information into a dictionary for API responses.

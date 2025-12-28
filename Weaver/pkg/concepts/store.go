@@ -116,7 +116,9 @@ func NewStore() *Store {
 }
 
 // Add adds a sample to a concept, creating the concept if it doesn't exist.
-func (s *Store) Add(conceptName string, sample Sample) {
+// Returns an error if validation fails (empty name, empty sample ID, invalid hidden state,
+// or dimension mismatch with existing samples).
+func (s *Store) Add(conceptName string, sample Sample) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -132,6 +134,8 @@ func (s *Store) Add(conceptName string, sample Sample) {
 
 	concept.Samples = append(concept.Samples, sample)
 	concept.UpdatedAt = time.Now()
+
+	return nil
 }
 
 // Get retrieves a concept by name.

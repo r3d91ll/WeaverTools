@@ -104,6 +104,12 @@ func (c *ShellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 		return c.completeAgent(currentWord)
 	}
 
+	// Handle concept completion for arguments to concept-expecting commands
+	// Check if the line contains a concept command before the current word
+	if c.isConceptCommandContext(lineStr, wordStart) {
+		return c.completeConcept(currentWord)
+	}
+
 	return nil, 0
 }
 
@@ -123,6 +129,53 @@ func findWordStart(s string) int {
 
 	// Return position after the whitespace, or 0 if none found
 	return wordStart + 1
+}
+
+// isConceptCommandContext checks if the line contains a concept-expecting command
+// before the current word position. This is used to trigger concept name completion
+// for arguments to commands like /analyze, /compare, /validate, /metrics.
+//
+// Parameters:
+//   - line: The input line up to the cursor position
+//   - wordStart: The starting position of the current word being typed
+//
+// Returns true if the line starts with a concept command followed by whitespace.
+func (c *ShellCompleter) isConceptCommandContext(line string, wordStart int) bool {
+	// Get the part of the line before the current word
+	beforeWord := line[:wordStart]
+
+	// Trim trailing whitespace to get the command portion
+	beforeWord = strings.TrimRight(beforeWord, " \t")
+
+	// Check if the line starts with / (command prefix)
+	if !strings.HasPrefix(beforeWord, "/") {
+		// No command on this line, might still have concept command earlier
+		// Look for the last command in the line
+		lastCmdIdx := strings.LastIndex(beforeWord, "/")
+		if lastCmdIdx == -1 {
+			return false
+		}
+		beforeWord = beforeWord[lastCmdIdx:]
+	}
+
+	// Extract the command name (first word after /)
+	cmdPart := strings.TrimPrefix(beforeWord, "/")
+
+	// The command is the first word (up to the first space/tab)
+	cmdName := cmdPart
+	spaceIdx := strings.IndexAny(cmdPart, " \t")
+	if spaceIdx != -1 {
+		cmdName = cmdPart[:spaceIdx]
+	}
+
+	// Check if this is a concept-expecting command
+	for _, conceptCmd := range conceptCommands {
+		if cmdName == conceptCmd {
+			return true
+		}
+	}
+
+	return false
 }
 
 // completeCommand returns completions for commands starting with the given prefix.

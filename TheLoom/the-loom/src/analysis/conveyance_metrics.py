@@ -1539,6 +1539,567 @@ def calculate_c_pair_detailed(
 
 
 # ============================================================================
+# Patching Impact Metrics
+# ============================================================================
+
+
+@dataclass
+class PatchingImpactResult:
+    """Results from patching impact analysis.
+
+    Quantifies the causal effect of activation patching on conveyance metrics,
+    measuring how much a patch recovers baseline behavior from corrupted state.
+
+    MATHEMATICAL GROUNDING
+    ======================
+    Patching impact is computed by comparing metrics across three execution paths:
+    1. Clean (baseline): Original input, no intervention
+    2. Corrupted: Modified input, no patching
+    3. Patched: Modified input with activation patching applied
+
+    Key metrics:
+    - causal_effect: patched_metric - corrupted_metric
+      Positive = patch improved metric toward baseline
+    - recovery_rate: causal_effect / |clean_metric - corrupted_metric|
+      1.0 = full recovery, 0.0 = no recovery, >1.0 = overcorrection
+
+    INTERPRETATION
+    ==============
+    - recovery_rate near 1.0: Patch successfully restored clean behavior
+    - recovery_rate near 0.0: Patch had minimal effect
+    - recovery_rate > 1.0: Overcorrection (patched exceeds baseline)
+    - recovery_rate < 0.0: Patch made corruption worse
+
+    USAGE
+    =====
+    This dataclass integrates with the patching experiment framework to
+    measure how activation interventions affect semantic information transfer.
+    """
+
+    metric_name: str  # Name of the metric being analyzed
+    clean_value: float  # Metric value for clean (baseline) path
+    corrupted_value: float  # Metric value for corrupted path
+    patched_value: float  # Metric value for patched path
+    causal_effect: float  # patched - corrupted (improvement from patch)
+    recovery_rate: float  # causal_effect / |corruption_delta|
+    corruption_delta: float  # corrupted - clean (damage from corruption)
+    patch_layer: int | None = None  # Layer where patch was applied (if applicable)
+    patch_component: str | None = None  # Component patched (if applicable)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_recovery(self) -> bool:
+        """Check if the patch recovered toward baseline (positive causal effect)."""
+        # Recovery means moving from corrupted toward clean
+        # If corruption_delta < 0 (corrupted < clean), recovery means patched > corrupted
+        # If corruption_delta > 0 (corrupted > clean), recovery means patched < corrupted
+        if abs(self.corruption_delta) < 1e-10:
+            return False  # No corruption to recover from
+        return self.causal_effect * self.corruption_delta < 0
+
+    @property
+    def is_full_recovery(self) -> bool:
+        """Check if patch fully recovered baseline (recovery_rate >= 0.95)."""
+        return self.recovery_rate >= 0.95
+
+    @property
+    def is_overcorrection(self) -> bool:
+        """Check if patch overcorrected (recovery_rate > 1.0)."""
+        return self.recovery_rate > 1.0
+
+    @property
+    def is_harmful(self) -> bool:
+        """Check if patch made corruption worse (recovery_rate < 0)."""
+        return self.recovery_rate < 0.0
+
+    @property
+    def impact_severity(self) -> str:
+        """Classify the severity/quality of patch impact.
+
+        Categories:
+        - full_recovery: recovery_rate >= 0.95
+        - strong_recovery: 0.7 <= recovery_rate < 0.95
+        - moderate_recovery: 0.3 <= recovery_rate < 0.7
+        - weak_recovery: 0.0 <= recovery_rate < 0.3
+        - no_effect: recovery_rate ≈ 0
+        - harmful: recovery_rate < 0
+        - overcorrection: recovery_rate > 1.0
+        """
+        if abs(self.recovery_rate) < 0.05:
+            return "no_effect"
+        elif self.recovery_rate < 0:
+            return "harmful"
+        elif self.recovery_rate > 1.0:
+            return "overcorrection"
+        elif self.recovery_rate >= 0.95:
+            return "full_recovery"
+        elif self.recovery_rate >= 0.7:
+            return "strong_recovery"
+        elif self.recovery_rate >= 0.3:
+            return "moderate_recovery"
+        else:
+            return "weak_recovery"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "metric_name": self.metric_name,
+            "clean_value": self.clean_value,
+            "corrupted_value": self.corrupted_value,
+            "patched_value": self.patched_value,
+            "causal_effect": self.causal_effect,
+            "recovery_rate": self.recovery_rate,
+            "corruption_delta": self.corruption_delta,
+            "patch_layer": self.patch_layer,
+            "patch_component": self.patch_component,
+            "impact_severity": self.impact_severity,
+            "is_recovery": self.is_recovery,
+            "is_full_recovery": self.is_full_recovery,
+            "is_overcorrection": self.is_overcorrection,
+            "is_harmful": self.is_harmful,
+            "metadata": self.metadata,
+        }
+
+    def __repr__(self) -> str:
+        """Human-readable representation."""
+        layer_info = f", layer={self.patch_layer}" if self.patch_layer is not None else ""
+        return (
+            f"PatchingImpactResult("
+            f"metric={self.metric_name!r}, "
+            f"recovery={self.recovery_rate:.4f}, "
+            f"severity={self.impact_severity!r}"
+            f"{layer_info})"
+        )
+
+
+@dataclass
+class MultiPathMetricsResult:
+    """Results from computing metrics across all execution paths.
+
+    Contains conveyance metrics for clean, corrupted, and patched paths,
+    enabling comprehensive comparison of patching effects on information transfer.
+    """
+
+    clean_metrics: ConveyanceMetricsResult | None  # Metrics for clean path
+    corrupted_metrics: ConveyanceMetricsResult | None  # Metrics for corrupted path
+    patched_metrics: list[ConveyanceMetricsResult]  # Metrics for each patched path
+    impacts: list[PatchingImpactResult]  # Impact analysis for each patched path
+    n_patched_paths: int  # Number of patched paths analyzed
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_all_paths(self) -> bool:
+        """Check if metrics are available for all path types."""
+        return (
+            self.clean_metrics is not None
+            and self.corrupted_metrics is not None
+            and len(self.patched_metrics) > 0
+        )
+
+    @property
+    def mean_recovery_rate(self) -> float:
+        """Calculate mean recovery rate across all patched paths."""
+        if not self.impacts:
+            return 0.0
+        return float(np.mean([i.recovery_rate for i in self.impacts]))
+
+    @property
+    def best_recovery_rate(self) -> float:
+        """Get the best (highest) recovery rate among patched paths."""
+        if not self.impacts:
+            return 0.0
+        return float(max(i.recovery_rate for i in self.impacts))
+
+    @property
+    def best_patch_layer(self) -> int | None:
+        """Get the layer with the best recovery rate."""
+        if not self.impacts:
+            return None
+        best = max(self.impacts, key=lambda i: i.recovery_rate)
+        return best.patch_layer
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "has_all_paths": self.has_all_paths,
+            "n_patched_paths": self.n_patched_paths,
+            "mean_recovery_rate": self.mean_recovery_rate,
+            "best_recovery_rate": self.best_recovery_rate,
+            "best_patch_layer": self.best_patch_layer,
+            "clean_metrics": self.clean_metrics.to_dict() if self.clean_metrics else None,
+            "corrupted_metrics": self.corrupted_metrics.to_dict() if self.corrupted_metrics else None,
+            "patched_metrics": [pm.to_dict() for pm in self.patched_metrics],
+            "impacts": [i.to_dict() for i in self.impacts],
+            "metadata": self.metadata,
+        }
+
+
+def compute_patch_impact(
+    clean_value: float,
+    corrupted_value: float,
+    patched_value: float,
+    metric_name: str = "generic",
+    patch_layer: int | None = None,
+    patch_component: str | None = None,
+) -> PatchingImpactResult:
+    """Compute the impact of activation patching on a metric.
+
+    Measures how effectively a patch recovers baseline behavior from a corrupted
+    state. This is the core function for causal analysis of activation patches.
+
+    MATHEMATICAL GROUNDING
+    ======================
+    The patching impact is computed as:
+
+        causal_effect = patched_value - corrupted_value
+        corruption_delta = corrupted_value - clean_value
+        recovery_rate = causal_effect / |corruption_delta|
+
+    The recovery rate indicates what fraction of the corruption was undone:
+    - recovery_rate = 1.0: Full recovery (patched equals baseline)
+    - recovery_rate = 0.0: No recovery (patched equals corrupted)
+    - recovery_rate > 1.0: Overcorrection (patched overshoots baseline)
+    - recovery_rate < 0.0: Harmful (patched worse than corrupted)
+
+    Parameters:
+        clean_value: float
+            Metric value for the clean (baseline) execution path.
+        corrupted_value: float
+            Metric value for the corrupted execution path.
+        patched_value: float
+            Metric value for the patched execution path.
+        metric_name: str, default="generic"
+            Name of the metric being analyzed (e.g., "beta", "d_eff", "c_pair").
+        patch_layer: int | None, default=None
+            Layer index where the patch was applied.
+        patch_component: str | None, default=None
+            Component that was patched (e.g., "resid_pre", "attn").
+
+    Returns:
+        PatchingImpactResult with full impact analysis including:
+        - causal_effect: Direct measure of patch impact
+        - recovery_rate: Normalized recovery metric
+        - impact_severity: Classification of impact quality
+
+    Example:
+        >>> # Patch successfully restored clean behavior
+        >>> result = compute_patch_impact(
+        ...     clean_value=0.2,  # Low beta (healthy)
+        ...     corrupted_value=0.8,  # High beta (collapsed)
+        ...     patched_value=0.3,  # Patch reduced collapse
+        ...     metric_name="beta",
+        ...     patch_layer=5,
+        ... )
+        >>> print(f"Recovery rate: {result.recovery_rate:.2f}")  # ~0.83
+
+        >>> # Patch had no effect
+        >>> result = compute_patch_impact(
+        ...     clean_value=0.5,
+        ...     corrupted_value=0.8,
+        ...     patched_value=0.8,  # Same as corrupted
+        ...     metric_name="d_eff",
+        ... )
+        >>> print(result.impact_severity)  # "no_effect"
+
+    Notes:
+        - When clean and corrupted values are identical, recovery_rate = 0
+          (no corruption to recover from).
+        - Use with Beta metric: Lower Beta = healthier, so recovery means
+          reducing Beta toward clean baseline.
+        - Use with D_eff: Higher D_eff = more dimensions utilized.
+    """
+    # Calculate corruption delta (how much corruption changed the metric)
+    corruption_delta = corrupted_value - clean_value
+
+    # Calculate causal effect (how much patch changed from corrupted)
+    causal_effect = patched_value - corrupted_value
+
+    # Calculate recovery rate
+    # Avoid division by zero when there's no corruption
+    if abs(corruption_delta) < 1e-10:
+        # No corruption to recover from
+        if abs(causal_effect) < 1e-10:
+            recovery_rate = 0.0  # Patch had no effect (but none needed)
+        else:
+            # Patch changed something when nothing was corrupted
+            # This is unusual - treat as infinite recovery (or could be harmful)
+            recovery_rate = float("inf") if causal_effect > 0 else float("-inf")
+    else:
+        # Standard recovery rate: how much of corruption was undone
+        # Note: We use negative corruption_delta to correctly handle both
+        # cases where corruption increases or decreases the metric
+        recovery_rate = -causal_effect / corruption_delta
+
+    return PatchingImpactResult(
+        metric_name=metric_name,
+        clean_value=clean_value,
+        corrupted_value=corrupted_value,
+        patched_value=patched_value,
+        causal_effect=causal_effect,
+        recovery_rate=recovery_rate,
+        corruption_delta=corruption_delta,
+        patch_layer=patch_layer,
+        patch_component=patch_component,
+    )
+
+
+def compute_beta_patch_impact(
+    clean_embeddings: np.ndarray,
+    corrupted_embeddings: np.ndarray,
+    patched_embeddings: np.ndarray,
+    variance_threshold: float = DEFAULT_VARIANCE_THRESHOLD,
+    patch_layer: int | None = None,
+    patch_component: str | None = None,
+) -> PatchingImpactResult:
+    """Compute the impact of patching on Beta (collapse indicator) metric.
+
+    Specialized function for analyzing how activation patches affect semantic
+    collapse in embedding space.
+
+    Parameters:
+        clean_embeddings: Array of shape (n_samples, n_features)
+            Embeddings from the clean (baseline) execution path.
+        corrupted_embeddings: Array of shape (n_samples, n_features)
+            Embeddings from the corrupted execution path.
+        patched_embeddings: Array of shape (n_samples, n_features)
+            Embeddings from the patched execution path.
+        variance_threshold: float, default=0.90
+            Variance threshold for D_eff calculation.
+        patch_layer: int | None, default=None
+            Layer where the patch was applied.
+        patch_component: str | None, default=None
+            Component that was patched.
+
+    Returns:
+        PatchingImpactResult for the Beta metric with full impact analysis.
+
+    Example:
+        >>> result = compute_beta_patch_impact(
+        ...     clean_embeddings=clean_hidden_states,
+        ...     corrupted_embeddings=corrupted_hidden_states,
+        ...     patched_embeddings=patched_hidden_states,
+        ...     patch_layer=5,
+        ... )
+        >>> print(f"Beta recovery: {result.recovery_rate:.2%}")
+    """
+    # Calculate Beta for each path
+    beta_clean = calculate_beta(clean_embeddings, variance_threshold=variance_threshold)
+    beta_corrupted = calculate_beta(corrupted_embeddings, variance_threshold=variance_threshold)
+    beta_patched = calculate_beta(patched_embeddings, variance_threshold=variance_threshold)
+
+    return compute_patch_impact(
+        clean_value=beta_clean,
+        corrupted_value=beta_corrupted,
+        patched_value=beta_patched,
+        metric_name="beta",
+        patch_layer=patch_layer,
+        patch_component=patch_component,
+    )
+
+
+def compute_d_eff_patch_impact(
+    clean_embeddings: np.ndarray,
+    corrupted_embeddings: np.ndarray,
+    patched_embeddings: np.ndarray,
+    variance_threshold: float = DEFAULT_VARIANCE_THRESHOLD,
+    patch_layer: int | None = None,
+    patch_component: str | None = None,
+) -> PatchingImpactResult:
+    """Compute the impact of patching on D_eff (effective dimensionality) metric.
+
+    Specialized function for analyzing how activation patches affect the
+    effective dimensionality of embedding space.
+
+    Parameters:
+        clean_embeddings: Array of shape (n_samples, n_features)
+            Embeddings from the clean (baseline) execution path.
+        corrupted_embeddings: Array of shape (n_samples, n_features)
+            Embeddings from the corrupted execution path.
+        patched_embeddings: Array of shape (n_samples, n_features)
+            Embeddings from the patched execution path.
+        variance_threshold: float, default=0.90
+            Variance threshold for D_eff calculation.
+        patch_layer: int | None, default=None
+            Layer where the patch was applied.
+        patch_component: str | None, default=None
+            Component that was patched.
+
+    Returns:
+        PatchingImpactResult for the D_eff metric with full impact analysis.
+    """
+    # Calculate D_eff for each path
+    d_eff_clean = calculate_d_eff(clean_embeddings, variance_threshold=variance_threshold)
+    d_eff_corrupted = calculate_d_eff(corrupted_embeddings, variance_threshold=variance_threshold)
+    d_eff_patched = calculate_d_eff(patched_embeddings, variance_threshold=variance_threshold)
+
+    return compute_patch_impact(
+        clean_value=float(d_eff_clean),
+        corrupted_value=float(d_eff_corrupted),
+        patched_value=float(d_eff_patched),
+        metric_name="d_eff",
+        patch_layer=patch_layer,
+        patch_component=patch_component,
+    )
+
+
+def compute_quality_score_patch_impact(
+    clean_metrics: ConveyanceMetricsResult,
+    corrupted_metrics: ConveyanceMetricsResult,
+    patched_metrics: ConveyanceMetricsResult,
+    patch_layer: int | None = None,
+    patch_component: str | None = None,
+) -> PatchingImpactResult:
+    """Compute the impact of patching on the overall quality score.
+
+    Uses the composite quality_score from ConveyanceMetricsResult which
+    combines dimensionality, collapse, and transfer metrics.
+
+    Parameters:
+        clean_metrics: ConveyanceMetricsResult
+            Full metrics from the clean (baseline) execution path.
+        corrupted_metrics: ConveyanceMetricsResult
+            Full metrics from the corrupted execution path.
+        patched_metrics: ConveyanceMetricsResult
+            Full metrics from the patched execution path.
+        patch_layer: int | None, default=None
+            Layer where the patch was applied.
+        patch_component: str | None, default=None
+            Component that was patched.
+
+    Returns:
+        PatchingImpactResult for the quality_score metric.
+    """
+    return compute_patch_impact(
+        clean_value=clean_metrics.quality_score,
+        corrupted_value=corrupted_metrics.quality_score,
+        patched_value=patched_metrics.quality_score,
+        metric_name="quality_score",
+        patch_layer=patch_layer,
+        patch_component=patch_component,
+    )
+
+
+def aggregate_patch_impacts(
+    impacts: list[PatchingImpactResult],
+) -> dict[str, Any]:
+    """Aggregate patching impact results across multiple experiments.
+
+    Computes summary statistics for a series of patching experiments,
+    useful for multi-layer sweeps or systematic studies.
+
+    Parameters:
+        impacts: list[PatchingImpactResult]
+            List of impact results to aggregate.
+
+    Returns:
+        dict[str, Any] containing:
+        - mean_recovery_rate: Average recovery rate
+        - best_recovery_rate: Highest recovery rate
+        - worst_recovery_rate: Lowest recovery rate
+        - best_layer: Layer with best recovery (if applicable)
+        - recovery_distribution: Counts by severity category
+        - all_recovery_rates: List of all recovery rates for visualization
+
+    Example:
+        >>> impacts = [
+        ...     compute_patch_impact(0.2, 0.8, 0.3, "beta", patch_layer=0),
+        ...     compute_patch_impact(0.2, 0.8, 0.4, "beta", patch_layer=5),
+        ...     compute_patch_impact(0.2, 0.8, 0.25, "beta", patch_layer=10),
+        ... ]
+        >>> stats = aggregate_patch_impacts(impacts)
+        >>> print(f"Best layer: {stats['best_layer']}, recovery: {stats['best_recovery_rate']:.2%}")
+    """
+    if not impacts:
+        return {
+            "mean_recovery_rate": 0.0,
+            "best_recovery_rate": 0.0,
+            "worst_recovery_rate": 0.0,
+            "best_layer": None,
+            "num_impacts": 0,
+            "recovery_distribution": {},
+            "all_recovery_rates": [],
+        }
+
+    recovery_rates = [i.recovery_rate for i in impacts if not np.isinf(i.recovery_rate)]
+
+    if not recovery_rates:
+        return {
+            "mean_recovery_rate": 0.0,
+            "best_recovery_rate": 0.0,
+            "worst_recovery_rate": 0.0,
+            "best_layer": None,
+            "num_impacts": len(impacts),
+            "recovery_distribution": {},
+            "all_recovery_rates": [],
+        }
+
+    # Find best impact (highest recovery rate)
+    best_impact = max(impacts, key=lambda i: i.recovery_rate if not np.isinf(i.recovery_rate) else float("-inf"))
+
+    # Count impacts by severity category
+    severity_counts: dict[str, int] = {}
+    for impact in impacts:
+        severity = impact.impact_severity
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    return {
+        "mean_recovery_rate": float(np.mean(recovery_rates)),
+        "std_recovery_rate": float(np.std(recovery_rates)) if len(recovery_rates) > 1 else 0.0,
+        "best_recovery_rate": float(max(recovery_rates)),
+        "worst_recovery_rate": float(min(recovery_rates)),
+        "best_layer": best_impact.patch_layer,
+        "best_component": best_impact.patch_component,
+        "num_impacts": len(impacts),
+        "num_full_recovery": sum(1 for i in impacts if i.is_full_recovery),
+        "num_harmful": sum(1 for i in impacts if i.is_harmful),
+        "recovery_distribution": severity_counts,
+        "all_recovery_rates": recovery_rates,
+        "layers_by_recovery": [
+            (i.patch_layer, i.recovery_rate)
+            for i in sorted(impacts, key=lambda x: x.recovery_rate, reverse=True)
+            if i.patch_layer is not None
+        ],
+    }
+
+
+def identify_causal_layers(
+    impacts: list[PatchingImpactResult],
+    recovery_threshold: float = 0.3,
+) -> list[int]:
+    """Identify layers that causally affect the metric.
+
+    Finds layers where patching has significant recovery effect, indicating
+    that those layers carry causal information for the measured behavior.
+
+    Parameters:
+        impacts: list[PatchingImpactResult]
+            List of impact results from a layer sweep.
+        recovery_threshold: float, default=0.3
+            Minimum recovery rate to consider a layer as causal.
+
+    Returns:
+        list[int]: Layer indices where patching has significant effect,
+            sorted by recovery rate (highest first).
+
+    Example:
+        >>> # Find layers that matter for semantic transfer
+        >>> causal_layers = identify_causal_layers(layer_sweep_impacts, threshold=0.5)
+        >>> print(f"Causal layers: {causal_layers}")  # e.g., [5, 6, 8]
+    """
+    causal = [
+        i for i in impacts
+        if i.patch_layer is not None
+        and i.recovery_rate >= recovery_threshold
+        and not np.isinf(i.recovery_rate)
+    ]
+
+    # Sort by recovery rate (highest first)
+    causal.sort(key=lambda i: i.recovery_rate, reverse=True)
+
+    return [i.patch_layer for i in causal if i.patch_layer is not None]
+
+
+# ============================================================================
 # Module Self-Test
 # ============================================================================
 
@@ -1735,5 +2296,134 @@ if __name__ == "__main__":
     print("\nAll Bootstrap CI tests passed!")
 
     print("\n" + "=" * 60)
-    print("All D_eff, Beta, C_pair, and Bootstrap CI tests passed!")
+    print("Testing Patching Impact Metrics...")
+    print("=" * 60)
+
+    # Basic patching impact calculation
+    impact = compute_patch_impact(
+        clean_value=0.2,
+        corrupted_value=0.8,
+        patched_value=0.4,
+        metric_name="beta",
+        patch_layer=5,
+        patch_component="resid_pre",
+    )
+    print(f"\nBasic Patching Impact:")
+    print(f"  Clean: {impact.clean_value}, Corrupted: {impact.corrupted_value}, Patched: {impact.patched_value}")
+    print(f"  Corruption delta: {impact.corruption_delta:.4f}")
+    print(f"  Causal effect: {impact.causal_effect:.4f}")
+    print(f"  Recovery rate: {impact.recovery_rate:.4f}")
+    print(f"  Impact severity: {impact.impact_severity}")
+    print(f"  Is recovery: {impact.is_recovery}")
+    assert isinstance(impact, PatchingImpactResult), "Should return PatchingImpactResult"
+    assert impact.patch_layer == 5, "Should preserve patch layer"
+
+    # Test full recovery case
+    full_recovery_impact = compute_patch_impact(
+        clean_value=0.2,
+        corrupted_value=0.8,
+        patched_value=0.2,  # Full recovery
+        metric_name="beta",
+    )
+    print(f"\nFull Recovery Impact:")
+    print(f"  Recovery rate: {full_recovery_impact.recovery_rate:.4f}")
+    print(f"  Is full recovery: {full_recovery_impact.is_full_recovery}")
+    print(f"  Severity: {full_recovery_impact.impact_severity}")
+    assert full_recovery_impact.is_full_recovery, "Should be full recovery when patched == clean"
+    assert full_recovery_impact.impact_severity == "full_recovery", f"Expected 'full_recovery', got {full_recovery_impact.impact_severity}"
+
+    # Test no effect case
+    no_effect_impact = compute_patch_impact(
+        clean_value=0.2,
+        corrupted_value=0.8,
+        patched_value=0.8,  # No change
+        metric_name="beta",
+    )
+    print(f"\nNo Effect Impact:")
+    print(f"  Recovery rate: {no_effect_impact.recovery_rate:.4f}")
+    print(f"  Severity: {no_effect_impact.impact_severity}")
+    assert no_effect_impact.impact_severity == "no_effect", f"Expected 'no_effect', got {no_effect_impact.impact_severity}"
+
+    # Test harmful case (patch makes it worse)
+    harmful_impact = compute_patch_impact(
+        clean_value=0.2,
+        corrupted_value=0.8,
+        patched_value=0.9,  # Worse than corrupted
+        metric_name="beta",
+    )
+    print(f"\nHarmful Impact:")
+    print(f"  Recovery rate: {harmful_impact.recovery_rate:.4f}")
+    print(f"  Is harmful: {harmful_impact.is_harmful}")
+    print(f"  Severity: {harmful_impact.impact_severity}")
+    assert harmful_impact.is_harmful, "Should be harmful when patch makes metric worse"
+
+    # Test overcorrection case
+    overcorrection_impact = compute_patch_impact(
+        clean_value=0.4,
+        corrupted_value=0.8,
+        patched_value=0.1,  # Overcorrected past clean
+        metric_name="beta",
+    )
+    print(f"\nOvercorrection Impact:")
+    print(f"  Recovery rate: {overcorrection_impact.recovery_rate:.4f}")
+    print(f"  Is overcorrection: {overcorrection_impact.is_overcorrection}")
+    print(f"  Severity: {overcorrection_impact.impact_severity}")
+    assert overcorrection_impact.is_overcorrection, "Should be overcorrection when patched overshoots"
+
+    # Test aggregate patch impacts
+    test_impacts = [
+        compute_patch_impact(0.2, 0.8, 0.3, "beta", patch_layer=0),
+        compute_patch_impact(0.2, 0.8, 0.25, "beta", patch_layer=5),
+        compute_patch_impact(0.2, 0.8, 0.6, "beta", patch_layer=10),
+        compute_patch_impact(0.2, 0.8, 0.8, "beta", patch_layer=11),  # No effect
+    ]
+    aggregate = aggregate_patch_impacts(test_impacts)
+    print(f"\nAggregate Impact Results:")
+    print(f"  Mean recovery: {aggregate['mean_recovery_rate']:.4f}")
+    print(f"  Best recovery: {aggregate['best_recovery_rate']:.4f}")
+    print(f"  Best layer: {aggregate['best_layer']}")
+    print(f"  Recovery distribution: {aggregate['recovery_distribution']}")
+    assert aggregate["best_layer"] == 5, f"Best layer should be 5, got {aggregate['best_layer']}"
+
+    # Test identify causal layers
+    causal_layers = identify_causal_layers(test_impacts, recovery_threshold=0.3)
+    print(f"\nCausal Layers (threshold=0.3): {causal_layers}")
+    assert 5 in causal_layers, "Layer 5 should be identified as causal"
+    assert 11 not in causal_layers, "Layer 11 should not be causal (no effect)"
+
+    # Test compute_beta_patch_impact with embeddings
+    clean_emb = np.random.randn(50, 256)
+    collapsed_emb = np.random.randn(50, 1) @ np.random.randn(1, 256)  # Collapsed
+    partial_emb = np.random.randn(50, 5) @ np.random.randn(5, 256)  # Partially collapsed
+
+    beta_impact = compute_beta_patch_impact(
+        clean_embeddings=clean_emb,
+        corrupted_embeddings=collapsed_emb,
+        patched_embeddings=partial_emb,
+        patch_layer=7,
+    )
+    print(f"\nBeta Patch Impact from Embeddings:")
+    print(f"  Clean beta: {beta_impact.clean_value:.4f}")
+    print(f"  Corrupted beta: {beta_impact.corrupted_value:.4f}")
+    print(f"  Patched beta: {beta_impact.patched_value:.4f}")
+    print(f"  Recovery rate: {beta_impact.recovery_rate:.4f}")
+    assert beta_impact.metric_name == "beta", "Should set metric name to 'beta'"
+
+    # Test MultiPathMetricsResult (just verify it can be created)
+    multi_result = MultiPathMetricsResult(
+        clean_metrics=None,
+        corrupted_metrics=None,
+        patched_metrics=[],
+        impacts=test_impacts,
+        n_patched_paths=4,
+    )
+    print(f"\nMultiPathMetricsResult:")
+    print(f"  Has all paths: {multi_result.has_all_paths}")
+    print(f"  Mean recovery: {multi_result.mean_recovery_rate:.4f}")
+    print(f"  Best layer: {multi_result.best_patch_layer}")
+
+    print("\nAll Patching Impact tests passed!")
+
+    print("\n" + "=" * 60)
+    print("All D_eff, Beta, C_pair, Bootstrap CI, and Patching Impact tests passed!")
     print("=" * 60)

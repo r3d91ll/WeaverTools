@@ -3,8 +3,10 @@
 package spinner
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -188,4 +190,155 @@ func (p *ProgressBar) Percentage() float64 {
 		return 0
 	}
 	return float64(p.current) / float64(p.config.Total) * 100
+}
+
+// Unicode box-drawing characters for the progress bar.
+const (
+	// barFilled is the character for completed progress.
+	barFilled = "█"
+	// barEmpty is the character for remaining progress.
+	barEmpty = "░"
+)
+
+// render writes the current progress bar state to the output.
+// In TTY mode, it clears the previous line and displays an updated bar.
+// In non-TTY mode, it does nothing (updates are printed on new lines instead).
+// Thread-safe: acquires mutex to read state.
+func (p *ProgressBar) render() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.active {
+		return
+	}
+
+	// Non-TTY mode: do not render inline updates (handled separately)
+	if !p.isTTY {
+		return
+	}
+
+	// Build and display the progress bar
+	output := p.buildOutput()
+	p.clearAndWrite(output)
+}
+
+// renderNonTTY prints a progress update on a new line for non-TTY environments.
+// Caller must hold the mutex.
+func (p *ProgressBar) renderNonTTY() {
+	if p.isTTY {
+		return
+	}
+
+	output := p.buildOutput()
+	fmt.Fprintln(p.config.Writer, output)
+}
+
+// buildOutput constructs the progress bar string from current state.
+// Caller must hold the mutex.
+// Output format: Message [████████░░░░░░░░░░░░] 40% (8/20) (2.4s)
+func (p *ProgressBar) buildOutput() string {
+	var parts []string
+
+	// Add message prefix
+	if p.config.Message != "" {
+		parts = append(parts, p.config.Message)
+	}
+
+	// Build the visual bar
+	bar := p.buildBar()
+	parts = append(parts, bar)
+
+	// Add percentage if enabled
+	if p.config.ShowPercentage {
+		pct := 0.0
+		if p.config.Total > 0 {
+			pct = float64(p.current) / float64(p.config.Total) * 100
+		}
+		parts = append(parts, fmt.Sprintf("%.0f%%", pct))
+	}
+
+	// Add count if enabled
+	if p.config.ShowCount {
+		parts = append(parts, fmt.Sprintf("(%d/%d)", p.current, p.config.Total))
+	}
+
+	// Add elapsed time if enabled
+	if p.config.ShowElapsed && !p.startTime.IsZero() {
+		elapsed := time.Since(p.startTime)
+		parts = append(parts, p.formatElapsed(elapsed))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// buildBar constructs the visual progress bar portion.
+// Returns a string like "[████████░░░░░░░░░░░░]"
+// Caller must hold the mutex.
+func (p *ProgressBar) buildBar() string {
+	width := p.config.Width
+	if width <= 0 {
+		width = 20
+	}
+
+	// Calculate filled portion
+	filled := 0
+	if p.config.Total > 0 {
+		filled = (p.current * width) / p.config.Total
+		if filled > width {
+			filled = width
+		}
+		if filled < 0 {
+			filled = 0
+		}
+	}
+	empty := width - filled
+
+	// Build the bar using unicode characters
+	var bar strings.Builder
+	bar.WriteString("[")
+	for i := 0; i < filled; i++ {
+		bar.WriteString(barFilled)
+	}
+	for i := 0; i < empty; i++ {
+		bar.WriteString(barEmpty)
+	}
+	bar.WriteString("]")
+
+	return bar.String()
+}
+
+// formatElapsed formats a duration for display.
+// Short durations show as "(1.2s)", longer as "(1m 30s)".
+// Caller must hold the mutex.
+func (p *ProgressBar) formatElapsed(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("(%.1fs)", d.Seconds())
+	}
+	minutes := int(d.Minutes())
+	seconds := int(d.Seconds()) % 60
+	return fmt.Sprintf("(%dm %ds)", minutes, seconds)
+}
+
+// clearAndWrite clears the current line and writes new content.
+// Uses carriage return + spaces for cross-platform compatibility.
+// Caller must hold the mutex.
+func (p *ProgressBar) clearAndWrite(output string) {
+	// Clear previous output by overwriting with spaces
+	if p.lastOutput > 0 {
+		spaces := strings.Repeat(" ", p.lastOutput)
+		fmt.Fprint(p.config.Writer, carriageReturn+spaces+carriageReturn)
+	}
+
+	fmt.Fprint(p.config.Writer, output)
+	p.lastOutput = len(output)
+}
+
+// clearLine clears the current progress bar line from the terminal.
+// Caller must hold the mutex.
+func (p *ProgressBar) clearLine() {
+	if p.lastOutput > 0 {
+		spaces := strings.Repeat(" ", p.lastOutput)
+		fmt.Fprint(p.config.Writer, carriageReturn+spaces+carriageReturn)
+		p.lastOutput = 0
+	}
 }

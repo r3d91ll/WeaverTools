@@ -119,11 +119,37 @@ func NewStore() *Store {
 // Returns an error if validation fails (empty name, empty sample ID, invalid hidden state,
 // or dimension mismatch with existing samples).
 func (s *Store) Add(conceptName string, sample Sample) error {
+	// Validation 1: Check for empty concept name
+	if conceptName == "" {
+		return createEmptyConceptNameError()
+	}
+
+	// Validation 2: Check for empty sample ID
+	if sample.ID == "" {
+		return createEmptySampleIDError(conceptName)
+	}
+
+	// Validation 3: Validate hidden state if present
+	if sample.HiddenState != nil {
+		if validationErr := sample.HiddenState.Validate(); validationErr != nil {
+			return createInvalidHiddenStateError(conceptName, sample.ID, validationErr)
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Validation 4: Check dimension mismatch against existing samples
 	concept, ok := s.concepts[conceptName]
-	if !ok {
+	if ok {
+		existingDim := concept.Dimension()
+		if existingDim > 0 && sample.HiddenState != nil {
+			sampleDim := sample.HiddenState.Dimension()
+			if sampleDim > 0 && sampleDim != existingDim {
+				return createDimensionMismatchError(conceptName, sample.ID, existingDim, sampleDim)
+			}
+		}
+	} else {
 		concept = &Concept{
 			Name:      conceptName,
 			Samples:   []Sample{},

@@ -366,12 +366,20 @@ nano .env  # or your preferred editor
 
 ### Token Revocation
 
-If you suspect a token has been exposed:
+If you suspect a token has been exposed, **act immediately**:
 
-1. **GitHub tokens**: Go to https://github.com/settings/tokens and delete the compromised token
-2. **Generate a new token** with the same scopes
+1. **Revoke the token** on GitHub (see table below for locations)
+2. **Generate a new token** with minimal required scopes
 3. **Update your `.env` file** with the new token
-4. **Audit usage** - Check GitHub's security log for unauthorized access
+4. **Audit usage** - Check [GitHub's security log](https://github.com/settings/security-log) for unauthorized access
+
+| Token Type | Prefix | Revocation Location |
+|------------|--------|---------------------|
+| Personal Access Token (Classic) | `ghp_` | [Settings > Developer settings > Tokens (classic)](https://github.com/settings/tokens) |
+| Fine-grained Token | `github_pat_` | [Settings > Developer settings > Fine-grained tokens](https://github.com/settings/personal-access-tokens) |
+| OAuth Token | `gho_` | [Settings > Applications > Authorized OAuth Apps](https://github.com/settings/applications) |
+
+For detailed step-by-step instructions, see **[docs/security/TOKEN-REVOCATION.md](docs/security/TOKEN-REVOCATION.md)**.
 
 ### Pre-commit Hook (Optional)
 

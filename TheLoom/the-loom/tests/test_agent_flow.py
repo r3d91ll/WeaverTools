@@ -2073,3 +2073,439 @@ class TestEndToEndIntegration:
         # The D_eff trajectory should show this difference
         trajectory = result.d_eff_trajectory
         assert trajectory[0] > trajectory[1]
+
+
+# ============================================================================
+# End-to-End Verification: Full Analysis Pipeline
+# Matches subtask-4-3 specification: 3 agents, 5 turns each
+# ============================================================================
+
+
+class TestFullAnalysisPipelineE2E:
+    """End-to-end verification of the full analysis pipeline.
+
+    This test class verifies the complete pipeline as specified in subtask-4-3:
+    1. Create synthetic multi-agent conversation data with 3 agents, 5 turns each
+    2. Build information flow graph with build_agent_flow_graph()
+    3. Detect bottlenecks with find_agent_bottlenecks()
+    4. Compare two configurations with compare_flow_patterns()
+    5. Generate alignment visualization with visualize_agent_alignment()
+    """
+
+    @pytest.fixture
+    def three_agent_five_turns_states(self) -> dict:
+        """Create synthetic multi-agent conversation with 3 agents, 5 turns each.
+
+        Configuration:
+        - Agent A (user): turns 0, 3, 6, 9, 12
+        - Agent B (assistant): turns 1, 4, 7, 10, 13
+        - Agent C (tool): turns 2, 5, 8, 11, 14
+        """
+        np.random.seed(42)
+
+        # Use different hidden state dimensions and sample counts to simulate
+        # realistic variation in agent representations
+        return {
+            "user": {
+                0: np.random.randn(25, 256),
+                3: np.random.randn(25, 256),
+                6: np.random.randn(25, 256),
+                9: np.random.randn(25, 256),
+                12: np.random.randn(25, 256),
+            },
+            "assistant": {
+                1: np.random.randn(30, 256),
+                4: np.random.randn(30, 256),
+                7: np.random.randn(30, 256),
+                10: np.random.randn(30, 256),
+                13: np.random.randn(30, 256),
+            },
+            "tool": {
+                2: np.random.randn(20, 256),
+                5: np.random.randn(20, 256),
+                8: np.random.randn(20, 256),
+                11: np.random.randn(20, 256),
+                14: np.random.randn(20, 256),
+            },
+        }
+
+    @pytest.fixture
+    def three_agent_conveyance_edges(self) -> dict:
+        """Create conveyance edges for 3-agent conversation."""
+        return {
+            ("user", "assistant"): 0.85,
+            ("assistant", "tool"): 0.72,
+            ("tool", "user"): 0.68,
+            ("user", "tool"): 0.70,
+            ("tool", "assistant"): 0.75,
+            ("assistant", "user"): 0.80,
+        }
+
+    @pytest.fixture
+    def alternative_config_states(self) -> dict:
+        """Create alternative configuration with same structure but different data.
+
+        This simulates a different conversation or model configuration for comparison.
+        """
+        np.random.seed(123)  # Different seed for different data
+
+        return {
+            "user": {
+                0: np.random.randn(25, 256),
+                3: np.random.randn(25, 256),
+                6: np.random.randn(25, 256),
+                9: np.random.randn(25, 256),
+                12: np.random.randn(25, 256),
+            },
+            "assistant": {
+                1: np.random.randn(30, 256),
+                4: np.random.randn(30, 256),
+                7: np.random.randn(30, 256),
+                10: np.random.randn(30, 256),
+                13: np.random.randn(30, 256),
+            },
+            "tool": {
+                2: np.random.randn(20, 256),
+                5: np.random.randn(20, 256),
+                8: np.random.randn(20, 256),
+                11: np.random.randn(20, 256),
+                14: np.random.randn(20, 256),
+            },
+        }
+
+    @pytest.mark.gpu
+    def test_full_pipeline_step_by_step(
+        self,
+        three_agent_five_turns_states: dict,
+        three_agent_conveyance_edges: dict,
+        alternative_config_states: dict,
+    ) -> None:
+        """Full end-to-end verification of the analysis pipeline.
+
+        Steps:
+        1. Create synthetic multi-agent conversation data with 3 agents, 5 turns each
+        2. Build information flow graph with build_agent_flow_graph()
+        3. Detect bottlenecks with find_agent_bottlenecks()
+        4. Compare two configurations with compare_flow_patterns()
+        5. Generate alignment visualization with visualize_agent_alignment()
+        """
+        # =================================================================
+        # STEP 1: Verify synthetic data setup (3 agents, 5 turns each)
+        # =================================================================
+        assert len(three_agent_five_turns_states) == 3, "Should have 3 agents"
+        for agent, turns in three_agent_five_turns_states.items():
+            assert len(turns) == 5, f"Agent {agent} should have 5 turns"
+
+        # =================================================================
+        # STEP 2: Build information flow graph with build_agent_flow_graph()
+        # =================================================================
+        flow_result = build_agent_flow_graph(
+            three_agent_five_turns_states,
+            three_agent_conveyance_edges,
+        )
+
+        # Verify graph structure
+        assert isinstance(flow_result, AgentFlowGraphResult)
+        assert flow_result.n_nodes == 15, "Should have 15 nodes (3 agents × 5 turns)"
+        assert flow_result.n_edges == 14, "Should have 14 edges (15 nodes - 1)"
+        assert flow_result.agents == {"user", "assistant", "tool"}
+        assert flow_result.is_multi_agent
+        assert flow_result.n_agents == 3
+        assert flow_result.has_sufficient_data
+        assert flow_result.conversation_length == 15
+
+        # Verify D_eff and beta computed for all turns
+        assert len(flow_result.d_eff_by_turn) == 15
+        assert len(flow_result.beta_by_turn) == 15
+
+        # Verify graph is weakly connected
+        assert flow_result.is_connected
+
+        # Verify node attributes
+        G = flow_result.graph
+        for node in G.nodes():
+            attrs = G.nodes[node]
+            assert "agent" in attrs
+            assert "turn" in attrs
+            assert "d_eff" in attrs
+            assert "beta" in attrs
+
+        # Verify edge attributes
+        for _, _, data in G.edges(data=True):
+            assert "weight" in data
+            assert "conveyance" in data
+
+        # =================================================================
+        # STEP 3: Detect bottlenecks with find_agent_bottlenecks()
+        # =================================================================
+        bottleneck_result = find_agent_bottlenecks(flow_result.graph)
+
+        assert isinstance(bottleneck_result, AgentBottleneckResult)
+
+        # Verify centrality computed for all nodes
+        assert len(bottleneck_result.centrality_scores) == 15
+
+        # Verify severity classification
+        assert bottleneck_result.severity in ["none", "mild", "moderate", "severe"]
+
+        # Verify bottleneck properties work
+        _ = bottleneck_result.has_bottlenecks
+        _ = bottleneck_result.bottleneck_agents
+
+        # If bottlenecks found, verify their structure
+        if bottleneck_result.has_bottlenecks:
+            assert bottleneck_result.n_bottlenecks > 0
+            assert len(bottleneck_result.bottleneck_edges) == bottleneck_result.n_bottlenecks
+            assert bottleneck_result.max_drop_edge is not None
+            assert bottleneck_result.max_drop_value > 0
+
+            # Verify all bottleneck edges have corresponding drops
+            for edge in bottleneck_result.bottleneck_edges:
+                assert edge in bottleneck_result.d_eff_drops
+                assert edge in bottleneck_result.relative_drops
+                assert 0 <= bottleneck_result.relative_drops[edge] <= 1
+
+        # =================================================================
+        # STEP 4: Compare two configurations with compare_flow_patterns()
+        # =================================================================
+        # Build alternative configuration graph
+        alt_flow_result = build_agent_flow_graph(
+            alternative_config_states,
+            three_agent_conveyance_edges,
+        )
+
+        comparison_result = compare_flow_patterns(
+            flow_result.graph,
+            alt_flow_result.graph,
+        )
+
+        assert isinstance(comparison_result, FlowComparisonResult)
+
+        # Both have same agents
+        assert comparison_result.common_agents == {"user", "assistant", "tool"}
+        assert comparison_result.agents_only_in_a == set()
+        assert comparison_result.agents_only_in_b == set()
+        assert comparison_result.agent_overlap == 1.0
+
+        # Both have same structure
+        assert comparison_result.n_turns_a == 15
+        assert comparison_result.n_turns_b == 15
+        assert comparison_result.structural_similarity == pytest.approx(1.0)
+
+        # Verify divergence quality
+        assert comparison_result.divergence_quality in [
+            "identical", "similar", "moderate", "divergent"
+        ]
+
+        # Verify computed properties
+        _ = comparison_result.is_similar
+        _ = comparison_result.length_ratio
+
+        # Verify stats are populated
+        assert "n_nodes" in comparison_result.graph_a_stats
+        assert "n_edges" in comparison_result.graph_a_stats
+        assert "mean_d_eff" in comparison_result.graph_a_stats
+
+        # =================================================================
+        # STEP 5: Generate alignment visualization with visualize_agent_alignment()
+        # =================================================================
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        alignment_result = visualize_agent_alignment(flow_result.graph, output_path)
+
+        assert alignment_result is not None
+        assert isinstance(alignment_result, AgentAlignmentResult)
+
+        # Verify alignment structure for 3 agents
+        assert alignment_result.n_agents == 3
+        assert alignment_result.alignment_matrix.shape == (3, 3)
+
+        # 3 agents = 3 pairwise alignments
+        assert len(alignment_result.pairwise_alignment) == 3
+
+        # Verify alignment statistics
+        assert 0 <= alignment_result.mean_alignment <= 1
+        assert 0 <= alignment_result.min_alignment <= 1
+        assert 0 <= alignment_result.max_alignment <= 1
+        assert alignment_result.std_alignment >= 0
+
+        # Verify computed properties
+        _ = alignment_result.is_well_aligned
+        _ = alignment_result.alignment_quality
+        _ = alignment_result.has_outlier
+
+        # Verify file was created
+        assert Path(output_path).exists()
+        assert Path(output_path).stat().st_size > 0
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    @pytest.mark.gpu
+    def test_full_pipeline_produces_valid_visualizations(
+        self,
+        three_agent_five_turns_states: dict,
+        three_agent_conveyance_edges: dict,
+    ) -> None:
+        """Verify that the pipeline produces valid publication-quality visualizations."""
+        # Build graph
+        flow_result = build_agent_flow_graph(
+            three_agent_five_turns_states,
+            three_agent_conveyance_edges,
+        )
+
+        # Generate visualization at publication quality
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        alignment_result = visualize_agent_alignment(
+            flow_result.graph,
+            output_path,
+            figsize=DEFAULT_FIGURE_SIZE,
+            dpi=DEFAULT_FIGURE_DPI,
+        )
+
+        assert alignment_result is not None
+
+        # Verify file was created with reasonable size for publication quality
+        file_size = Path(output_path).stat().st_size
+        assert file_size > 10000, "Publication quality image should be > 10KB"
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    @pytest.mark.gpu
+    def test_full_pipeline_with_bottleneck_injection(self) -> None:
+        """Test pipeline with deliberately injected bottlenecks.
+
+        Creates data where D_eff clearly drops at specific transitions
+        to verify bottleneck detection works correctly.
+        """
+        np.random.seed(42)
+
+        # Create data with deliberate rank variations:
+        # - User: high rank (full dimensional)
+        # - Assistant: medium rank (compressed)
+        # - Tool: low rank (highly compressed)
+
+        agent_states = {
+            "user": {
+                0: np.random.randn(50, 128),  # Full rank
+                3: np.random.randn(50, 128),
+                6: np.random.randn(50, 128),
+                9: np.random.randn(50, 128),
+                12: np.random.randn(50, 128),
+            },
+            "assistant": {
+                # Rank ~30 (compressed from 128)
+                1: np.random.randn(50, 30) @ np.random.randn(30, 128),
+                4: np.random.randn(50, 30) @ np.random.randn(30, 128),
+                7: np.random.randn(50, 30) @ np.random.randn(30, 128),
+                10: np.random.randn(50, 30) @ np.random.randn(30, 128),
+                13: np.random.randn(50, 30) @ np.random.randn(30, 128),
+            },
+            "tool": {
+                # Rank ~10 (highly compressed)
+                2: np.random.randn(50, 10) @ np.random.randn(10, 128),
+                5: np.random.randn(50, 10) @ np.random.randn(10, 128),
+                8: np.random.randn(50, 10) @ np.random.randn(10, 128),
+                11: np.random.randn(50, 10) @ np.random.randn(10, 128),
+                14: np.random.randn(50, 10) @ np.random.randn(10, 128),
+            },
+        }
+
+        conveyance_edges = {
+            ("user", "assistant"): 0.8,
+            ("assistant", "tool"): 0.6,
+            ("tool", "user"): 0.7,
+        }
+
+        # Build graph
+        flow_result = build_agent_flow_graph(agent_states, conveyance_edges)
+
+        # Verify D_eff drops as expected (user > assistant > tool)
+        # Check a sample of turns
+        assert flow_result.d_eff_by_turn[0] > flow_result.d_eff_by_turn[1]
+        assert flow_result.d_eff_by_turn[1] > flow_result.d_eff_by_turn[2]
+
+        # Detect bottlenecks
+        bottleneck_result = find_agent_bottlenecks(flow_result.graph)
+
+        # Should detect bottlenecks at user->assistant and assistant->tool transitions
+        assert bottleneck_result.has_bottlenecks
+        assert bottleneck_result.n_bottlenecks > 0
+
+        # Compare with alternative (same structure but less compression)
+        alt_states = {
+            "user": {
+                0: np.random.randn(50, 128),
+                3: np.random.randn(50, 128),
+                6: np.random.randn(50, 128),
+                9: np.random.randn(50, 128),
+                12: np.random.randn(50, 128),
+            },
+            "assistant": {
+                1: np.random.randn(50, 128),  # Full rank (no compression)
+                4: np.random.randn(50, 128),
+                7: np.random.randn(50, 128),
+                10: np.random.randn(50, 128),
+                13: np.random.randn(50, 128),
+            },
+            "tool": {
+                2: np.random.randn(50, 128),  # Full rank (no compression)
+                5: np.random.randn(50, 128),
+                8: np.random.randn(50, 128),
+                11: np.random.randn(50, 128),
+                14: np.random.randn(50, 128),
+            },
+        }
+
+        alt_result = build_agent_flow_graph(alt_states, conveyance_edges)
+        comparison = compare_flow_patterns(flow_result.graph, alt_result.graph)
+
+        # Comparison should show different D_eff patterns
+        assert comparison.d_eff_mean_diff != 0 or comparison.d_eff_abs_mean_diff != 0
+
+        # Visualize
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        alignment = visualize_agent_alignment(flow_result.graph, output_path)
+
+        assert alignment is not None
+        assert alignment.n_agents == 3
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    @pytest.mark.gpu
+    def test_full_pipeline_memory_management(
+        self,
+        three_agent_five_turns_states: dict,
+        three_agent_conveyance_edges: dict,
+    ) -> None:
+        """Verify that the pipeline doesn't leak memory with repeated calls."""
+        import matplotlib.pyplot as plt
+
+        initial_figs = len(plt.get_fignums())
+
+        # Run pipeline multiple times
+        for _ in range(3):
+            flow_result = build_agent_flow_graph(
+                three_agent_five_turns_states,
+                three_agent_conveyance_edges,
+            )
+            _ = find_agent_bottlenecks(flow_result.graph)
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                output_path = f.name
+
+            _ = visualize_agent_alignment(flow_result.graph, output_path)
+            Path(output_path).unlink()
+
+        # No matplotlib figures should be left open
+        final_figs = len(plt.get_fignums())
+        assert final_figs == initial_figs, (
+            f"Memory leak: {final_figs - initial_figs} figures left open"
+        )

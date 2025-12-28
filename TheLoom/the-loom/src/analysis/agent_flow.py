@@ -646,4 +646,158 @@ def build_agent_flow_graph(
     )
 
 
-# Additional core functions will be implemented in subtasks 2-4 through 2-6
+def find_agent_bottlenecks(
+    G: nx.DiGraph,
+    threshold: float = DEFAULT_BOTTLENECK_THRESHOLD,
+) -> AgentBottleneckResult:
+    """Identify information bottlenecks in agent communication.
+
+    Analyzes the agent flow graph to find transitions where D_eff drops
+    significantly, indicating potential information compression or loss
+    during agent-to-agent handoffs.
+
+    DETECTION ALGORITHM
+    ===================
+    For each edge (source, target) in the flow graph:
+    1. Compute D_eff drop: D_eff_source - D_eff_target (only if positive)
+    2. Compute relative drop: drop / D_eff_source
+    3. Calculate mean D_eff drop across all positive drops
+    4. An edge is a bottleneck if:
+       drop > threshold × mean_drop
+
+    Parameters:
+        G: nx.DiGraph
+            Agent information flow graph with D_eff node attributes.
+            Expected node attributes: 'd_eff' (int).
+            Typically created by build_agent_flow_graph().
+        threshold: float, default=1.5
+            Threshold multiplier for bottleneck detection.
+            A transition is a bottleneck if its D_eff drop exceeds
+            threshold × mean(D_eff_drops) across all transitions.
+            Higher values are more selective (fewer bottlenecks).
+
+    Returns:
+        AgentBottleneckResult with detected bottlenecks:
+        - bottleneck_edges: List of (source, target) node pairs
+        - d_eff_drops: Absolute D_eff drop at each bottleneck
+        - relative_drops: Relative drop (0-1) at each bottleneck
+        - centrality_scores: Betweenness centrality of each node
+        - severity: Classification of overall bottleneck severity
+
+    Example:
+        >>> import networkx as nx
+        >>> from src.analysis.agent_flow import find_agent_bottlenecks
+        >>> # Create a flow graph with D_eff drops
+        >>> G = nx.DiGraph()
+        >>> G.add_node("agent_a_t0", d_eff=100)
+        >>> G.add_node("agent_b_t1", d_eff=50)  # 50% drop - bottleneck!
+        >>> G.add_node("agent_a_t2", d_eff=45)  # Small drop
+        >>> G.add_edge("agent_a_t0", "agent_b_t1")
+        >>> G.add_edge("agent_b_t1", "agent_a_t2")
+        >>> result = find_agent_bottlenecks(G)
+        >>> print(f"Bottlenecks found: {result.n_bottlenecks}")
+        >>> print(f"Severity: {result.severity}")
+
+    Notes:
+        - Empty graphs return empty results (no error)
+        - Graphs with fewer than MIN_NODES_FOR_BOTTLENECK nodes return empty results
+        - Betweenness centrality is computed to identify critical nodes
+        - Nodes missing 'd_eff' attribute are skipped with relative_drops=0
+    """
+    # Handle empty or insufficient graph
+    n_nodes = G.number_of_nodes()
+    n_edges = G.number_of_edges()
+
+    if n_nodes < MIN_NODES_FOR_BOTTLENECK or n_edges < MIN_EDGES_FOR_FLOW:
+        return AgentBottleneckResult(
+            bottleneck_edges=[],
+            d_eff_drops={},
+            relative_drops={},
+            centrality_scores={},
+            threshold_used=threshold,
+            n_bottlenecks=0,
+            max_drop_edge=None,
+            max_drop_value=0,
+            mean_d_eff_drop=0.0,
+            metadata={"warning": "insufficient_data", "n_nodes": n_nodes, "n_edges": n_edges},
+        )
+
+    # Compute betweenness centrality for all nodes
+    # This helps identify nodes that are critical for information flow
+    centrality_scores: dict[str, float] = nx.betweenness_centrality(G)
+
+    # Collect D_eff drops for all edges
+    all_drops: list[int] = []
+    edge_drops: dict[tuple[str, str], int] = {}
+    edge_relative_drops: dict[tuple[str, str], float] = {}
+
+    for source, target in G.edges():
+        # Get D_eff values from node attributes
+        source_d_eff = G.nodes[source].get("d_eff", 0)
+        target_d_eff = G.nodes[target].get("d_eff", 0)
+
+        # Only consider positive drops (information compression)
+        drop = source_d_eff - target_d_eff
+        if drop > 0:
+            all_drops.append(drop)
+            edge_drops[(source, target)] = drop
+
+            # Compute relative drop (avoid division by zero)
+            if source_d_eff >= MIN_D_EFF_FOR_RELATIVE:
+                relative_drop = drop / source_d_eff
+            else:
+                relative_drop = 0.0
+            edge_relative_drops[(source, target)] = relative_drop
+
+    # If no positive drops, return empty result
+    if not all_drops:
+        return AgentBottleneckResult(
+            bottleneck_edges=[],
+            d_eff_drops={},
+            relative_drops={},
+            centrality_scores=centrality_scores,
+            threshold_used=threshold,
+            n_bottlenecks=0,
+            max_drop_edge=None,
+            max_drop_value=0,
+            mean_d_eff_drop=0.0,
+            metadata={"info": "no_positive_drops"},
+        )
+
+    # Calculate mean D_eff drop for threshold comparison
+    mean_d_eff_drop = float(np.mean(all_drops))
+
+    # Identify bottleneck edges: drop > threshold × mean_drop
+    bottleneck_threshold = threshold * mean_d_eff_drop
+    bottleneck_edges: list[tuple[str, str]] = []
+    bottleneck_d_eff_drops: dict[tuple[str, str], int] = {}
+    bottleneck_relative_drops: dict[tuple[str, str], float] = {}
+
+    for edge, drop in edge_drops.items():
+        if drop > bottleneck_threshold:
+            bottleneck_edges.append(edge)
+            bottleneck_d_eff_drops[edge] = drop
+            bottleneck_relative_drops[edge] = edge_relative_drops[edge]
+
+    # Find max drop edge
+    if bottleneck_d_eff_drops:
+        max_drop_edge = max(bottleneck_d_eff_drops, key=bottleneck_d_eff_drops.get)  # type: ignore
+        max_drop_value = bottleneck_d_eff_drops[max_drop_edge]
+    else:
+        max_drop_edge = None
+        max_drop_value = 0
+
+    return AgentBottleneckResult(
+        bottleneck_edges=bottleneck_edges,
+        d_eff_drops=bottleneck_d_eff_drops,
+        relative_drops=bottleneck_relative_drops,
+        centrality_scores=centrality_scores,
+        threshold_used=threshold,
+        n_bottlenecks=len(bottleneck_edges),
+        max_drop_edge=max_drop_edge,
+        max_drop_value=max_drop_value,
+        mean_d_eff_drop=mean_d_eff_drop,
+    )
+
+
+# Additional core functions will be implemented in subtasks 2-5 through 2-6

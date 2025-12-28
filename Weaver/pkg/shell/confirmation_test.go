@@ -3,9 +3,12 @@ package shell
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/r3d91ll/weaver/pkg/concepts"
 )
 
 // =============================================================================
@@ -495,5 +498,251 @@ func TestInteractivePrompter_LongMessage(t *testing.T) {
 	expectedPrompt := longMessage + " [y/N]: "
 	if writer.String() != expectedPrompt {
 		t.Error("Long message was not fully written to output")
+	}
+}
+
+// =============================================================================
+// /clear_concepts Command Tests with Confirmation
+// =============================================================================
+
+// newTestShellForClearConcepts creates a minimal Shell for testing /clear_concepts.
+// It only sets up the fields needed for the clear_concepts command.
+func newTestShellForClearConcepts(prompter Prompter) *Shell {
+	return &Shell{
+		conceptStore: concepts.NewStore(),
+		Prompter:     prompter,
+	}
+}
+
+// addTestConcepts adds test concepts to the shell's concept store.
+func addTestConcepts(s *Shell, count int) {
+	for i := 0; i < count; i++ {
+		conceptName := "concept" + string(rune('A'+i))
+		sample := concepts.Sample{
+			ID:      "sample-" + conceptName,
+			Content: "Test content for " + conceptName,
+		}
+		s.conceptStore.Add(conceptName, sample)
+	}
+}
+
+func TestClearConcepts_UserConfirms(t *testing.T) {
+	// Setup: Create shell with MockPrompter that returns true (user confirms)
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearConcepts(mock)
+
+	// Add some test concepts
+	addTestConcepts(shell, 3)
+
+	if shell.conceptStore.Count() != 3 {
+		t.Fatalf("Expected 3 concepts before clear, got %d", shell.conceptStore.Count())
+	}
+
+	// Execute /clear_concepts command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear_concepts")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was requested
+	if mock.CallCount != 1 {
+		t.Errorf("Expected 1 confirmation call, got %d", mock.CallCount)
+	}
+
+	// Verify: prompt message includes concept count
+	if !strings.Contains(mock.LastPrompt(), "3 concept(s)") {
+		t.Errorf("Expected prompt to mention '3 concept(s)', got: %q", mock.LastPrompt())
+	}
+
+	// Verify: concepts were cleared (user confirmed)
+	if shell.conceptStore.Count() != 0 {
+		t.Errorf("Expected 0 concepts after confirmed clear, got %d", shell.conceptStore.Count())
+	}
+}
+
+func TestClearConcepts_UserRejects(t *testing.T) {
+	// Setup: Create shell with MockPrompter that returns false (user rejects)
+	mock := NewMockPrompter(false)
+	shell := newTestShellForClearConcepts(mock)
+
+	// Add some test concepts
+	addTestConcepts(shell, 3)
+
+	if shell.conceptStore.Count() != 3 {
+		t.Fatalf("Expected 3 concepts before clear, got %d", shell.conceptStore.Count())
+	}
+
+	// Execute /clear_concepts command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear_concepts")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was requested
+	if mock.CallCount != 1 {
+		t.Errorf("Expected 1 confirmation call, got %d", mock.CallCount)
+	}
+
+	// Verify: concepts were NOT cleared (user rejected)
+	if shell.conceptStore.Count() != 3 {
+		t.Errorf("Expected 3 concepts after rejected clear, got %d", shell.conceptStore.Count())
+	}
+}
+
+func TestClearConcepts_ForceFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "--force flag",
+			command: "/clear_concepts --force",
+		},
+		{
+			name:    "-f flag",
+			command: "/clear_concepts -f",
+		},
+		{
+			name:    "--force with extra space",
+			command: "/clear_concepts  --force",
+		},
+		{
+			name:    "-f with extra space",
+			command: "/clear_concepts  -f",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup: Create shell with MockPrompter (should NOT be called with --force)
+			mock := NewMockPrompter(false) // Would reject if called
+			shell := newTestShellForClearConcepts(mock)
+
+			// Add some test concepts
+			addTestConcepts(shell, 3)
+
+			if shell.conceptStore.Count() != 3 {
+				t.Fatalf("Expected 3 concepts before clear, got %d", shell.conceptStore.Count())
+			}
+
+			// Execute /clear_concepts with force flag
+			ctx := context.Background()
+			err := shell.handleCommand(ctx, tt.command)
+			if err != nil {
+				t.Fatalf("handleCommand() returned unexpected error: %v", err)
+			}
+
+			// Verify: confirmation was NOT requested (force flag skips it)
+			if mock.CallCount != 0 {
+				t.Errorf("Expected 0 confirmation calls with force flag, got %d", mock.CallCount)
+			}
+
+			// Verify: concepts were cleared even though mock would have rejected
+			if shell.conceptStore.Count() != 0 {
+				t.Errorf("Expected 0 concepts after forced clear, got %d", shell.conceptStore.Count())
+			}
+		})
+	}
+}
+
+func TestClearConcepts_EmptyStore(t *testing.T) {
+	// Setup: Create shell with empty concept store
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearConcepts(mock)
+
+	// Verify store is empty
+	if shell.conceptStore.Count() != 0 {
+		t.Fatalf("Expected 0 concepts in empty store, got %d", shell.conceptStore.Count())
+	}
+
+	// Execute /clear_concepts command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear_concepts")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was NOT requested (no concepts to clear)
+	if mock.CallCount != 0 {
+		t.Errorf("Expected 0 confirmation calls for empty store, got %d", mock.CallCount)
+	}
+}
+
+func TestClearConcepts_ConfirmationError(t *testing.T) {
+	// Setup: Create shell with MockPrompter that returns an error
+	expectedErr := errors.New("stdin closed unexpectedly")
+	mock := NewMockPrompterWithError(expectedErr)
+	shell := newTestShellForClearConcepts(mock)
+
+	// Add some test concepts
+	addTestConcepts(shell, 3)
+
+	// Execute /clear_concepts command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear_concepts")
+
+	// Verify: error was returned
+	if err == nil {
+		t.Fatal("Expected error from handleCommand(), got nil")
+	}
+
+	// Verify: error message contains context about confirmation failure
+	if !strings.Contains(err.Error(), "confirmation") {
+		t.Errorf("Expected error to mention 'confirmation', got: %v", err)
+	}
+
+	// Verify: concepts were NOT cleared (error occurred)
+	if shell.conceptStore.Count() != 3 {
+		t.Errorf("Expected 3 concepts after error, got %d", shell.conceptStore.Count())
+	}
+}
+
+func TestClearConcepts_SingleConcept(t *testing.T) {
+	// Setup: Create shell with MockPrompter that confirms
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearConcepts(mock)
+
+	// Add a single concept
+	addTestConcepts(shell, 1)
+
+	if shell.conceptStore.Count() != 1 {
+		t.Fatalf("Expected 1 concept before clear, got %d", shell.conceptStore.Count())
+	}
+
+	// Execute /clear_concepts command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear_concepts")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: prompt message uses correct grammar for single concept
+	if !strings.Contains(mock.LastPrompt(), "1 concept(s)") {
+		t.Errorf("Expected prompt to mention '1 concept(s)', got: %q", mock.LastPrompt())
+	}
+
+	// Verify: concept was cleared
+	if shell.conceptStore.Count() != 0 {
+		t.Errorf("Expected 0 concepts after clear, got %d", shell.conceptStore.Count())
+	}
+}
+
+func TestClearConcepts_ForceWithEmptyStore(t *testing.T) {
+	// Setup: Create shell with empty concept store
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearConcepts(mock)
+
+	// Execute /clear_concepts --force command on empty store
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear_concepts --force")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was NOT requested
+	if mock.CallCount != 0 {
+		t.Errorf("Expected 0 confirmation calls for empty store with force, got %d", mock.CallCount)
 	}
 }

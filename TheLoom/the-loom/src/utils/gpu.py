@@ -474,6 +474,54 @@ class GPUManager:
 
         return {"has_gpu": True, "devices": device_statuses}
 
+    def can_allocate(
+        self,
+        required_memory_gb: float,
+        device: int | None = None,
+    ) -> bool:
+        """
+        Check if the specified amount of memory can be allocated on a GPU device.
+
+        This method performs a pre-allocation check to determine if there is
+        sufficient free memory available, accounting for the configured memory_fraction.
+
+        Parameters:
+            required_memory_gb (float): Amount of memory required in gigabytes.
+            device (int | None): Specific device index to check. If None, checks
+                the default device (first allowed device).
+
+        Returns:
+            bool: True if the required memory can be allocated, False otherwise.
+                Returns False if no GPU is available.
+        """
+        if not self.has_gpu:
+            return False
+
+        # Determine which device to check
+        device_idx = device if device is not None else self.allowed_devices[0]
+
+        if device_idx not in self.allowed_devices:
+            logger.warning(f"Device {device_idx} not in allowed devices")
+            return False
+
+        info = self._get_single_gpu_info(device_idx)
+
+        # Calculate available memory considering memory_fraction
+        # Only use memory_fraction of total memory to leave headroom
+        usable_memory_gb = info.total_memory_gb * self.memory_fraction
+        available_memory_gb = usable_memory_gb - info.used_memory_gb
+
+        can_alloc = available_memory_gb >= required_memory_gb
+
+        if not can_alloc:
+            logger.debug(
+                f"Cannot allocate {required_memory_gb:.2f}GB on device {device_idx}: "
+                f"available={available_memory_gb:.2f}GB (free={info.free_memory_gb:.2f}GB, "
+                f"usable={usable_memory_gb:.2f}GB)"
+            )
+
+        return can_alloc
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the GPUManager state and per-GPU information into a dictionary for API responses.

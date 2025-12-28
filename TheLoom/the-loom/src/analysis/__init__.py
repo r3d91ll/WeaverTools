@@ -26,6 +26,16 @@ from .kakeya_geometry import (
     run_conveyance_experiment,
 )
 
+from .conveyance_metrics import (
+    # Result types
+    ConveyanceMetricsResult,
+    # Main conveyance metric functions
+    bootstrap_ci,
+    calculate_beta,
+    calculate_c_pair,
+    calculate_d_eff,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -46,4 +56,11 @@ __all__ = [
     "GrainAnalysisResult",
     "Grain",
     "BilateralGeometryResult",
+    # Conveyance metrics functions
+    "calculate_d_eff",
+    "calculate_beta",
+    "calculate_c_pair",
+    "bootstrap_ci",
+    # Conveyance metrics result types
+    "ConveyanceMetricsResult",
 ]

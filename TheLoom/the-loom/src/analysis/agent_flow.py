@@ -1189,4 +1189,463 @@ def _compute_structural_similarity(
     return (node_sim + edge_sim + density_sim) / 3.0
 
 
-# Additional core functions will be implemented in subtask 2-6
+def visualize_agent_alignment(
+    G: nx.DiGraph,
+    output_path: str,
+    figsize: tuple[int, int] = DEFAULT_FIGURE_SIZE,
+    dpi: int = DEFAULT_FIGURE_DPI,
+) -> AgentAlignmentResult | None:
+    """Visualize semantic alignment between agents in a flow graph.
+
+    Creates a publication-quality multi-panel visualization showing:
+    1. Agent alignment matrix (heatmap of D_eff-based similarity)
+    2. D_eff trajectory over conversation turns
+    3. Graph layout with D_eff-colored nodes
+
+    VISUALIZATION LAYOUT
+    ====================
+    The output is a 2x2 subplot grid:
+    - Top-left: Alignment matrix heatmap (agents × agents)
+    - Top-right: D_eff trajectory line plot (turn × D_eff)
+    - Bottom-left: Network graph with spring layout
+    - Bottom-right: Legend and summary statistics
+
+    ALIGNMENT COMPUTATION
+    =====================
+    Agent alignment is computed based on D_eff similarity:
+
+        alignment(i, j) = 1 - |D_eff_i - D_eff_j| / max(D_eff_i, D_eff_j)
+
+    This measures how similarly two agents represent information
+    dimensionally. Values range from 0 (very different) to 1 (identical).
+
+    Parameters:
+        G: nx.DiGraph
+            Agent information flow graph with node attributes:
+            - 'agent': Agent name (str)
+            - 'turn': Turn index (int)
+            - 'd_eff': Effective dimensionality (int)
+            Typically created by build_agent_flow_graph().
+        output_path: str
+            Path to save the visualization (e.g., "alignment.png").
+            Supports any format matplotlib can save (png, pdf, svg).
+        figsize: tuple[int, int], default=(12, 10)
+            Figure size in inches (width, height).
+        dpi: int, default=300
+            Dots per inch for the output image.
+            300 is publication-quality; use 150 for drafts.
+
+    Returns:
+        AgentAlignmentResult with alignment metrics, or None if graph
+        has insufficient data (< 2 nodes).
+
+    Example:
+        >>> import networkx as nx
+        >>> from src.analysis.agent_flow import visualize_agent_alignment
+        >>> # Create a flow graph
+        >>> G = nx.DiGraph()
+        >>> G.add_node("user_t0", agent="user", turn=0, d_eff=100)
+        >>> G.add_node("assistant_t1", agent="assistant", turn=1, d_eff=90)
+        >>> G.add_node("user_t2", agent="user", turn=2, d_eff=85)
+        >>> G.add_edge("user_t0", "assistant_t1", weight=0.8)
+        >>> G.add_edge("assistant_t1", "user_t2", weight=0.75)
+        >>> result = visualize_agent_alignment(G, "alignment.png")
+        >>> if result:
+        ...     print(f"Mean alignment: {result.mean_alignment:.4f}")
+
+    Notes:
+        - Empty graphs produce a placeholder figure with warning text
+        - Single-agent graphs produce alignment matrix with single entry
+        - Always calls plt.close() after saving to prevent memory leaks
+        - Uses seed=42 for reproducible graph layout
+        - Applies plt.tight_layout() before saving to avoid clipped labels
+    """
+    import matplotlib.pyplot as plt
+
+    # Handle empty graph
+    if G.number_of_nodes() == 0:
+        # Create placeholder figure with warning
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(
+            0.5, 0.5,
+            "No data to visualize\n(empty graph)",
+            ha="center", va="center",
+            fontsize=16, color="gray"
+        )
+        ax.axis("off")
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        plt.close()
+        return None
+
+    # Extract agent data from graph
+    agents_data = _extract_agent_data(G)
+    agent_names = sorted(agents_data.keys())
+    n_agents = len(agent_names)
+
+    # Single-node graph handling
+    if G.number_of_nodes() == 1:
+        node = list(G.nodes())[0]
+        d_eff = G.nodes[node].get("d_eff", 0)
+        agent = G.nodes[node].get("agent", "unknown")
+
+        # Create simple figure
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(
+            0.5, 0.5,
+            f"Single node: {agent}\nD_eff: {d_eff}",
+            ha="center", va="center",
+            fontsize=14
+        )
+        ax.axis("off")
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        plt.close()
+
+        # Return minimal alignment result
+        return AgentAlignmentResult(
+            agent_names=[agent],
+            alignment_matrix=np.array([[1.0]]),
+            pairwise_alignment={},
+            mean_alignment=1.0,
+            min_alignment=1.0,
+            max_alignment=1.0,
+            min_pair=None,
+            max_pair=None,
+            std_alignment=0.0,
+            metadata={"warning": "single_node"},
+        )
+
+    # Compute alignment matrix
+    alignment_matrix, pairwise_alignment = _compute_alignment_matrix(
+        agents_data, agent_names
+    )
+
+    # Calculate alignment statistics
+    alignment_result = _create_alignment_result(
+        agent_names, alignment_matrix, pairwise_alignment
+    )
+
+    # Create the visualization
+    fig, axs = plt.subplots(2, 2, figsize=figsize)
+
+    # Panel 1: Alignment matrix heatmap (top-left)
+    _plot_alignment_heatmap(axs[0, 0], alignment_matrix, agent_names)
+
+    # Panel 2: D_eff trajectory (top-right)
+    _plot_deff_trajectory(axs[0, 1], G)
+
+    # Panel 3: Network graph (bottom-left)
+    _plot_network_graph(axs[1, 0], G)
+
+    # Panel 4: Summary statistics (bottom-right)
+    _plot_summary_stats(axs[1, 1], alignment_result, G)
+
+    # Apply tight layout and save
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close()  # CRITICAL: Prevent memory leaks
+
+    return alignment_result
+
+
+# ============================================================================
+# Helper Functions for Visualization
+# ============================================================================
+
+
+def _extract_agent_data(G: nx.DiGraph) -> dict[str, list[int]]:
+    """Extract D_eff values grouped by agent name.
+
+    Parameters:
+        G: Agent flow graph with 'agent' and 'd_eff' node attributes.
+
+    Returns:
+        dict mapping agent name to list of D_eff values across turns.
+    """
+    agents_data: dict[str, list[int]] = {}
+
+    for node in G.nodes():
+        agent = G.nodes[node].get("agent", "unknown")
+        d_eff = G.nodes[node].get("d_eff", 0)
+
+        if agent not in agents_data:
+            agents_data[agent] = []
+        agents_data[agent].append(d_eff)
+
+    return agents_data
+
+
+def _compute_alignment_matrix(
+    agents_data: dict[str, list[int]],
+    agent_names: list[str],
+) -> tuple[NDArray[np.floating[Any]], dict[tuple[str, str], float]]:
+    """Compute pairwise alignment matrix based on D_eff similarity.
+
+    Alignment between two agents is computed as:
+        alignment = 1 - |mean_d_eff_i - mean_d_eff_j| / max(mean_d_eff_i, mean_d_eff_j)
+
+    Parameters:
+        agents_data: Agent name -> list of D_eff values.
+        agent_names: Sorted list of agent names.
+
+    Returns:
+        tuple of:
+        - alignment_matrix: NxN numpy array of alignments [0, 1]
+        - pairwise_alignment: dict mapping (agent_i, agent_j) -> alignment
+    """
+    n = len(agent_names)
+    alignment_matrix = np.zeros((n, n), dtype=np.float64)
+    pairwise_alignment: dict[tuple[str, str], float] = {}
+
+    # Compute mean D_eff for each agent
+    mean_d_eff = {
+        agent: float(np.mean(d_eff_list)) if d_eff_list else 0.0
+        for agent, d_eff_list in agents_data.items()
+    }
+
+    for i, agent_i in enumerate(agent_names):
+        for j, agent_j in enumerate(agent_names):
+            if i == j:
+                alignment_matrix[i, j] = 1.0
+            else:
+                d_i = mean_d_eff[agent_i]
+                d_j = mean_d_eff[agent_j]
+
+                # Compute alignment based on D_eff similarity
+                if max(d_i, d_j) > 0:
+                    alignment = 1.0 - abs(d_i - d_j) / max(d_i, d_j)
+                else:
+                    alignment = 1.0  # Both zero -> identical
+
+                alignment_matrix[i, j] = alignment
+
+                # Store pairwise (only store once per pair)
+                if i < j:
+                    pairwise_alignment[(agent_i, agent_j)] = alignment
+
+    return alignment_matrix, pairwise_alignment
+
+
+def _create_alignment_result(
+    agent_names: list[str],
+    alignment_matrix: NDArray[np.floating[Any]],
+    pairwise_alignment: dict[tuple[str, str], float],
+) -> AgentAlignmentResult:
+    """Create AgentAlignmentResult from computed alignment data.
+
+    Parameters:
+        agent_names: Sorted list of agent names.
+        alignment_matrix: NxN alignment matrix.
+        pairwise_alignment: dict of (agent_i, agent_j) -> alignment.
+
+    Returns:
+        AgentAlignmentResult with all statistics computed.
+    """
+    # Extract off-diagonal alignments for statistics
+    if pairwise_alignment:
+        alignment_values = list(pairwise_alignment.values())
+        mean_alignment = float(np.mean(alignment_values))
+        min_alignment = float(min(alignment_values))
+        max_alignment = float(max(alignment_values))
+        std_alignment = float(np.std(alignment_values))
+
+        # Find min and max pairs
+        min_pair = min(pairwise_alignment, key=pairwise_alignment.get)  # type: ignore
+        max_pair = max(pairwise_alignment, key=pairwise_alignment.get)  # type: ignore
+    else:
+        # Single agent case
+        mean_alignment = 1.0
+        min_alignment = 1.0
+        max_alignment = 1.0
+        std_alignment = 0.0
+        min_pair = None
+        max_pair = None
+
+    return AgentAlignmentResult(
+        agent_names=agent_names,
+        alignment_matrix=alignment_matrix,
+        pairwise_alignment=pairwise_alignment,
+        mean_alignment=mean_alignment,
+        min_alignment=min_alignment,
+        max_alignment=max_alignment,
+        min_pair=min_pair,
+        max_pair=max_pair,
+        std_alignment=std_alignment,
+    )
+
+
+def _plot_alignment_heatmap(
+    ax: Any,
+    alignment_matrix: NDArray[np.floating[Any]],
+    agent_names: list[str],
+) -> None:
+    """Plot alignment matrix as a heatmap.
+
+    Parameters:
+        ax: Matplotlib axes to plot on.
+        alignment_matrix: NxN alignment matrix.
+        agent_names: Agent names for axis labels.
+    """
+    import matplotlib.pyplot as plt
+
+    im = ax.imshow(alignment_matrix, cmap="RdYlGn", vmin=0, vmax=1)
+
+    # Set axis labels
+    ax.set_xticks(range(len(agent_names)))
+    ax.set_yticks(range(len(agent_names)))
+    ax.set_xticklabels(agent_names, rotation=45, ha="right")
+    ax.set_yticklabels(agent_names)
+
+    # Add colorbar
+    plt.colorbar(im, ax=ax, label="Alignment")
+
+    # Add value annotations
+    for i in range(len(agent_names)):
+        for j in range(len(agent_names)):
+            text_color = "white" if alignment_matrix[i, j] < 0.5 else "black"
+            ax.text(
+                j, i, f"{alignment_matrix[i, j]:.2f}",
+                ha="center", va="center", color=text_color, fontsize=8
+            )
+
+    ax.set_title("Agent Alignment Matrix")
+    ax.set_xlabel("Agent")
+    ax.set_ylabel("Agent")
+
+
+def _plot_deff_trajectory(ax: Any, G: nx.DiGraph) -> None:
+    """Plot D_eff trajectory over conversation turns.
+
+    Parameters:
+        ax: Matplotlib axes to plot on.
+        G: Agent flow graph with 'turn' and 'd_eff' node attributes.
+    """
+    # Extract turn and D_eff data
+    turn_data: list[tuple[int, int, str]] = []
+
+    for node in G.nodes():
+        turn = G.nodes[node].get("turn", 0)
+        d_eff = G.nodes[node].get("d_eff", 0)
+        agent = G.nodes[node].get("agent", "unknown")
+        turn_data.append((turn, d_eff, agent))
+
+    # Sort by turn
+    turn_data.sort(key=lambda x: x[0])
+
+    if not turn_data:
+        ax.text(0.5, 0.5, "No data", ha="center", va="center")
+        ax.set_title("D_eff Trajectory")
+        return
+
+    turns = [t[0] for t in turn_data]
+    d_eff_values = [t[1] for t in turn_data]
+    agents = [t[2] for t in turn_data]
+
+    # Plot trajectory line
+    ax.plot(turns, d_eff_values, "b-o", linewidth=2, markersize=6, label="D_eff")
+
+    # Color points by agent
+    unique_agents = sorted(set(agents))
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(unique_agents), 1)))  # type: ignore
+    agent_colors = {agent: colors[i] for i, agent in enumerate(unique_agents)}
+
+    for i, (turn, d_eff, agent) in enumerate(turn_data):
+        ax.scatter([turn], [d_eff], c=[agent_colors[agent]], s=100, zorder=5)
+
+    ax.set_xlabel("Turn")
+    ax.set_ylabel("D_eff")
+    ax.set_title("D_eff Trajectory Over Turns")
+    ax.grid(True, alpha=0.3)
+
+    # Add legend for agents
+    for agent, color in agent_colors.items():
+        ax.scatter([], [], c=[color], label=agent, s=50)
+    ax.legend(loc="best", fontsize=8)
+
+
+def _plot_network_graph(ax: Any, G: nx.DiGraph) -> None:
+    """Plot network graph with D_eff-colored nodes.
+
+    Parameters:
+        ax: Matplotlib axes to plot on.
+        G: Agent flow graph to visualize.
+    """
+    import matplotlib.pyplot as plt
+
+    if G.number_of_nodes() == 0:
+        ax.text(0.5, 0.5, "No nodes", ha="center", va="center")
+        ax.set_title("Agent Flow Graph")
+        return
+
+    # Use spring layout with fixed seed for reproducibility
+    pos = nx.spring_layout(G, seed=DEFAULT_LAYOUT_SEED, k=DEFAULT_SPRING_LAYOUT_K)
+
+    # Extract D_eff values for node coloring
+    d_eff_values = [G.nodes[node].get("d_eff", 0) for node in G.nodes()]
+
+    # Draw the graph
+    nodes = nx.draw_networkx_nodes(
+        G, pos, ax=ax,
+        node_color=d_eff_values,
+        cmap=plt.cm.viridis,  # type: ignore
+        node_size=500
+    )
+    nx.draw_networkx_edges(G, pos, ax=ax, arrows=True, alpha=0.6)
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=7)
+
+    # Add colorbar for D_eff
+    if nodes is not None and d_eff_values:
+        plt.colorbar(nodes, ax=ax, label="D_eff")
+
+    ax.set_title("Agent Flow Graph")
+    ax.axis("off")
+
+
+def _plot_summary_stats(
+    ax: Any,
+    alignment_result: AgentAlignmentResult,
+    G: nx.DiGraph,
+) -> None:
+    """Plot summary statistics text.
+
+    Parameters:
+        ax: Matplotlib axes to plot on.
+        alignment_result: Alignment analysis results.
+        G: Agent flow graph for additional stats.
+    """
+    ax.axis("off")
+
+    # Build summary text
+    lines = [
+        "Summary Statistics",
+        "=" * 25,
+        f"Agents: {alignment_result.n_agents}",
+        f"Nodes: {G.number_of_nodes()}",
+        f"Edges: {G.number_of_edges()}",
+        "",
+        "Alignment Metrics",
+        "-" * 20,
+        f"Mean Alignment: {alignment_result.mean_alignment:.4f}",
+        f"Min Alignment: {alignment_result.min_alignment:.4f}",
+        f"Max Alignment: {alignment_result.max_alignment:.4f}",
+        f"Std Alignment: {alignment_result.std_alignment:.4f}",
+        "",
+        f"Quality: {alignment_result.alignment_quality}",
+        f"Well-Aligned: {alignment_result.is_well_aligned}",
+    ]
+
+    if alignment_result.min_pair:
+        lines.append(f"Min Pair: {alignment_result.min_pair}")
+    if alignment_result.max_pair:
+        lines.append(f"Max Pair: {alignment_result.max_pair}")
+
+    # Plot text
+    text = "\n".join(lines)
+    ax.text(
+        0.1, 0.9, text,
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment="top",
+        fontfamily="monospace"
+    )

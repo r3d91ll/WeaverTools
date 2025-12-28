@@ -3,6 +3,7 @@ package yarn
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -1384,6 +1385,180 @@ func TestConcurrentStress(t *testing.T) {
 			t.Errorf("count (%d) and list length (%d) mismatch", count, len(list))
 		}
 	})
+}
+
+// ============================================================================
+// suggestSimilarSessions Tests
+// ============================================================================
+
+// TestSuggestSimilarSessions_CaseMismatch verifies detection of case-insensitive matches.
+func TestSuggestSimilarSessions_CaseMismatch(t *testing.T) {
+	available := []string{"my-experiment", "loom-test"}
+
+	suggestions := suggestSimilarSessions("My-Experiment", available)
+	if len(suggestions) == 0 {
+		t.Error("expected case mismatch suggestion")
+	}
+
+	found := false
+	for _, s := range suggestions {
+		if strings.Contains(s, "my-experiment") && strings.Contains(s, "case") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected suggestion about case mismatch")
+	}
+}
+
+// TestSuggestSimilarSessions_PartialMatch verifies detection of substring matches.
+func TestSuggestSimilarSessions_PartialMatch(t *testing.T) {
+	t.Run("input is substring of available", func(t *testing.T) {
+		available := []string{"experiment-2024", "loom-test"}
+
+		suggestions := suggestSimilarSessions("experiment", available)
+		if len(suggestions) == 0 {
+			t.Error("expected partial match suggestion")
+		}
+
+		found := false
+		for _, s := range suggestions {
+			if strings.Contains(s, "experiment-2024") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected suggestion for experiment-2024")
+		}
+	})
+
+	t.Run("available is substring of input", func(t *testing.T) {
+		available := []string{"my", "test"}
+
+		suggestions := suggestSimilarSessions("my-session", available)
+		if len(suggestions) == 0 {
+			t.Error("expected partial match suggestion when available is substring of input")
+		}
+
+		found := false
+		for _, s := range suggestions {
+			if strings.Contains(s, "my") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected suggestion for 'my'")
+		}
+	})
+}
+
+// TestSuggestSimilarSessions_NoMatch verifies no suggestions for unrelated names.
+func TestSuggestSimilarSessions_NoMatch(t *testing.T) {
+	available := []string{"experiment-2024", "loom-test"}
+
+	suggestions := suggestSimilarSessions("xyz-unrelated", available)
+	if len(suggestions) != 0 {
+		t.Errorf("expected no suggestions for completely different name, got %v", suggestions)
+	}
+}
+
+// TestSuggestSimilarSessions_ExactMatch verifies no suggestions for exact matches.
+func TestSuggestSimilarSessions_ExactMatch(t *testing.T) {
+	available := []string{"experiment-2024", "loom-test"}
+
+	// Exact match shouldn't produce suggestions (no correction needed)
+	suggestions := suggestSimilarSessions("experiment-2024", available)
+	if len(suggestions) != 0 {
+		t.Errorf("expected no suggestions for exact match, got %v", suggestions)
+	}
+}
+
+// TestSuggestSimilarSessions_EmptyAvailable verifies behavior with no available sessions.
+func TestSuggestSimilarSessions_EmptyAvailable(t *testing.T) {
+	available := []string{}
+
+	suggestions := suggestSimilarSessions("my-session", available)
+	if len(suggestions) != 0 {
+		t.Errorf("expected no suggestions when no sessions available, got %v", suggestions)
+	}
+}
+
+// TestSuggestSimilarSessions_EmptyInput verifies behavior with empty input name.
+func TestSuggestSimilarSessions_EmptyInput(t *testing.T) {
+	available := []string{"experiment-2024", "loom-test"}
+
+	suggestions := suggestSimilarSessions("", available)
+	// Empty string should match as substring of everything, but we're looking for typo help
+	// The function may or may not suggest - just ensure no panic
+	_ = suggestions
+}
+
+// TestSuggestSimilarSessions_MultipleSuggestions verifies multiple matches are returned.
+func TestSuggestSimilarSessions_MultipleSuggestions(t *testing.T) {
+	available := []string{"test-alpha", "test-beta", "test-gamma"}
+
+	suggestions := suggestSimilarSessions("test", available)
+	if len(suggestions) < 3 {
+		t.Errorf("expected 3 suggestions for 'test' matching test-*, got %d: %v", len(suggestions), suggestions)
+	}
+}
+
+// TestSuggestSimilarSessions_CaseMismatchFormat verifies the format of case mismatch suggestions.
+func TestSuggestSimilarSessions_CaseMismatchFormat(t *testing.T) {
+	available := []string{"mysession"}
+
+	suggestions := suggestSimilarSessions("MySession", available)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+
+	expected := `Did you mean "mysession"? (case mismatch)`
+	if suggestions[0] != expected {
+		t.Errorf("expected %q, got %q", expected, suggestions[0])
+	}
+}
+
+// TestSuggestSimilarSessions_PartialMatchFormat verifies the format of partial match suggestions.
+func TestSuggestSimilarSessions_PartialMatchFormat(t *testing.T) {
+	available := []string{"experiment-2024"}
+
+	suggestions := suggestSimilarSessions("experiment", available)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(suggestions))
+	}
+
+	expected := `Did you mean "experiment-2024"?`
+	if suggestions[0] != expected {
+		t.Errorf("expected %q, got %q", expected, suggestions[0])
+	}
+}
+
+// TestSuggestSimilarSessions_CaseMismatchPrioritized verifies case mismatch is distinct from partial match.
+func TestSuggestSimilarSessions_CaseMismatchPrioritized(t *testing.T) {
+	// When there's both a case mismatch and partial match, case mismatch should be noted
+	available := []string{"MySession"}
+
+	suggestions := suggestSimilarSessions("mysession", available)
+	if len(suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d: %v", len(suggestions), suggestions)
+	}
+
+	// Should indicate case mismatch, not just partial match
+	if !strings.Contains(suggestions[0], "case") {
+		t.Errorf("expected case mismatch indication, got %q", suggestions[0])
+	}
+}
+
+// TestSuggestSimilarSessions_NilAvailable handles nil slice (defensive).
+func TestSuggestSimilarSessions_NilAvailable(t *testing.T) {
+	// The function signature takes []string which can be nil
+	suggestions := suggestSimilarSessions("test", nil)
+	if len(suggestions) != 0 {
+		t.Errorf("expected no suggestions for nil available, got %v", suggestions)
+	}
 }
 
 // TestCount verifies the Count method functionality.

@@ -156,9 +156,27 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		s.printHistory()
 
 	case "/clear":
+		messageCount := len(s.conv.History(-1))
+		if messageCount == 0 {
+			fmt.Println("No messages to clear.")
+			return nil
+		}
+
+		// Prompt for confirmation
+		message := fmt.Sprintf("This will clear %d message(s). Are you sure?", messageCount)
+		confirmed, err := s.Prompter.Confirm(message)
+		if err != nil {
+			return fmt.Errorf("failed to get confirmation: %w", err)
+		}
+
+		if !confirmed {
+			fmt.Println("Operation cancelled.")
+			return nil
+		}
+
 		s.conv = yarn.NewConversation(s.session.Name + "-conv")
 		s.session.AddConversation(s.conv)
-		fmt.Println("Conversation cleared.")
+		fmt.Printf("Cleared %d message(s).\n", messageCount)
 
 	case "/default":
 		if len(parts) > 1 {

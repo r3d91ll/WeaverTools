@@ -89,6 +89,11 @@ func (e *Extractor) Extract(ctx context.Context, cfg ExtractionConfig) (*Extract
 		default:
 		}
 
+		// Report progress if callback is set
+		if cfg.OnProgress != nil {
+			cfg.OnProgress(i, cfg.NumSamples, time.Since(start))
+		}
+
 		sample, err := e.extractSingle(ctx, prompt, cfg)
 		if err != nil {
 			// Store a user-friendly error message for display

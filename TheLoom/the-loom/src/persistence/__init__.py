@@ -12,6 +12,7 @@ from .database import (
     HiddenStateRecord,
     init_db,
 )
+from .storage import HiddenStateStorage
 
 __all__ = [
     "DatabaseManager",
@@ -20,4 +21,5 @@ __all__ = [
     "MetricRecord",
     "HiddenStateRecord",
     "init_db",
+    "HiddenStateStorage",
 ]

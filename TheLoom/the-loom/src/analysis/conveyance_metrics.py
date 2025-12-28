@@ -1590,7 +1590,19 @@ class PatchingImpactResult:
 
     @property
     def is_recovery(self) -> bool:
-        """Check if the patch recovered toward baseline (positive causal effect)."""
+        """Check if the patch moved the metric toward the clean baseline.
+
+        Recovery is direction-aware: it checks whether the causal effect
+        counteracts the corruption, regardless of whether values increased
+        or decreased. The multiplication check handles both cases:
+
+        - If corruption_delta > 0 (corrupted > clean): recovery requires
+          causal_effect < 0 (patched moved down toward clean)
+        - If corruption_delta < 0 (corrupted < clean): recovery requires
+          causal_effect > 0 (patched moved up toward clean)
+
+        Returns True if the patch moved in the recovery direction.
+        """
         # Recovery means moving from corrupted toward clean
         # If corruption_delta < 0 (corrupted < clean), recovery means patched > corrupted
         # If corruption_delta > 0 (corrupted > clean), recovery means patched < corrupted
@@ -1754,7 +1766,12 @@ def compute_patch_impact(
 
         causal_effect = patched_value - corrupted_value
         corruption_delta = corrupted_value - clean_value
-        recovery_rate = causal_effect / |corruption_delta|
+        recovery_rate = -causal_effect / corruption_delta
+
+    The negative sign ensures recovery_rate is positive when the patch
+    moves toward clean (counteracts corruption), regardless of direction:
+    - If corruption increased metric (delta > 0), recovery needs negative causal_effect
+    - If corruption decreased metric (delta < 0), recovery needs positive causal_effect
 
     The recovery rate indicates what fraction of the corruption was undone:
     - recovery_rate = 1.0: Full recovery (patched equals baseline)

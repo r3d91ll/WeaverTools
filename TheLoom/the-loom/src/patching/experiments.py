@@ -1049,6 +1049,18 @@ class PatchingExperiment:
         This is a generic method for running model inference and caching
         activations at specified layers and components.
 
+        NOTE: This method currently creates an empty cache but does NOT
+        automatically populate it with activations. The caller is responsible
+        for either:
+        1. Using a model that returns hidden states directly (e.g., from
+           return_hidden_states=True in generation) and manually storing them
+        2. Using HookedTransformer.run_with_cache() which handles hook
+           registration internally
+
+        TODO: Implement automatic hook registration to capture activations
+        during the forward pass. This requires the run_fn to be a HookedTransformer
+        model call with proper hook setup.
+
         Parameters:
             run_fn (Callable[..., torch.Tensor]): Function to run (e.g., model forward).
             run_id (str): Unique identifier for this run (for cache naming).
@@ -1057,7 +1069,8 @@ class PatchingExperiment:
             **run_kwargs: Additional arguments to pass to run_fn.
 
         Returns:
-            tuple[torch.Tensor, ActivationCache]: (output, cache)
+            tuple[torch.Tensor, ActivationCache]: (output, cache) where cache may
+                be empty if activations were not explicitly stored by the caller.
         """
         # Use config defaults if not specified
         layers = layers if layers is not None else self._config.layers
@@ -1067,6 +1080,9 @@ class PatchingExperiment:
         cache = self._cache_manager.get_or_create_cache(run_id)
 
         # Execute the run function
+        # NOTE: Activations are NOT automatically captured here.
+        # The caller must either use a model that returns hidden_states
+        # or manually populate the cache.
         output = run_fn(**run_kwargs)
 
         return output, cache

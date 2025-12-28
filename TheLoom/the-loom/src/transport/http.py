@@ -2715,13 +2715,19 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     # Activation Patching Endpoints (Causal Intervention Analysis)
     # ========================================================================
 
-    # Store for patching experiments and their results
-    patching_experiments: dict[str, PatchingExperiment] = {}
-    patching_recording_store = RecordingStore()
-    patching_cache_manager = CacheManager(
+    # Store patching state on app.state for proper lifecycle management
+    # This ensures cleanup on shutdown and consistent state across requests
+    app.state.patching_experiments: dict[str, PatchingExperiment] = {}
+    app.state.patching_recording_store = RecordingStore()
+    app.state.patching_cache_manager = CacheManager(
         max_size_mb=config.patching.max_cache_size_mb if hasattr(config, 'patching') else 4096,
         cleanup_on_exit=True,
     )
+
+    # Local aliases for backward compatibility within endpoint functions
+    patching_experiments = app.state.patching_experiments
+    patching_recording_store = app.state.patching_recording_store
+    patching_cache_manager = app.state.patching_cache_manager
 
     @app.post("/api/patching/configure", response_model=PatchingConfigureResponse)
     async def configure_patching(
@@ -2878,6 +2884,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 cache=clean_cache,
                 input_text=request.clean_input,
                 generation_time_ms=clean_time_ms,
+                metadata={"output_text": clean_output.text},
             )
 
             clean_path_result = PatchingPathResult(
@@ -2923,6 +2930,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 cache=corrupted_cache,
                 input_text=request.corrupted_input,
                 generation_time_ms=corrupted_time_ms,
+                metadata={"output_text": corrupted_output.text},
             )
 
             corrupted_path_result = PatchingPathResult(
@@ -3047,14 +3055,14 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     detail=f"Experiment not found: {experiment_id}",
                 )
 
-            # Extract outputs
+            # Extract outputs (output_text stored in metadata during recording)
             clean_output = None
             if recording.clean_output:
-                clean_output = recording.clean_output.input_text
+                clean_output = recording.clean_output.metadata.get("output_text")
 
             corrupted_output = None
             if recording.corrupted_output:
-                corrupted_output = recording.corrupted_output.input_text
+                corrupted_output = recording.corrupted_output.metadata.get("output_text")
 
             # Compute causal effects (simplified for now)
             causal_effects: list[CausalEffectResult] = []

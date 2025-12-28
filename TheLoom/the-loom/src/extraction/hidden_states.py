@@ -7,10 +7,14 @@ from transformer models - the core capability for conveyance measurement.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from transformer_lens import HookedTransformer
+    from transformer_lens.ActivationCache import ActivationCache
 
 
 @dataclass
@@ -110,6 +114,237 @@ def extract_with_precision(
             results[layer_idx] = torch.tensor(tensor, dtype=target_dtype)
 
     return results
+
+
+@dataclass
+class SelectiveCacheResult:
+    """Container for TransformerLens selective cache extraction results.
+
+    This provides a memory-efficient alternative to caching all activations
+    by only storing the hooks specified in names_filter.
+    """
+
+    cache: dict[str, torch.Tensor]  # Hook name -> activation tensor
+    logits: torch.Tensor | None  # Model output logits (if not stopped early)
+    hooks_cached: list[str]  # List of hook names that were cached
+    stopped_at_layer: int | None  # Layer where processing stopped (if using stop_at_layer)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def get_residual_stream(self, layer: int) -> torch.Tensor | None:
+        """Get the residual stream hidden state at the specified layer.
+
+        Parameters:
+            layer (int): Layer index to retrieve.
+
+        Returns:
+            torch.Tensor | None: The residual stream tensor, or None if not cached.
+        """
+        hook_name = f"blocks.{layer}.hook_resid_post"
+        return self.cache.get(hook_name)
+
+    def get_attention_pattern(self, layer: int) -> torch.Tensor | None:
+        """Get the attention pattern at the specified layer.
+
+        Parameters:
+            layer (int): Layer index to retrieve.
+
+        Returns:
+            torch.Tensor | None: The attention pattern tensor, or None if not cached.
+        """
+        hook_name = f"blocks.{layer}.attn.hook_pattern"
+        return self.cache.get(hook_name)
+
+    def to_hidden_states_dict(self) -> dict[int, torch.Tensor]:
+        """Convert cached residual stream activations to layer-indexed dict.
+
+        Returns:
+            dict[int, torch.Tensor]: Mapping from layer index to hidden state tensor,
+                only including residual stream hooks (hook_resid_post).
+        """
+        result: dict[int, torch.Tensor] = {}
+        for hook_name, tensor in self.cache.items():
+            if "hook_resid_post" in hook_name:
+                # Extract layer number from hook name like 'blocks.5.hook_resid_post'
+                parts = hook_name.split(".")
+                if len(parts) >= 2 and parts[1].isdigit():
+                    layer_idx = int(parts[1])
+                    result[layer_idx] = tensor
+        return result
+
+
+def build_hook_filter(
+    layers: list[int] | None = None,
+    hook_types: list[str] | None = None,
+    n_layers: int | None = None,
+) -> list[str]:
+    """
+    Build a list of TransformerLens hook name strings for selective caching.
+
+    This helper constructs hook names in the correct format for use with
+    extract_with_selective_cache(). Returns a list of strings, not a lambda.
+
+    Parameters:
+        layers (list[int] | None): Specific layer indices to cache. If None
+            and n_layers is provided, caches all layers [0, n_layers).
+        hook_types (list[str] | None): Types of hooks to cache. Defaults to
+            ['hook_resid_post']. Common types:
+            - 'hook_resid_post': Residual stream after layer (most common)
+            - 'hook_resid_pre': Residual stream before layer
+            - 'attn.hook_pattern': Attention patterns
+            - 'attn.hook_result': Attention output
+            - 'mlp.hook_post': MLP output
+        n_layers (int | None): Total number of layers in model. Required if
+            layers is None to cache all layers.
+
+    Returns:
+        list[str]: List of hook name strings suitable for names_filter parameter.
+
+    Raises:
+        ValueError: If neither layers nor n_layers is provided.
+
+    Example:
+        >>> # Cache residual stream at layers 0 and 5
+        >>> hooks = build_hook_filter(layers=[0, 5])
+        >>> # ['blocks.0.hook_resid_post', 'blocks.5.hook_resid_post']
+
+        >>> # Cache attention patterns and residual at layer 3
+        >>> hooks = build_hook_filter(
+        ...     layers=[3],
+        ...     hook_types=['hook_resid_post', 'attn.hook_pattern']
+        ... )
+        >>> # ['blocks.3.hook_resid_post', 'blocks.3.attn.hook_pattern']
+    """
+    if layers is None and n_layers is None:
+        raise ValueError("Must provide either 'layers' or 'n_layers'")
+
+    if layers is None:
+        layers = list(range(n_layers))  # type: ignore[arg-type]
+
+    if hook_types is None:
+        hook_types = ["hook_resid_post"]
+
+    hook_names: list[str] = []
+    for layer in layers:
+        for hook_type in hook_types:
+            hook_names.append(f"blocks.{layer}.{hook_type}")
+
+    return hook_names
+
+
+def extract_with_selective_cache(
+    model: HookedTransformer,
+    tokens: torch.Tensor,
+    names_filter: list[str] | None = None,
+    stop_at_layer: int | None = None,
+    precision: str | None = None,
+) -> SelectiveCacheResult:
+    """
+    Extract hidden states using TransformerLens selective caching.
+
+    This function provides memory-efficient hidden state extraction by only
+    caching the specified hooks rather than all activations (default TransformerLens
+    behavior which causes 2-3x memory overhead).
+
+    IMPORTANT: names_filter accepts a list of hook name STRINGS, not lambda functions.
+    This is by design to ensure predictable memory usage and serializable configs.
+
+    Parameters:
+        model (HookedTransformer): TransformerLens model to run.
+        tokens (torch.Tensor): Input token IDs of shape [batch, seq_len].
+        names_filter (list[str] | None): List of hook names to cache. If None,
+            defaults to caching residual stream at all layers. Common patterns:
+            - 'blocks.{layer}.hook_resid_post': Residual stream after layer
+            - 'blocks.{layer}.attn.hook_pattern': Attention patterns
+            - 'blocks.{layer}.hook_resid_pre': Residual stream before layer
+            Example: names_filter=['blocks.0.hook_resid_post', 'blocks.5.hook_resid_post']
+        stop_at_layer (int | None): If specified, stop computation at this layer
+            to save memory when only early layers are needed. The model will not
+            compute layers >= stop_at_layer.
+        precision (str | None): Target precision for cached tensors. If specified,
+            cached tensors will be converted. Supported: 'fp16', 'fp32', 'bf16'.
+
+    Returns:
+        SelectiveCacheResult: Container with cached activations, logits (if computed),
+            and metadata about what was cached.
+
+    Raises:
+        ImportError: If TransformerLens is not installed.
+        ValueError: If invalid hook names are provided.
+
+    Example:
+        >>> from transformer_lens import HookedTransformer
+        >>> model = HookedTransformer.from_pretrained("gpt2")
+        >>> tokens = model.to_tokens("Hello world")
+        >>> # Cache only layer 0 and layer 5 residual streams
+        >>> result = extract_with_selective_cache(
+        ...     model, tokens,
+        ...     names_filter=['blocks.0.hook_resid_post', 'blocks.5.hook_resid_post'],
+        ...     stop_at_layer=6  # Don't compute layers 6+
+        ... )
+        >>> layer_0_hidden = result.get_residual_stream(0)
+    """
+    try:
+        from transformer_lens import HookedTransformer as TL_HookedTransformer
+    except ImportError as e:
+        raise ImportError(
+            "TransformerLens is required for selective caching. "
+            "Install with: pip install transformer-lens"
+        ) from e
+
+    # Build default names_filter if not provided (all residual stream positions)
+    if names_filter is None:
+        # Cache all residual stream post-layer activations
+        n_layers = model.cfg.n_layers
+        names_filter = [f"blocks.{i}.hook_resid_post" for i in range(n_layers)]
+
+    # Validate that names_filter is a list of strings (not a lambda)
+    if not isinstance(names_filter, list):
+        raise ValueError(
+            f"names_filter must be a list of hook name strings, not {type(names_filter).__name__}. "
+            "Example: names_filter=['blocks.0.hook_resid_post']"
+        )
+
+    for hook_name in names_filter:
+        if not isinstance(hook_name, str):
+            raise ValueError(
+                f"All items in names_filter must be strings, got {type(hook_name).__name__}. "
+                "Example: names_filter=['blocks.0.hook_resid_post']"
+            )
+
+    # Run with selective caching - use inference mode for memory efficiency
+    with torch.set_grad_enabled(False):
+        logits, cache = model.run_with_cache(
+            tokens,
+            names_filter=names_filter,
+            stop_at_layer=stop_at_layer,
+        )
+
+    # Extract cached tensors into a plain dict
+    cached_tensors: dict[str, torch.Tensor] = {}
+    hooks_actually_cached: list[str] = []
+
+    for hook_name in names_filter:
+        if hook_name in cache:
+            tensor = cache[hook_name]
+
+            # Apply precision conversion if requested
+            if precision is not None and precision in PRECISION_DTYPE_MAP:
+                tensor = tensor.to(dtype=PRECISION_DTYPE_MAP[precision])
+
+            cached_tensors[hook_name] = tensor
+            hooks_actually_cached.append(hook_name)
+
+    return SelectiveCacheResult(
+        cache=cached_tensors,
+        logits=logits if stop_at_layer is None else None,
+        hooks_cached=hooks_actually_cached,
+        stopped_at_layer=stop_at_layer,
+        metadata={
+            "requested_hooks": names_filter,
+            "precision": precision,
+            "n_tokens": tokens.shape[-1] if tokens.dim() > 0 else 0,
+        },
+    )
 
 
 def extract_hidden_states(

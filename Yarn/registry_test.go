@@ -1,7 +1,10 @@
 package yarn
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -1495,6 +1498,635 @@ func TestCount(t *testing.T) {
 
 		if registry.Count() != 2 {
 			t.Errorf("expected 2 (including ended session), got %d", registry.Count())
+		}
+	})
+}
+
+// ============================================================================
+// Save/Load Tests
+// ============================================================================
+
+// TestSave verifies the Save method creates correct directory and files.
+func TestSave(t *testing.T) {
+	t.Run("creates directory if it doesn't exist", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		session := NewSession("test-session", "description")
+		_ = registry.Register("test", session)
+
+		dir := t.TempDir()
+		savePath := filepath.Join(dir, "new-subdir")
+
+		err := registry.Save(savePath)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify directory was created
+		info, err := os.Stat(savePath)
+		if err != nil {
+			t.Fatalf("directory not created: %v", err)
+		}
+		if !info.IsDir() {
+			t.Error("expected directory, got file")
+		}
+	})
+
+	t.Run("creates manifest.json", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		session := NewSession("test-session", "description")
+		_ = registry.Register("test", session)
+
+		dir := t.TempDir()
+
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify manifest exists
+		manifestPath := filepath.Join(dir, "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatalf("manifest.json not created: %v", err)
+		}
+
+		// Verify manifest contents
+		var manifest struct {
+			Version  int               `json:"version"`
+			Sessions map[string]string `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("failed to parse manifest: %v", err)
+		}
+		if manifest.Version != 1 {
+			t.Errorf("expected version 1, got %d", manifest.Version)
+		}
+		if len(manifest.Sessions) != 1 {
+			t.Errorf("expected 1 session in manifest, got %d", len(manifest.Sessions))
+		}
+	})
+
+	t.Run("creates session file", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		_ = registry.Register("test", session)
+
+		dir := t.TempDir()
+
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Find session file (should be test.json based on sanitized name)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("failed to read directory: %v", err)
+		}
+
+		sessionFileFound := false
+		for _, entry := range entries {
+			if entry.Name() != "manifest.json" && filepath.Ext(entry.Name()) == ".json" {
+				sessionFileFound = true
+
+				// Verify session file contents
+				data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+				if err != nil {
+					t.Fatalf("failed to read session file: %v", err)
+				}
+
+				var savedSession Session
+				if err := json.Unmarshal(data, &savedSession); err != nil {
+					t.Fatalf("failed to parse session file: %v", err)
+				}
+
+				if savedSession.Name != "test-session" {
+					t.Errorf("expected Name 'test-session', got %q", savedSession.Name)
+				}
+				if savedSession.Description != "test description" {
+					t.Errorf("expected Description 'test description', got %q", savedSession.Description)
+				}
+			}
+		}
+
+		if !sessionFileFound {
+			t.Error("no session file was created")
+		}
+	})
+
+	t.Run("empty registry saves empty manifest", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		dir := t.TempDir()
+
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify manifest exists with empty sessions
+		manifestPath := filepath.Join(dir, "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatalf("manifest.json not created: %v", err)
+		}
+
+		var manifest struct {
+			Sessions map[string]string `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("failed to parse manifest: %v", err)
+		}
+		if len(manifest.Sessions) != 0 {
+			t.Errorf("expected 0 sessions in manifest, got %d", len(manifest.Sessions))
+		}
+	})
+
+	t.Run("multiple sessions saved", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("s1", NewSession("session-1", "desc 1"))
+		_ = registry.Register("s2", NewSession("session-2", "desc 2"))
+		_ = registry.Register("s3", NewSession("session-3", "desc 3"))
+
+		dir := t.TempDir()
+
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify manifest contains all sessions
+		manifestPath := filepath.Join(dir, "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatalf("failed to read manifest: %v", err)
+		}
+
+		var manifest struct {
+			Sessions map[string]string `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("failed to parse manifest: %v", err)
+		}
+		if len(manifest.Sessions) != 3 {
+			t.Errorf("expected 3 sessions in manifest, got %d", len(manifest.Sessions))
+		}
+
+		// Verify each registry name is in manifest
+		for _, name := range []string{"s1", "s2", "s3"} {
+			if _, ok := manifest.Sessions[name]; !ok {
+				t.Errorf("session %q not found in manifest", name)
+			}
+		}
+	})
+
+	t.Run("nil session skipped", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("nil-session", nil)
+		_ = registry.Register("real-session", NewSession("real", "d"))
+
+		dir := t.TempDir()
+
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify only real session in manifest
+		manifestPath := filepath.Join(dir, "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatalf("failed to read manifest: %v", err)
+		}
+
+		var manifest struct {
+			Sessions map[string]string `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("failed to parse manifest: %v", err)
+		}
+		if len(manifest.Sessions) != 1 {
+			t.Errorf("expected 1 session in manifest (nil skipped), got %d", len(manifest.Sessions))
+		}
+		if _, ok := manifest.Sessions["real-session"]; !ok {
+			t.Error("real-session not found in manifest")
+		}
+	})
+}
+
+// TestLoad verifies the Load method restores registry state correctly.
+func TestLoad(t *testing.T) {
+	t.Run("loads single session", func(t *testing.T) {
+		// First save a session
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Load into new registry
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Verify session was loaded
+		got, ok := loaded.Get("test")
+		if !ok {
+			t.Fatal("session 'test' not found after load")
+		}
+		if got.Name != "test-session" {
+			t.Errorf("expected Name 'test-session', got %q", got.Name)
+		}
+		if got.Description != "test description" {
+			t.Errorf("expected Description 'test description', got %q", got.Description)
+		}
+	})
+
+	t.Run("loads multiple sessions", func(t *testing.T) {
+		// Save multiple sessions
+		original := NewSessionRegistry()
+		_ = original.Register("s1", NewSession("session-1", "desc 1"))
+		_ = original.Register("s2", NewSession("session-2", "desc 2"))
+		_ = original.Register("s3", NewSession("session-3", "desc 3"))
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Load into new registry
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Verify all sessions were loaded
+		if loaded.Count() != 3 {
+			t.Errorf("expected 3 sessions, got %d", loaded.Count())
+		}
+
+		for _, name := range []string{"s1", "s2", "s3"} {
+			if _, ok := loaded.Get(name); !ok {
+				t.Errorf("session %q not found after load", name)
+			}
+		}
+	})
+
+	t.Run("merges into existing registry", func(t *testing.T) {
+		// Save a session
+		original := NewSessionRegistry()
+		_ = original.Register("saved", NewSession("saved-session", "saved desc"))
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Load into registry with existing session
+		existing := NewSessionRegistry()
+		_ = existing.Register("existing", NewSession("existing-session", "existing desc"))
+
+		if err := existing.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Verify both sessions exist
+		if existing.Count() != 2 {
+			t.Errorf("expected 2 sessions after merge, got %d", existing.Count())
+		}
+		if _, ok := existing.Get("existing"); !ok {
+			t.Error("existing session not found after load")
+		}
+		if _, ok := existing.Get("saved"); !ok {
+			t.Error("saved session not found after load")
+		}
+	})
+
+	t.Run("overwrites existing session with same name", func(t *testing.T) {
+		// Save a session
+		original := NewSessionRegistry()
+		originalSession := NewSession("original", "original desc")
+		_ = original.Register("test", originalSession)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Load into registry with session of same name
+		existing := NewSessionRegistry()
+		existingSession := NewSession("existing", "existing desc")
+		_ = existing.Register("test", existingSession)
+
+		if err := existing.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Verify loaded session overwrote existing
+		got, ok := existing.Get("test")
+		if !ok {
+			t.Fatal("session 'test' not found after load")
+		}
+		if got.Name != "original" {
+			t.Errorf("expected loaded session name 'original', got %q", got.Name)
+		}
+	})
+
+	t.Run("empty directory loads nothing", func(t *testing.T) {
+		dir := t.TempDir()
+
+		registry := NewSessionRegistry()
+		if err := registry.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if registry.Count() != 0 {
+			t.Errorf("expected 0 sessions from empty dir, got %d", registry.Count())
+		}
+	})
+
+	t.Run("preserves session ID", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "description")
+		originalID := session.ID
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if got.ID != originalID {
+			t.Errorf("expected ID %q, got %q", originalID, got.ID)
+		}
+	})
+
+	t.Run("preserves timestamps", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "description")
+		originalStartedAt := session.StartedAt
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if !got.StartedAt.Equal(originalStartedAt) {
+			t.Errorf("expected StartedAt %v, got %v", originalStartedAt, got.StartedAt)
+		}
+	})
+}
+
+// TestLoadNonExistentDir verifies Load returns nil for non-existent directories.
+func TestLoadNonExistentDir(t *testing.T) {
+	registry := NewSessionRegistry()
+
+	err := registry.Load("/nonexistent/path/that/does/not/exist")
+	if err != nil {
+		t.Errorf("expected nil error for non-existent dir, got %v", err)
+	}
+
+	if registry.Count() != 0 {
+		t.Errorf("expected 0 sessions, got %d", registry.Count())
+	}
+}
+
+// TestSaveLoadRoundtrip verifies Save then Load preserves all data.
+func TestSaveLoadRoundtrip(t *testing.T) {
+	t.Run("empty registry roundtrip", func(t *testing.T) {
+		original := NewSessionRegistry()
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if loaded.Count() != 0 {
+			t.Errorf("expected 0 sessions after roundtrip, got %d", loaded.Count())
+		}
+	})
+
+	t.Run("single session roundtrip", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if loaded.Count() != 1 {
+			t.Fatalf("expected 1 session, got %d", loaded.Count())
+		}
+
+		got, ok := loaded.Get("test")
+		if !ok {
+			t.Fatal("session 'test' not found")
+		}
+		if got.Name != session.Name {
+			t.Errorf("Name mismatch: %q != %q", got.Name, session.Name)
+		}
+		if got.Description != session.Description {
+			t.Errorf("Description mismatch: %q != %q", got.Description, session.Description)
+		}
+		if got.ID != session.ID {
+			t.Errorf("ID mismatch: %q != %q", got.ID, session.ID)
+		}
+	})
+
+	t.Run("multiple sessions roundtrip", func(t *testing.T) {
+		original := NewSessionRegistry()
+		sessions := map[string]*Session{
+			"alpha": NewSession("alpha-session", "first"),
+			"beta":  NewSession("beta-session", "second"),
+			"gamma": NewSession("gamma-session", "third"),
+		}
+		for name, s := range sessions {
+			_ = original.Register(name, s)
+		}
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if loaded.Count() != 3 {
+			t.Errorf("expected 3 sessions, got %d", loaded.Count())
+		}
+
+		for name, origSession := range sessions {
+			got, ok := loaded.Get(name)
+			if !ok {
+				t.Errorf("session %q not found after roundtrip", name)
+				continue
+			}
+			if got.Name != origSession.Name {
+				t.Errorf("session %q Name mismatch: %q != %q", name, got.Name, origSession.Name)
+			}
+			if got.ID != origSession.ID {
+				t.Errorf("session %q ID mismatch: %q != %q", name, got.ID, origSession.ID)
+			}
+		}
+	})
+
+	t.Run("active session status preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("active-session", "description")
+		_ = original.Register("active", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("active")
+		if got.EndedAt != nil {
+			t.Error("expected active session to have nil EndedAt")
+		}
+
+		// Verify appears in Active list
+		active := loaded.Active()
+		if len(active) != 1 {
+			t.Errorf("expected 1 active session, got %d", len(active))
+		}
+	})
+
+	t.Run("ended session status preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("ended-session", "description")
+		session.End() // Mark as ended
+		_ = original.Register("ended", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("ended")
+		if got.EndedAt == nil {
+			t.Error("expected ended session to have non-nil EndedAt")
+		}
+
+		// Verify does NOT appear in Active list
+		active := loaded.Active()
+		if len(active) != 0 {
+			t.Errorf("expected 0 active sessions, got %d", len(active))
+		}
+	})
+
+	t.Run("mix of active and ended sessions", func(t *testing.T) {
+		original := NewSessionRegistry()
+
+		activeSession := NewSession("active-session", "active desc")
+		endedSession := NewSession("ended-session", "ended desc")
+		endedSession.End()
+
+		_ = original.Register("active", activeSession)
+		_ = original.Register("ended", endedSession)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Verify counts
+		if loaded.Count() != 2 {
+			t.Errorf("expected 2 total sessions, got %d", loaded.Count())
+		}
+
+		activeList := loaded.Active()
+		if len(activeList) != 1 {
+			t.Errorf("expected 1 active session, got %d", len(activeList))
+		}
+
+		// Verify active session
+		gotActive, _ := loaded.Get("active")
+		if gotActive.EndedAt != nil {
+			t.Error("active session should have nil EndedAt")
+		}
+
+		// Verify ended session
+		gotEnded, _ := loaded.Get("ended")
+		if gotEnded.EndedAt == nil {
+			t.Error("ended session should have non-nil EndedAt")
+		}
+	})
+
+	t.Run("registry name differs from session name", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("session-internal-name", "description")
+		_ = original.Register("registry-key", session) // Different from session.Name
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Should be retrievable by registry name, not session name
+		got, ok := loaded.Get("registry-key")
+		if !ok {
+			t.Fatal("session not found by registry key")
+		}
+		if got.Name != "session-internal-name" {
+			t.Errorf("expected session Name 'session-internal-name', got %q", got.Name)
+		}
+
+		// Session name should NOT be a registry key
+		_, ok = loaded.Get("session-internal-name")
+		if ok {
+			t.Error("session should not be retrievable by session.Name when registry key differs")
 		}
 	})
 }

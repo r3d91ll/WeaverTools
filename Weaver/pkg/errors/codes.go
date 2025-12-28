@@ -241,6 +241,9 @@ const (
 	// ErrAnalysisInvalidResponse indicates the analysis server returned invalid data.
 	ErrAnalysisInvalidResponse = "ANALYSIS_INVALID_RESPONSE"
 
+	// ErrConceptsEmptyName indicates the concept name is empty.
+	ErrConceptsEmptyName = "CONCEPTS_EMPTY_NAME"
+
 	// ErrConceptsSampleInvalid indicates a sample failed validation.
 	// General validation failure for samples added to the store.
 	ErrConceptsSampleInvalid = "CONCEPTS_SAMPLE_INVALID"

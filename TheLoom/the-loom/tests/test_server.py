@@ -1355,11 +1355,13 @@ class TestGPUEndpoints:
             mock_gpu_instance.has_gpu = True
             mock_gpu_instance.get_gpu_info.return_value = [
                 MagicMock(
-                    device_index=0,
-                    device_name="Mock GPU 0",
-                    total_memory_mb=8192.0,
-                    free_memory_mb=6000.0,
-                    used_memory_mb=2192.0,
+                    index=0,
+                    name="Mock GPU 0",
+                    total_memory_gb=8.0,
+                    free_memory_gb=6.0,
+                    used_memory_gb=2.0,
+                    utilization_percent=25.0,
+                    compute_capability=(8, 6),
                 ),
             ]
 
@@ -1579,11 +1581,13 @@ class TestGPUEndpoints:
                 mock_gpu_instance.has_gpu = True
                 mock_gpu_instance.get_gpu_info.return_value = [
                     MagicMock(
-                        device_index=0,
-                        device_name="Mock GPU",
-                        total_memory_mb=8192.0,
-                        free_memory_mb=4096.0,
-                        used_memory_mb=4096.0,
+                        index=0,
+                        name="Mock GPU",
+                        total_memory_gb=8.0,
+                        free_memory_gb=4.0,
+                        used_memory_gb=4.0,
+                        utilization_percent=50.0,
+                        compute_capability=(8, 6),
                     ),
                 ]
 

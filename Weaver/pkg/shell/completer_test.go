@@ -681,3 +681,160 @@ func TestSortedCompletions(t *testing.T) {
 		t.Errorf("completions should be consistent across calls: %v vs %v", strs1, strs2)
 	}
 }
+
+// TestDoFlagCompletion tests flag completion for /clear and /clear_concepts commands.
+func TestDoFlagCompletion(t *testing.T) {
+	c := NewShellCompleter(nil)
+
+	tests := []struct {
+		name     string
+		line     string
+		pos      int
+		wantLen  int
+		contains []string
+	}{
+		{
+			name:     "dash after /clear shows both flags",
+			line:     "/clear -",
+			pos:      8,
+			wantLen:  1,
+			contains: []string{"-force ", "f "},
+		},
+		{
+			name:     "double dash after /clear shows --force",
+			line:     "/clear --",
+			pos:      9,
+			wantLen:  2,
+			contains: []string{"force "},
+		},
+		{
+			name:     "dash f after /clear completes -f",
+			line:     "/clear -f",
+			pos:      9,
+			wantLen:  2,
+			contains: []string{" "},
+		},
+		{
+			name:     "dash after /clear_concepts shows both flags",
+			line:     "/clear_concepts -",
+			pos:      17,
+			wantLen:  1,
+			contains: []string{"-force ", "f "},
+		},
+		{
+			name:     "double dash after /clear_concepts shows --force",
+			line:     "/clear_concepts --",
+			pos:      18,
+			wantLen:  2,
+			contains: []string{"force "},
+		},
+		{
+			name:     "dash f after /clear_concepts completes -f",
+			line:     "/clear_concepts -f",
+			pos:      18,
+			wantLen:  2,
+			contains: []string{" "},
+		},
+		{
+			name:     "--fo after /clear shows --force",
+			line:     "/clear --fo",
+			pos:      11,
+			wantLen:  4,
+			contains: []string{"rce "},
+		},
+		{
+			name:     "--force after /clear (exact match)",
+			line:     "/clear --force",
+			pos:      14,
+			wantLen:  7,
+			contains: []string{" "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, length := c.Do([]rune(tt.line), tt.pos)
+
+			if tt.wantLen > 0 && length != tt.wantLen {
+				t.Errorf("length = %d, want %d", length, tt.wantLen)
+			}
+
+			if tt.contains == nil {
+				if len(results) != 0 {
+					t.Errorf("expected no results, got %d", len(results))
+				}
+				return
+			}
+
+			// Convert results to strings for comparison
+			gotStrings := make([]string, len(results))
+			for i, r := range results {
+				gotStrings[i] = string(r)
+			}
+
+			// Check that all expected completions are present
+			for _, want := range tt.contains {
+				found := false
+				for _, got := range gotStrings {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("missing expected completion %q in %v", want, gotStrings)
+				}
+			}
+		})
+	}
+}
+
+// TestDoFlagCompletionNotForOtherCommands tests that flags don't complete for other commands.
+func TestDoFlagCompletionNotForOtherCommands(t *testing.T) {
+	c := NewShellCompleter(nil)
+
+	tests := []struct {
+		name string
+		line string
+		pos  int
+	}{
+		{
+			name: "dash after /help",
+			line: "/help -",
+			pos:  7,
+		},
+		{
+			name: "dash after /agents",
+			line: "/agents -",
+			pos:  9,
+		},
+		{
+			name: "dash after /session",
+			line: "/session -",
+			pos:  10,
+		},
+		{
+			name: "dash after /history",
+			line: "/history -",
+			pos:  10,
+		},
+		{
+			name: "dash after plain text",
+			line: "some text -",
+			pos:  11,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, length := c.Do([]rune(tt.line), tt.pos)
+
+			if len(results) != 0 {
+				t.Errorf("expected no flag completions for %q, got %d results", tt.line, len(results))
+			}
+			if length != 0 {
+				t.Errorf("expected length 0, got %d", length)
+			}
+		})
+	}
+}

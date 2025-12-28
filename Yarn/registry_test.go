@@ -2644,21 +2644,17 @@ func TestLoadSessionWithMeasurements(t *testing.T) {
 		m := NewMeasurement()
 		m.SenderID = "sender-1"
 		m.SenderHidden = &HiddenState{
-			ID:        "hidden-1",
-			Timestamp: time.Now(),
-			Vector:    []float64{0.1, 0.2, 0.3, 0.4, 0.5},
-			Source:    "test-source",
-			LayerID:   "layer-1",
-			ModelID:   "model-1",
+			Vector: []float32{0.1, 0.2, 0.3, 0.4, 0.5},
+			Shape:  []int{5},
+			Layer:  12,
+			DType:  "float32",
 		}
 		m.ReceiverID = "receiver-1"
 		m.ReceiverHidden = &HiddenState{
-			ID:        "hidden-2",
-			Timestamp: time.Now(),
-			Vector:    []float64{0.5, 0.4, 0.3, 0.2, 0.1},
-			Source:    "test-source",
-			LayerID:   "layer-2",
-			ModelID:   "model-2",
+			Vector: []float32{0.5, 0.4, 0.3, 0.2, 0.1},
+			Shape:  []int{5},
+			Layer:  24,
+			DType:  "float32",
 		}
 
 		session.AddMeasurement(m)
@@ -2683,15 +2679,15 @@ func TestLoadSessionWithMeasurements(t *testing.T) {
 		if len(loadedM.SenderHidden.Vector) != 5 {
 			t.Errorf("SenderHidden vector length mismatch: got %d, want 5", len(loadedM.SenderHidden.Vector))
 		}
-		if loadedM.SenderHidden.LayerID != "layer-1" {
-			t.Errorf("SenderHidden LayerID mismatch: got %q, want %q", loadedM.SenderHidden.LayerID, "layer-1")
+		if loadedM.SenderHidden.Layer != 12 {
+			t.Errorf("SenderHidden Layer mismatch: got %d, want 12", loadedM.SenderHidden.Layer)
 		}
 
 		if loadedM.ReceiverHidden == nil {
 			t.Fatal("ReceiverHidden is nil after load")
 		}
-		if loadedM.ReceiverHidden.ModelID != "model-2" {
-			t.Errorf("ReceiverHidden ModelID mismatch: got %q, want %q", loadedM.ReceiverHidden.ModelID, "model-2")
+		if loadedM.ReceiverHidden.DType != "float32" {
+			t.Errorf("ReceiverHidden DType mismatch: got %q, want %q", loadedM.ReceiverHidden.DType, "float32")
 		}
 	})
 
@@ -2732,8 +2728,8 @@ func TestLoadSessionWithMeasurements(t *testing.T) {
 			m.Alignment = 0.5
 			m.SenderID = "sender-1"
 			if i%2 == 0 {
-				m.SenderHidden = &HiddenState{Vector: []float64{0.1}}
-				m.ReceiverHidden = &HiddenState{Vector: []float64{0.2}}
+				m.SenderHidden = &HiddenState{Vector: []float32{0.1}, Shape: []int{1}}
+				m.ReceiverHidden = &HiddenState{Vector: []float32{0.2}, Shape: []int{1}}
 			}
 			session.AddMeasurement(m)
 		}

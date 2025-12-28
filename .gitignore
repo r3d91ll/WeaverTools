@@ -80,7 +80,9 @@ credentials.json
 weaver-testing/
 
 # Auto-Claude (task automation tool)
-.auto-claude/
+# Ignore all .auto-claude contents except templates
+.auto-claude/*
+!.auto-claude/.env.example
 .auto-claude-status
 .worktrees/
 

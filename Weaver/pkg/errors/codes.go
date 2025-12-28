@@ -240,6 +240,23 @@ const (
 
 	// ErrAnalysisInvalidResponse indicates the analysis server returned invalid data.
 	ErrAnalysisInvalidResponse = "ANALYSIS_INVALID_RESPONSE"
+
+	// ErrConceptsEmptyName indicates the concept name is empty.
+	ErrConceptsEmptyName = "CONCEPTS_EMPTY_NAME"
+
+	// ErrConceptsSampleInvalid indicates a sample failed validation.
+	// General validation failure for samples added to the store.
+	ErrConceptsSampleInvalid = "CONCEPTS_SAMPLE_INVALID"
+
+	// ErrConceptsDimensionMismatch indicates a sample's hidden state dimension
+	// doesn't match the existing samples in the concept.
+	ErrConceptsDimensionMismatch = "CONCEPTS_DIMENSION_MISMATCH"
+
+	// ErrConceptsEmptySampleID indicates the sample ID is empty.
+	ErrConceptsEmptySampleID = "CONCEPTS_EMPTY_SAMPLE_ID"
+
+	// ErrConceptsNilHiddenState indicates the sample has a nil hidden state.
+	ErrConceptsNilHiddenState = "CONCEPTS_NIL_HIDDEN_STATE"
 )
 
 // -----------------------------------------------------------------------------
@@ -357,11 +374,16 @@ func CodeCategory(code string) Category {
 		ErrIOMarshalFailed, ErrIOUnmarshalFailed:
 		return CategoryIO
 
-	// Concepts/Analysis codes
+	// Concepts/Analysis codes - internal errors
 	case ErrConceptsNoHiddenState, ErrConceptsInsufficientSamples,
 		ErrConceptsNotFound, ErrConceptsExtractionFailed,
 		ErrAnalysisFailed, ErrAnalysisServerUnavailable, ErrAnalysisInvalidResponse:
 		return CategoryInternal // These are internal to Weaver's analysis system
+
+	// Concepts/Analysis codes - validation errors
+	case ErrConceptsEmptyName, ErrConceptsSampleInvalid, ErrConceptsDimensionMismatch,
+		ErrConceptsEmptySampleID, ErrConceptsNilHiddenState:
+		return CategoryValidation // These are input validation errors for Add operations
 
 	// Session codes
 	case ErrSessionNotFound, ErrSessionExportFailed, ErrSessionLoadFailed:

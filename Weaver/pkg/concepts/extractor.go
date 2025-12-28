@@ -90,7 +90,11 @@ func (e *Extractor) Extract(ctx context.Context, cfg ExtractionConfig) (*Extract
 			continue
 		}
 
-		e.store.Add(cfg.Concept, sample)
+		if err := e.store.Add(cfg.Concept, sample); err != nil {
+			// Store a user-friendly error message for display
+			result.Errors = append(result.Errors, formatSampleError(i+1, err))
+			continue
+		}
 		result.SamplesAdded++
 	}
 

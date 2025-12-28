@@ -116,12 +116,40 @@ func NewStore() *Store {
 }
 
 // Add adds a sample to a concept, creating the concept if it doesn't exist.
-func (s *Store) Add(conceptName string, sample Sample) {
+// Returns an error if validation fails (empty name, empty sample ID, invalid hidden state,
+// or dimension mismatch with existing samples).
+func (s *Store) Add(conceptName string, sample Sample) error {
+	// Validation 1: Check for empty concept name
+	if conceptName == "" {
+		return createEmptyConceptNameError()
+	}
+
+	// Validation 2: Check for empty sample ID
+	if sample.ID == "" {
+		return createEmptySampleIDError(conceptName)
+	}
+
+	// Validation 3: Validate hidden state if present
+	if sample.HiddenState != nil {
+		if validationErr := sample.HiddenState.Validate(); validationErr != nil {
+			return createInvalidHiddenStateError(conceptName, sample.ID, validationErr)
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Validation 4: Check dimension mismatch against existing samples
 	concept, ok := s.concepts[conceptName]
-	if !ok {
+	if ok {
+		existingDim := concept.Dimension()
+		if existingDim > 0 && sample.HiddenState != nil {
+			sampleDim := sample.HiddenState.Dimension()
+			if sampleDim > 0 && sampleDim != existingDim {
+				return createDimensionMismatchError(conceptName, sample.ID, existingDim, sampleDim)
+			}
+		}
+	} else {
 		concept = &Concept{
 			Name:      conceptName,
 			Samples:   []Sample{},
@@ -132,6 +160,8 @@ func (s *Store) Add(conceptName string, sample Sample) {
 
 	concept.Samples = append(concept.Samples, sample)
 	concept.UpdatedAt = time.Now()
+
+	return nil
 }
 
 // Get retrieves a concept by name.
@@ -560,4 +590,63 @@ func formatSampleCount(n int) string {
 		n /= 10
 	}
 	return result
+}
+
+// -----------------------------------------------------------------------------
+// Add Operation Error Helpers
+// -----------------------------------------------------------------------------
+// These functions create structured WeaverErrors for Add operation validation
+// failures with appropriate context and suggestions.
+
+// createEmptyConceptNameError creates a structured error when concept name is empty.
+func createEmptyConceptNameError() *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsEmptyName,
+		"concept name cannot be empty").
+		WithContext("operation", "add").
+		WithSuggestion("Provide a descriptive name for the concept (e.g., 'recursion', 'sorting', 'authentication')").
+		WithSuggestion("Concept names should be lowercase with optional hyphens or underscores").
+		WithSuggestion("Use '/extract <concept-name> <count>' to specify a valid concept name")
+}
+
+// createEmptySampleIDError creates a structured error when sample ID is empty.
+func createEmptySampleIDError(conceptName string) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsEmptySampleID,
+		"sample ID cannot be empty").
+		WithContext("concept", conceptName).
+		WithContext("operation", "add").
+		WithSuggestion("Generate a unique sample ID using UUID (e.g., uuid.New().String())").
+		WithSuggestion("Sample IDs must be unique within a concept to allow proper tracking").
+		WithSuggestion("Consider using a combination of timestamp and random suffix if UUID is unavailable")
+}
+
+// createInvalidHiddenStateError creates a structured error when hidden state validation fails.
+// This wraps a yarn.ValidationError to provide context and suggestions for fixing the data.
+func createInvalidHiddenStateError(conceptName, sampleID string, validationErr *yarn.ValidationError) *werrors.WeaverError {
+	return werrors.ValidationWrap(validationErr, werrors.ErrConceptsSampleInvalid,
+		"hidden state validation failed").
+		WithContext("concept", conceptName).
+		WithContext("sample_id", sampleID).
+		WithContext("validation_field", validationErr.Field).
+		WithContext("validation_error", validationErr.Message).
+		WithContext("operation", "add").
+		WithSuggestion("Re-extract the sample with valid hidden state data using '/extract'").
+		WithSuggestion("Ensure the model supports hidden state extraction").
+		WithSuggestion("Check that the hidden state vector is not empty and has valid dimensions").
+		WithSuggestion("Verify the dtype is 'float32' or 'float16'")
+}
+
+// createDimensionMismatchError creates a structured error when a sample's dimension
+// doesn't match the existing concept dimension.
+func createDimensionMismatchError(conceptName, sampleID string, expectedDim, actualDim int) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsDimensionMismatch,
+		"sample dimension does not match existing concept dimension").
+		WithContext("concept", conceptName).
+		WithContext("sample_id", sampleID).
+		WithContext("expected_dimension", formatSampleCount(expectedDim)).
+		WithContext("actual_dimension", formatSampleCount(actualDim)).
+		WithContext("operation", "add").
+		WithSuggestion("All samples in a concept must have the same hidden state dimension").
+		WithSuggestion("Re-extract this sample using the same model as existing samples").
+		WithSuggestion("Use '/concepts list' to see existing concepts and their sample counts").
+		WithSuggestion("Consider creating a new concept if using a different model")
 }

@@ -36,6 +36,18 @@ from .conveyance_metrics import (
     calculate_d_eff,
 )
 
+from .layer_utils import (
+    # Result types
+    BottleneckResult,
+    LayerComparisonResult,
+    LayerTrajectoryResult,
+    # Layer analysis functions
+    compare_layer_deff,
+    compute_layer_trajectory,
+    find_bottleneck_layers,
+    compute_layer_similarity_matrix,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -63,4 +75,13 @@ __all__ = [
     "bootstrap_ci",
     # Conveyance metrics result types
     "ConveyanceMetricsResult",
+    # Layer analysis functions
+    "compare_layer_deff",
+    "compute_layer_trajectory",
+    "find_bottleneck_layers",
+    "compute_layer_similarity_matrix",
+    # Layer analysis result types
+    "BottleneckResult",
+    "LayerComparisonResult",
+    "LayerTrajectoryResult",
 ]

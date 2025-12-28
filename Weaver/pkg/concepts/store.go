@@ -561,3 +561,19 @@ func formatSampleCount(n int) string {
 	}
 	return result
 }
+
+// -----------------------------------------------------------------------------
+// Add Operation Error Helpers
+// -----------------------------------------------------------------------------
+// These functions create structured WeaverErrors for Add operation validation
+// failures with appropriate context and suggestions.
+
+// createEmptyConceptNameError creates a structured error when concept name is empty.
+func createEmptyConceptNameError() *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsEmptyName,
+		"concept name cannot be empty").
+		WithContext("operation", "add").
+		WithSuggestion("Provide a descriptive name for the concept (e.g., 'recursion', 'sorting', 'authentication')").
+		WithSuggestion("Concept names should be lowercase with optional hyphens or underscores").
+		WithSuggestion("Use '/extract <concept-name> <count>' to specify a valid concept name")
+}

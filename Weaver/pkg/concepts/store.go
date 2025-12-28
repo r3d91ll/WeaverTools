@@ -384,6 +384,97 @@ func (s *Store) Count() int {
 	return len(s.concepts)
 }
 
+// Stats returns detailed statistics for all concepts in the store.
+// It follows the lock-copy-release pattern from SessionRegistry.Status():
+// (1) RLock and copy concepts map, (2) RUnlock, (3) iterate copies to compute
+// ConceptStats for each, (4) aggregate into StoreStats.
+// This approach minimizes lock contention by releasing the lock before
+// computing statistics.
+//
+// This method is safe for concurrent use.
+func (s *Store) Stats() StoreStats {
+	// Step 1: RLock and copy concepts map references
+	s.mu.RLock()
+	concepts := make(map[string]*Concept, len(s.concepts))
+	for name, c := range s.concepts {
+		concepts[name] = c
+	}
+	s.mu.RUnlock()
+
+	// Step 2: Initialize aggregate stats
+	stats := StoreStats{
+		ConceptCount: len(concepts),
+		Dimensions:   make(map[int]int),
+		Models:       make(map[string]int),
+		Concepts:     make(map[string]ConceptStats),
+	}
+
+	// Handle empty store case
+	if len(concepts) == 0 {
+		return stats
+	}
+
+	// Step 3: Iterate copies to compute stats for each concept
+	var oldestExtraction, newestExtraction time.Time
+	firstTime := true
+
+	for name, concept := range concepts {
+		if concept == nil {
+			continue
+		}
+
+		// Compute per-concept stats
+		cs := concept.Stats()
+		stats.Concepts[name] = cs
+
+		// Aggregate sample counts
+		stats.TotalSamples += cs.SampleCount
+
+		// Track dimension distribution
+		if cs.Dimension > 0 {
+			stats.Dimensions[cs.Dimension]++
+		}
+
+		// Track healthy vs unhealthy concepts
+		if len(cs.MismatchedIDs) > 0 {
+			stats.ConceptsWithIssues++
+		} else {
+			stats.HealthyConcepts++
+		}
+
+		// Count model usage across all samples
+		for _, sample := range concept.Samples {
+			if sample.Model != "" {
+				stats.Models[sample.Model]++
+			}
+		}
+
+		// Track overall time ranges from per-concept stats
+		if !cs.OldestSampleAt.IsZero() {
+			if firstTime {
+				oldestExtraction = cs.OldestSampleAt
+				newestExtraction = cs.NewestSampleAt
+				firstTime = false
+			} else {
+				if cs.OldestSampleAt.Before(oldestExtraction) {
+					oldestExtraction = cs.OldestSampleAt
+				}
+				if cs.NewestSampleAt.After(newestExtraction) {
+					newestExtraction = cs.NewestSampleAt
+				}
+			}
+		}
+	}
+
+	// Set time ranges if we found valid times
+	if !firstTime {
+		stats.OldestExtraction = oldestExtraction
+		stats.NewestExtraction = newestExtraction
+	}
+
+	return stats
+}
+
 // Save persists all concepts to a directory.
 func (s *Store) Save(dir string) error {
 	// Copy data under lock, then release before I/O

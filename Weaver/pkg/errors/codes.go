@@ -374,11 +374,16 @@ func CodeCategory(code string) Category {
 		ErrIOMarshalFailed, ErrIOUnmarshalFailed:
 		return CategoryIO
 
-	// Concepts/Analysis codes
+	// Concepts/Analysis codes - internal errors
 	case ErrConceptsNoHiddenState, ErrConceptsInsufficientSamples,
 		ErrConceptsNotFound, ErrConceptsExtractionFailed,
 		ErrAnalysisFailed, ErrAnalysisServerUnavailable, ErrAnalysisInvalidResponse:
 		return CategoryInternal // These are internal to Weaver's analysis system
+
+	// Concepts/Analysis codes - validation errors
+	case ErrConceptsEmptyName, ErrConceptsSampleInvalid, ErrConceptsDimensionMismatch,
+		ErrConceptsEmptySampleID, ErrConceptsNilHiddenState:
+		return CategoryValidation // These are input validation errors for Add operations
 
 	// Session codes
 	case ErrSessionNotFound, ErrSessionExportFailed, ErrSessionLoadFailed:

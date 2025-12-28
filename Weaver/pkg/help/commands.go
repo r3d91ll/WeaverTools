@@ -130,9 +130,13 @@ var Commands = []Command{
 	{
 		Name:        "/clear",
 		Category:    CategorySession,
-		Description: "Start a new conversation (clears history)",
-		Usage:       "/clear",
-		Examples:    nil,
+		Description: "Start a new conversation (clears history, prompts for confirmation)",
+		Usage:       "/clear [--force|-f]",
+		Examples: []Example{
+			{Command: "/clear", Description: "Clear history (with confirmation prompt)"},
+			{Command: "/clear --force", Description: "Clear history without confirmation"},
+			{Command: "/clear -f", Description: "Clear history without confirmation (short flag)"},
+		},
 	},
 	{
 		Name:        "/default",
@@ -204,9 +208,13 @@ var Commands = []Command{
 	{
 		Name:        "/clear_concepts",
 		Category:    CategoryAnalysis,
-		Description: "Remove all stored concepts",
-		Usage:       "/clear_concepts",
-		Examples:    nil,
+		Description: "Remove all stored concepts (prompts for confirmation)",
+		Usage:       "/clear_concepts [--force|-f]",
+		Examples: []Example{
+			{Command: "/clear_concepts", Description: "Clear concepts (with confirmation prompt)"},
+			{Command: "/clear_concepts --force", Description: "Clear concepts without confirmation"},
+			{Command: "/clear_concepts -f", Description: "Clear concepts without confirmation (short flag)"},
+		},
 	},
 
 	// General Commands

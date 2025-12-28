@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +33,42 @@ type LoomConfig struct {
 	URL     string        `yaml:"url"`
 	Model   string        `yaml:"model"`
 	Timeout time.Duration `yaml:"timeout"`
+}
+
+// Validate checks if the LoomConfig is valid.
+// Returns nil for valid configs (including empty/default config).
+// Returns *WeaverError for invalid configurations.
+func (c LoomConfig) Validate() *werrors.WeaverError {
+	// Validate Name format if provided (no special characters that could cause issues)
+	if c.Name != "" && strings.ContainsAny(c.Name, " \t\n\r@#$%^&*(){}[]|\\<>") {
+		return werrors.ValidationInvalid("Name", c.Name, "contains invalid characters").
+			WithSuggestion("Use alphanumeric characters, hyphens, or underscores only").
+			WithSuggestion("Example: 'my-loom-backend' or 'loom_1'")
+	}
+
+	// Validate URL format if provided (must be http or https)
+	if c.URL != "" {
+		parsedURL, err := url.Parse(c.URL)
+		if err != nil {
+			return werrors.ValidationInvalid("URL", c.URL, "malformed URL").
+				WithSuggestion("Provide a valid URL in the format: http://host:port or https://host:port").
+				WithSuggestion("Example: 'http://localhost:8080' or 'https://api.example.com'")
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return werrors.ValidationInvalid("URL", c.URL, "must use http or https scheme").
+				WithSuggestion("Change the URL scheme to http:// or https://").
+				WithSuggestion("Example: 'http://localhost:8080' or 'https://api.example.com'")
+		}
+	}
+
+	// Validate Timeout is non-negative
+	if c.Timeout < 0 {
+		return werrors.ValidationOutOfRange("Timeout", c.Timeout, 0, "unlimited").
+			WithSuggestion("Timeout must be 0 or greater").
+			WithSuggestion("Use 0 to apply the default timeout (120 seconds)")
+	}
+
+	return nil
 }
 
 // NewLoom creates a new Loom backend.

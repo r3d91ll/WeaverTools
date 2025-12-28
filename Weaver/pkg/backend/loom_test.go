@@ -7,8 +7,606 @@ import (
 	"testing"
 	"time"
 
+	werrors "github.com/r3d91ll/weaver/pkg/errors"
 	yarn "github.com/r3d91ll/yarn"
 )
+
+// -----------------------------------------------------------------------------
+// LoomConfig Validation Tests
+// -----------------------------------------------------------------------------
+
+// TestLoomConfig_Validate tests the Validate() method for LoomConfig
+// using table-driven tests to cover all validation scenarios.
+func TestLoomConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name           string
+		config         LoomConfig
+		wantErr        bool
+		wantCode       string
+		wantFieldInMsg string // Field name that should appear in error message/context
+	}{
+		{
+			name:    "empty config passes",
+			config:  LoomConfig{},
+			wantErr: false,
+		},
+		{
+			name: "valid config with all fields",
+			config: LoomConfig{
+				Name:    "my-loom-backend",
+				URL:     "http://localhost:8080",
+				Model:   "llama-3.2-1b",
+				Timeout: 120 * time.Second,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with https URL",
+			config: LoomConfig{
+				URL: "https://api.example.com:8443",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with underscores in name",
+			config: LoomConfig{
+				Name: "loom_backend_1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with hyphens in name",
+			config: LoomConfig{
+				Name: "loom-primary",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with zero Timeout",
+			config: LoomConfig{
+				Timeout: 0,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid URL scheme - ftp",
+			config: LoomConfig{
+				URL: "ftp://example.com/files",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "URL",
+		},
+		{
+			name: "invalid URL scheme - file",
+			config: LoomConfig{
+				URL: "file:///path/to/file",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "URL",
+		},
+		{
+			name: "invalid URL scheme - ws",
+			config: LoomConfig{
+				URL: "ws://example.com:8080",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "URL",
+		},
+		{
+			name: "malformed URL - missing scheme",
+			config: LoomConfig{
+				URL: "://localhost:8080",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "URL",
+		},
+		{
+			name: "malformed URL - control characters",
+			config: LoomConfig{
+				URL: "http://localhost:8080/path\x00with\x7fcontrol",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "URL",
+		},
+		{
+			name: "negative Timeout returns error",
+			config: LoomConfig{
+				Timeout: -5 * time.Second,
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationOutOfRange,
+			wantFieldInMsg: "Timeout",
+		},
+		{
+			name: "very negative Timeout returns error",
+			config: LoomConfig{
+				Timeout: -1000 * time.Hour,
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationOutOfRange,
+			wantFieldInMsg: "Timeout",
+		},
+		{
+			name: "Name with spaces returns error",
+			config: LoomConfig{
+				Name: "my loom backend",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with tab returns error",
+			config: LoomConfig{
+				Name: "loom\tbackend",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with newline returns error",
+			config: LoomConfig{
+				Name: "loom\nbackend",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with @ returns error",
+			config: LoomConfig{
+				Name: "loom@server",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with # returns error",
+			config: LoomConfig{
+				Name: "loom#1",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with $ returns error",
+			config: LoomConfig{
+				Name: "loom$var",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with % returns error",
+			config: LoomConfig{
+				Name: "loom%encoded",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with parentheses returns error",
+			config: LoomConfig{
+				Name: "loom(backend)",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with brackets returns error",
+			config: LoomConfig{
+				Name: "loom[0]",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with braces returns error",
+			config: LoomConfig{
+				Name: "loom{backend}",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with pipe returns error",
+			config: LoomConfig{
+				Name: "loom|alternate",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with backslash returns error",
+			config: LoomConfig{
+				Name: "loom\\path",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+		{
+			name: "Name with angle brackets returns error",
+			config: LoomConfig{
+				Name: "loom<server>",
+			},
+			wantErr:        true,
+			wantCode:       werrors.ErrValidationInvalidValue,
+			wantFieldInMsg: "Name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				// Verify error code
+				if err.Code != tt.wantCode {
+					t.Errorf("error code = %q, want %q", err.Code, tt.wantCode)
+				}
+
+				// Verify error message contains the field name
+				if tt.wantFieldInMsg != "" {
+					if !strings.Contains(err.Message, tt.wantFieldInMsg) {
+						t.Errorf("error message should contain field name %q, got: %s",
+							tt.wantFieldInMsg, err.Message)
+					}
+				}
+
+				// Verify error has context with the field name
+				if tt.wantFieldInMsg != "" {
+					fieldVal, hasField := err.Context["field"]
+					if !hasField {
+						t.Error("error context should contain 'field' key")
+					} else if fieldVal != tt.wantFieldInMsg {
+						t.Errorf("context['field'] = %q, want %q", fieldVal, tt.wantFieldInMsg)
+					}
+				}
+
+				// Verify error has suggestions
+				if len(err.Suggestions) == 0 {
+					t.Error("error should have at least one suggestion")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestLoomConfig_Validate_SuggestionsContent verifies that validation errors
+// include helpful, actionable suggestions.
+func TestLoomConfig_Validate_SuggestionsContent(t *testing.T) {
+	t.Run("invalid name suggestions mention valid characters", func(t *testing.T) {
+		cfg := LoomConfig{Name: "invalid name"}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for invalid name")
+		}
+
+		foundCharSuggestion := false
+		foundExampleSuggestion := false
+		for _, s := range err.Suggestions {
+			if strings.Contains(s, "alphanumeric") ||
+				strings.Contains(s, "hyphens") ||
+				strings.Contains(s, "underscores") {
+				foundCharSuggestion = true
+			}
+			if strings.Contains(s, "Example") ||
+				strings.Contains(s, "example") ||
+				strings.Contains(s, "my-loom") ||
+				strings.Contains(s, "loom_") {
+				foundExampleSuggestion = true
+			}
+		}
+
+		if !foundCharSuggestion {
+			t.Error("suggestions should mention valid character types (alphanumeric, hyphens, underscores)")
+		}
+		if !foundExampleSuggestion {
+			t.Error("suggestions should include an example of a valid name")
+		}
+	})
+
+	t.Run("invalid URL scheme suggestions mention http/https", func(t *testing.T) {
+		cfg := LoomConfig{URL: "ftp://example.com/files"}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for invalid URL scheme")
+		}
+
+		foundSchemeSuggestion := false
+		foundExampleSuggestion := false
+		for _, s := range err.Suggestions {
+			if strings.Contains(s, "http") || strings.Contains(s, "https") {
+				foundSchemeSuggestion = true
+			}
+			if strings.Contains(s, "Example") ||
+				strings.Contains(s, "example") ||
+				strings.Contains(s, "localhost:8080") {
+				foundExampleSuggestion = true
+			}
+		}
+
+		if !foundSchemeSuggestion {
+			t.Error("suggestions should mention http/https scheme")
+		}
+		if !foundExampleSuggestion {
+			t.Error("suggestions should include an example of a valid URL")
+		}
+	})
+
+	t.Run("malformed URL suggestions mention valid format", func(t *testing.T) {
+		cfg := LoomConfig{URL: "://not-a-valid-url"}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for malformed URL")
+		}
+
+		foundFormatSuggestion := false
+		for _, s := range err.Suggestions {
+			if strings.Contains(s, "http://") ||
+				strings.Contains(s, "https://") ||
+				strings.Contains(s, "host:port") {
+				foundFormatSuggestion = true
+			}
+		}
+
+		if !foundFormatSuggestion {
+			t.Error("suggestions should mention valid URL format")
+		}
+	})
+
+	t.Run("negative Timeout suggestions mention valid range", func(t *testing.T) {
+		cfg := LoomConfig{Timeout: -100 * time.Second}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for negative Timeout")
+		}
+
+		foundRangeSuggestion := false
+		foundDefaultSuggestion := false
+		for _, s := range err.Suggestions {
+			if strings.Contains(s, "0") && strings.Contains(s, "greater") {
+				foundRangeSuggestion = true
+			}
+			if strings.Contains(s, "default") || strings.Contains(s, "120") {
+				foundDefaultSuggestion = true
+			}
+		}
+
+		if !foundRangeSuggestion {
+			t.Error("suggestions should mention valid range (0 or greater)")
+		}
+		if !foundDefaultSuggestion {
+			t.Error("suggestions should mention default value")
+		}
+	})
+}
+
+// TestLoomConfig_Validate_ErrorContext verifies that validation errors
+// include appropriate context information.
+func TestLoomConfig_Validate_ErrorContext(t *testing.T) {
+	t.Run("invalid name error includes value in context", func(t *testing.T) {
+		invalidName := "bad name!"
+		cfg := LoomConfig{Name: invalidName}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for invalid name")
+		}
+
+		valueCtx, hasValue := err.Context["value"]
+		if !hasValue {
+			t.Error("error context should contain 'value' key")
+		} else if valueCtx != invalidName {
+			t.Errorf("context['value'] = %q, want %q", valueCtx, invalidName)
+		}
+	})
+
+	t.Run("invalid URL error includes value in context", func(t *testing.T) {
+		invalidURL := "ftp://example.com"
+		cfg := LoomConfig{URL: invalidURL}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for invalid URL")
+		}
+
+		valueCtx, hasValue := err.Context["value"]
+		if !hasValue {
+			t.Error("error context should contain 'value' key")
+		} else if valueCtx != invalidURL {
+			t.Errorf("context['value'] = %q, want %q", valueCtx, invalidURL)
+		}
+	})
+
+	t.Run("out of range error includes value and range in context", func(t *testing.T) {
+		cfg := LoomConfig{Timeout: -100 * time.Second}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error for negative Timeout")
+		}
+
+		// Should have value in context
+		if _, hasValue := err.Context["value"]; !hasValue {
+			t.Error("error context should contain 'value' key")
+		}
+
+		// Should have min in context
+		if _, hasMin := err.Context["min"]; !hasMin {
+			t.Error("error context should contain 'min' key")
+		}
+
+		// Should have max in context
+		if _, hasMax := err.Context["max"]; !hasMax {
+			t.Error("error context should contain 'max' key")
+		}
+	})
+}
+
+// TestLoomConfig_Validate_Category verifies that validation errors
+// have the correct category.
+func TestLoomConfig_Validate_Category(t *testing.T) {
+	tests := []struct {
+		name   string
+		config LoomConfig
+	}{
+		{
+			name:   "invalid name",
+			config: LoomConfig{Name: "bad name"},
+		},
+		{
+			name:   "invalid URL scheme",
+			config: LoomConfig{URL: "ftp://example.com"},
+		},
+		{
+			name:   "negative Timeout",
+			config: LoomConfig{Timeout: -1 * time.Second},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+
+			if err.Category != werrors.CategoryValidation {
+				t.Errorf("error category = %q, want %q", err.Category, werrors.CategoryValidation)
+			}
+		})
+	}
+}
+
+// TestLoomConfig_Validate_FirstErrorReturned verifies that validation
+// returns on the first error encountered (Name is checked before URL and Timeout).
+func TestLoomConfig_Validate_FirstErrorReturned(t *testing.T) {
+	cfg := LoomConfig{
+		Name:    "bad name",         // Invalid (checked first)
+		URL:     "ftp://example.com", // Also invalid
+		Timeout: -100 * time.Second,  // Also invalid
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	// Name is validated first, so error should be about Name
+	if err.Code != werrors.ErrValidationInvalidValue {
+		t.Errorf("expected ErrValidationInvalidValue for Name error, got %q", err.Code)
+	}
+	if fieldCtx, ok := err.Context["field"]; ok && fieldCtx != "Name" {
+		t.Errorf("expected first error to be about Name field, got %q", fieldCtx)
+	}
+}
+
+// TestLoomConfig_Validate_URLEdgeCases tests edge cases for URL validation.
+func TestLoomConfig_Validate_URLEdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{
+			name:    "http with port",
+			url:     "http://localhost:8080",
+			wantErr: false,
+		},
+		{
+			name:    "https with port",
+			url:     "https://api.example.com:443",
+			wantErr: false,
+		},
+		{
+			name:    "http without port",
+			url:     "http://example.com",
+			wantErr: false,
+		},
+		{
+			name:    "https without port",
+			url:     "https://example.com",
+			wantErr: false,
+		},
+		{
+			name:    "http with path",
+			url:     "http://localhost:8080/v1/api",
+			wantErr: false,
+		},
+		{
+			name:    "http with IPv4 address",
+			url:     "http://192.168.1.100:8080",
+			wantErr: false,
+		},
+		{
+			name:    "http with IPv6 address",
+			url:     "http://[::1]:8080",
+			wantErr: false,
+		},
+		{
+			name:    "empty URL is valid (uses default)",
+			url:     "",
+			wantErr: false,
+		},
+		{
+			name:    "ftp scheme is invalid",
+			url:     "ftp://files.example.com",
+			wantErr: true,
+		},
+		{
+			name:    "websocket scheme is invalid",
+			url:     "ws://socket.example.com",
+			wantErr: true,
+		},
+		{
+			name:    "no scheme is invalid",
+			url:     "example.com:8080",
+			wantErr: true, // url.Parse treats this as scheme:opaque, not http
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := LoomConfig{URL: tt.url}
+			err := cfg.Validate()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// SSE Parsing Tests
+// -----------------------------------------------------------------------------
 
 // TestParseSSE_ValidEvents tests that parseSSE correctly parses valid SSE events.
 func TestParseSSE_ValidEvents(t *testing.T) {

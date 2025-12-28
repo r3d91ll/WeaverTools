@@ -28,6 +28,34 @@ type ClaudeCodeConfig struct {
 	MaxTokens    int    `yaml:"max_tokens"` // Default: 25000 (Claude CLI default)
 }
 
+// Validate checks if the ClaudeCodeConfig is valid.
+// Returns nil for valid configs (including empty/default config).
+// Returns *WeaverError for invalid configurations.
+func (c ClaudeCodeConfig) Validate() *werrors.WeaverError {
+	// Validate Name format if provided (no special characters that could cause issues)
+	if c.Name != "" && strings.ContainsAny(c.Name, " \t\n\r@#$%^&*(){}[]|\\<>") {
+		return werrors.ValidationInvalid("Name", c.Name, "contains invalid characters").
+			WithSuggestion("Use alphanumeric characters, hyphens, or underscores only").
+			WithSuggestion("Example: 'my-claude-backend' or 'claude_code_1'")
+	}
+
+	// Validate ContextLimit is non-negative
+	if c.ContextLimit < 0 {
+		return werrors.ValidationOutOfRange("ContextLimit", c.ContextLimit, 0, "unlimited").
+			WithSuggestion("ContextLimit must be 0 or greater").
+			WithSuggestion("Use 0 to apply the default context limit (200000)")
+	}
+
+	// Validate MaxTokens is non-negative
+	if c.MaxTokens < 0 {
+		return werrors.ValidationOutOfRange("MaxTokens", c.MaxTokens, 0, "unlimited").
+			WithSuggestion("MaxTokens must be 0 or greater").
+			WithSuggestion("Use 0 to apply the default max tokens (25000)")
+	}
+
+	return nil
+}
+
 // NewClaudeCode creates a new Claude Code backend.
 func NewClaudeCode(cfg ClaudeCodeConfig) *ClaudeCode {
 	name := cfg.Name

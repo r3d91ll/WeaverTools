@@ -7,6 +7,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -45,7 +46,15 @@ from ..utils.metrics import (
     set_models_loaded,
 )
 from ..utils.serialization import serialize_hidden_states, tensor_to_base64, tensor_to_list
-from ..persistence import ExperimentPersistence
+from ..persistence import (
+    ConversationRecord,
+    ExperimentPersistence,
+    ExperimentQuery,
+    ExperimentRecord,
+    ExperimentSummary,
+    HiddenStateRecord,
+    MetricRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -635,6 +644,105 @@ class ModelLoadResponse(BaseModel):
     load_time_seconds: float
     loader_type: str = Field(description="Which loader was used")
     quantization: str = Field(default="none", description="Quantization mode used")
+
+
+# ============================================================================
+# Experiment Persistence Query Models
+# ============================================================================
+
+
+class ExperimentResponse(BaseModel):
+    """Response model for experiment metadata."""
+
+    id: str = Field(description="Unique experiment identifier")
+    created_at: datetime = Field(description="Experiment creation timestamp")
+    model: str = Field(description="Model identifier used in the experiment")
+    config: dict[str, Any] = Field(description="Experiment configuration")
+    status: str = Field(description="Experiment status (running, completed, failed)")
+    notes: str | None = Field(default=None, description="Optional notes or description")
+
+
+class ExperimentSummaryResponse(BaseModel):
+    """Response model for experiment summary statistics."""
+
+    experiment_id: str = Field(description="Unique experiment identifier")
+    model: str = Field(description="Model identifier")
+    created_at: datetime = Field(description="Experiment creation timestamp")
+    status: str = Field(description="Experiment status")
+    conversation_count: int = Field(description="Number of conversation messages")
+    metric_count: int = Field(description="Number of metrics recorded")
+    hidden_state_count: int = Field(description="Number of hidden state snapshots")
+
+
+class ExperimentListResponse(BaseModel):
+    """Response model for listing experiments."""
+
+    experiments: list[ExperimentResponse] = Field(description="List of experiments")
+    total: int = Field(description="Total count of matching experiments")
+    limit: int = Field(description="Limit used in the query")
+    offset: int = Field(description="Offset used in the query")
+
+
+class ConversationResponse(BaseModel):
+    """Response model for a conversation message."""
+
+    id: int | None = Field(default=None, description="Conversation record ID")
+    experiment_id: str = Field(description="Parent experiment identifier")
+    sequence_num: int = Field(description="Message sequence number")
+    timestamp: datetime = Field(description="Message timestamp")
+    role: str = Field(description="Message role (user, assistant, system)")
+    content: str = Field(description="Message content")
+
+
+class ConversationsListResponse(BaseModel):
+    """Response model for listing conversations."""
+
+    experiment_id: str = Field(description="Parent experiment identifier")
+    conversations: list[ConversationResponse] = Field(description="List of conversation messages")
+    total: int = Field(description="Total count of messages")
+
+
+class HiddenStateResponse(BaseModel):
+    """Response model for hidden state record."""
+
+    id: int | None = Field(default=None, description="Hidden state record ID")
+    experiment_id: str = Field(description="Parent experiment identifier")
+    layer: int = Field(description="Layer index")
+    file_path: str = Field(description="Path to HDF5 file")
+    shape: list[int] = Field(description="Tensor shape")
+    dtype: str = Field(description="Data type")
+    timestamp: datetime = Field(description="Record timestamp")
+
+
+class HiddenStatesListResponse(BaseModel):
+    """Response model for listing hidden states."""
+
+    experiment_id: str = Field(description="Parent experiment identifier")
+    hidden_states: list[HiddenStateResponse] = Field(description="List of hidden state records")
+    layers: list[int] = Field(description="Available layer indices")
+    total: int = Field(description="Total count of hidden state records")
+
+
+class MetricResponse(BaseModel):
+    """Response model for a metric record."""
+
+    id: int | None = Field(default=None, description="Metric record ID")
+    experiment_id: str = Field(description="Parent experiment identifier")
+    name: str = Field(description="Metric name")
+    value: float = Field(description="Metric value")
+    unit: str | None = Field(default=None, description="Unit of measurement")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    timestamp: datetime = Field(description="Record timestamp")
+
+
+class ExperimentDetailResponse(BaseModel):
+    """Response model for detailed experiment data."""
+
+    experiment: ExperimentResponse = Field(description="Experiment metadata")
+    conversations: list[ConversationResponse] = Field(description="Conversation messages")
+    hidden_states: list[HiddenStateResponse] = Field(description="Hidden state records")
+    metrics: list[MetricResponse] = Field(description="Metric records")
+    summary: ExperimentSummaryResponse = Field(description="Summary statistics")
 
 
 # ============================================================================
@@ -2020,6 +2128,345 @@ def create_http_app(config: Config | None = None) -> FastAPI:
 
         except Exception as e:
             logger.exception(f"Batch embedding failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    # ========================================================================
+    # Experiment Persistence Query Endpoints
+    # ========================================================================
+
+    def _experiment_record_to_response(record: ExperimentRecord) -> ExperimentResponse:
+        """Convert an ExperimentRecord to ExperimentResponse."""
+        return ExperimentResponse(
+            id=record.id,
+            created_at=record.created_at,
+            model=record.model,
+            config=record.config,
+            status=record.status,
+            notes=record.notes,
+        )
+
+    def _conversation_record_to_response(record: ConversationRecord) -> ConversationResponse:
+        """Convert a ConversationRecord to ConversationResponse."""
+        return ConversationResponse(
+            id=record.id,
+            experiment_id=record.experiment_id,
+            sequence_num=record.sequence_num,
+            timestamp=record.timestamp,
+            role=record.role,
+            content=record.content,
+        )
+
+    def _hidden_state_record_to_response(record: HiddenStateRecord) -> HiddenStateResponse:
+        """Convert a HiddenStateRecord to HiddenStateResponse."""
+        return HiddenStateResponse(
+            id=record.id,
+            experiment_id=record.experiment_id,
+            layer=record.layer,
+            file_path=record.file_path,
+            shape=list(record.shape),
+            dtype=record.dtype,
+            timestamp=record.timestamp,
+        )
+
+    def _metric_record_to_response(record: MetricRecord) -> MetricResponse:
+        """Convert a MetricRecord to MetricResponse."""
+        return MetricResponse(
+            id=record.id,
+            experiment_id=record.experiment_id,
+            name=record.name,
+            value=record.value,
+            unit=record.unit,
+            metadata=record.metadata,
+            timestamp=record.timestamp,
+        )
+
+    @app.get("/experiments", response_model=ExperimentListResponse)
+    async def list_experiments(
+        limit: int = 100,
+        offset: int = 0,
+        model: str | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> ExperimentListResponse:
+        """List persisted experiments with optional filtering.
+
+        Query experiments stored in the persistence layer. Supports filtering
+        by model, status, and date range with pagination.
+
+        Parameters:
+            limit: Maximum number of experiments to return (default: 100).
+            offset: Number of experiments to skip for pagination (default: 0).
+            model: Filter by model identifier.
+            status: Filter by experiment status (running, completed, failed).
+            date_from: Filter experiments created on or after this datetime.
+            date_to: Filter experiments created on or before this datetime.
+
+        Returns:
+            ExperimentListResponse with experiments and pagination info.
+
+        Raises:
+            HTTPException: 503 if persistence is not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Create query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                experiments = query.list_experiments(
+                    limit=limit,
+                    offset=offset,
+                    model=model,
+                    status=status,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                total = query.count_experiments(model=model, status=status)
+            finally:
+                query.close()
+
+            return ExperimentListResponse(
+                experiments=[_experiment_record_to_response(exp) for exp in experiments],
+                total=total,
+                limit=limit,
+                offset=offset,
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to list experiments: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}", response_model=ExperimentDetailResponse)
+    async def get_experiment(experiment_id: str) -> ExperimentDetailResponse:
+        """Get detailed information about a specific experiment.
+
+        Retrieves the experiment metadata along with all associated
+        conversations, hidden state records, metrics, and summary statistics.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+
+        Returns:
+            ExperimentDetailResponse with full experiment data.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Get experiment data
+            data = persistence.get_experiment_data(experiment_id, include_hidden_states=False)
+
+            if data is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            experiment: ExperimentRecord = data["experiment"]
+            conversations: list[ConversationRecord] = data["conversations"]
+            hidden_state_records: list[HiddenStateRecord] = data["hidden_state_records"]
+            metrics: list[MetricRecord] = data["metrics"]
+
+            # Build summary
+            summary = ExperimentSummaryResponse(
+                experiment_id=experiment.id,
+                model=experiment.model,
+                created_at=experiment.created_at,
+                status=experiment.status,
+                conversation_count=len(conversations),
+                metric_count=len(metrics),
+                hidden_state_count=len(hidden_state_records),
+            )
+
+            return ExperimentDetailResponse(
+                experiment=_experiment_record_to_response(experiment),
+                conversations=[_conversation_record_to_response(c) for c in conversations],
+                hidden_states=[_hidden_state_record_to_response(hs) for hs in hidden_state_records],
+                metrics=[_metric_record_to_response(m) for m in metrics],
+                summary=summary,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get experiment {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}/conversations", response_model=ConversationsListResponse)
+    async def get_experiment_conversations(
+        experiment_id: str,
+        role: str | None = None,
+    ) -> ConversationsListResponse:
+        """Get conversation messages for an experiment.
+
+        Retrieves all conversation messages associated with the experiment,
+        optionally filtered by role.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+            role: Optional filter for specific role (user, assistant, system).
+
+        Returns:
+            ConversationsListResponse with conversation messages.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Get conversations using query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                conversations = query.get_conversations(experiment_id, role=role)
+            finally:
+                query.close()
+
+            return ConversationsListResponse(
+                experiment_id=experiment_id,
+                conversations=[_conversation_record_to_response(c) for c in conversations],
+                total=len(conversations),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get conversations for {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}/hidden_states", response_model=HiddenStatesListResponse)
+    async def get_experiment_hidden_states(
+        experiment_id: str,
+        layer: int | None = None,
+    ) -> HiddenStatesListResponse:
+        """Get hidden state records for an experiment.
+
+        Retrieves hidden state metadata for the experiment. The actual tensor
+        data can be loaded separately using the file paths returned.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+            layer: Optional filter for specific layer index.
+
+        Returns:
+            HiddenStatesListResponse with hidden state records and layer info.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Get hidden states using query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                hidden_states = query.get_hidden_states(experiment_id, layer=layer)
+                available_layers = query.get_hidden_state_layers(experiment_id)
+            finally:
+                query.close()
+
+            return HiddenStatesListResponse(
+                experiment_id=experiment_id,
+                hidden_states=[_hidden_state_record_to_response(hs) for hs in hidden_states],
+                layers=available_layers,
+                total=len(hidden_states),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get hidden states for {experiment_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/experiments/{experiment_id}/metrics")
+    async def get_experiment_metrics(
+        experiment_id: str,
+        metric_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Get metrics for an experiment.
+
+        Retrieves all metrics recorded for the experiment, optionally
+        filtered by metric name.
+
+        Parameters:
+            experiment_id: The unique identifier of the experiment.
+            metric_name: Optional filter for specific metric type.
+
+        Returns:
+            Dict with experiment_id, metrics list, and metric names.
+
+        Raises:
+            HTTPException: 404 if experiment not found, 503 if persistence not enabled.
+        """
+        if persistence is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Persistence is not enabled. Set persistence.enabled=true in config.",
+            )
+
+        try:
+            # Verify experiment exists
+            experiment = persistence.get_experiment(experiment_id)
+            if experiment is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Get metrics using query interface
+            query = ExperimentQuery(persistence.db._db_path)
+            try:
+                metrics = query.get_metrics(experiment_id, metric_name=metric_name)
+                metric_names = query.get_metric_names(experiment_id)
+            finally:
+                query.close()
+
+            return {
+                "experiment_id": experiment_id,
+                "metrics": [_metric_record_to_response(m) for m in metrics],
+                "metric_names": metric_names,
+                "total": len(metrics),
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to get metrics for {experiment_id}: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     return app

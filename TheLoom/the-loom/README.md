@@ -803,7 +803,7 @@ curl -X POST http://localhost:8080/generate \
 D_eff measures how many dimensions are actively used in a hidden state representation. It's computed from the singular value distribution of the hidden state matrix.
 
 **Formula:**
-```
+```text
 D_eff = exp(H) where H = -Σ(p_i × log(p_i))
 p_i = σ_i² / Σ(σ_j²)  (normalized squared singular values)
 ```

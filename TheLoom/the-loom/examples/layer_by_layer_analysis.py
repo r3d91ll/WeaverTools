@@ -135,24 +135,14 @@ def analyze_layer_hidden_states(
         Dictionary mapping layer index to analysis results
     """
     # Request hidden states for specified layers
+    # API accepts "all" string directly, no need for double-request
     result = client.generate(
         model=model,
         prompt=prompt,
         max_tokens=20,  # Short generation for analysis
         return_hidden_states=True,
-        hidden_state_layers=layers if isinstance(layers, list) else None,
+        hidden_state_layers=layers,  # API accepts "all" string or list[int]
     )
-
-    # Handle "all" layers case - the API returns all if None passed
-    if layers == "all":
-        # Re-request with all layers
-        result = client.generate(
-            model=model,
-            prompt=prompt,
-            max_tokens=20,
-            return_hidden_states=True,
-            hidden_state_layers=None,  # Server returns all layers
-        )
 
     hidden_states = result.get("hidden_states", {})
     analysis_results: dict[int, dict[str, Any]] = {}
@@ -198,9 +188,9 @@ def plot_d_eff_by_layer(
     # Sort layers by index (negative to positive)
     sorted_layers = sorted(layer_results.keys())
 
-    layers = [layer_results[l]["layer"] for l in sorted_layers]
-    d_effs = [layer_results[l]["d_eff"] for l in sorted_layers]
-    hidden_sizes = [layer_results[l]["hidden_size"] for l in sorted_layers]
+    layers = [layer_results[idx]["layer"] for idx in sorted_layers]
+    d_effs = [layer_results[idx]["d_eff"] for idx in sorted_layers]
+    hidden_sizes = [layer_results[idx]["hidden_size"] for idx in sorted_layers]
 
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
@@ -263,9 +253,9 @@ def print_layer_analysis(layer_results: dict[int, dict[str, Any]]) -> None:
         )
 
     # Summary statistics
-    d_effs = [layer_results[l]["d_eff"] for l in sorted_layers]
+    d_effs = [layer_results[idx]["d_eff"] for idx in sorted_layers]
     print("-" * 70)
-    print(f"\nSummary Statistics:")
+    print("\nSummary Statistics:")
     print(f"  Mean D_eff:   {np.mean(d_effs):.2f}")
     print(f"  Std D_eff:    {np.std(d_effs):.2f}")
     print(f"  Min D_eff:    {np.min(d_effs)} (Layer {sorted_layers[np.argmin(d_effs)]})")
@@ -318,25 +308,15 @@ def main() -> None:
         print("Part 2: Full Layer Analysis (all layers)")
         print("=" * 50)
 
-        # Request all layers by not specifying hidden_state_layers
-        full_result = client.generate(
+        # analyze_layer_hidden_states will call generate() internally
+        full_results = analyze_layer_hidden_states(
+            client=client,
             model=MODEL_ID,
             prompt=PROMPT,
-            max_tokens=20,
-            return_hidden_states=True,
-            # When hidden_state_layers is not specified, server returns all
+            layers="all",
         )
 
-        all_hidden_states = full_result.get("hidden_states", {})
-
-        if all_hidden_states:
-            full_results = analyze_layer_hidden_states(
-                client=client,
-                model=MODEL_ID,
-                prompt=PROMPT,
-                layers=list(int(k) for k in all_hidden_states.keys()),
-            )
-
+        if full_results:
             print_layer_analysis(full_results)
 
             # Plot D_eff across all layers

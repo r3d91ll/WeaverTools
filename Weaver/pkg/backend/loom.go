@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -414,12 +415,13 @@ func (l *Loom) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 					if result.Metadata == nil {
 						result.Metadata = make(map[string]any)
 					}
-					if _, ok := result.Metadata["layer_d_eff"]; !ok {
-						result.Metadata["layer_d_eff"] = make(map[string]float64)
+					// Safe type assertion pattern - recreate map if type doesn't match
+					deffMap, ok := result.Metadata["layer_d_eff"].(map[string]float64)
+					if !ok {
+						deffMap = make(map[string]float64)
+						result.Metadata["layer_d_eff"] = deffMap
 					}
-					if deffMap, ok := result.Metadata["layer_d_eff"].(map[string]float64); ok {
-						deffMap[layerKey] = layerState.DEff
-					}
+					deffMap[layerKey] = layerState.DEff
 				}
 			}
 		}
@@ -625,6 +627,8 @@ func CompareLayerStates(resp1, resp2 *ChatResponse) *LayerComparisonResult {
 			result.Layers = append(result.Layers, layer)
 		}
 	}
+	// Sort layers for deterministic ordering (map iteration order is not guaranteed)
+	sort.Ints(result.Layers)
 
 	// Compute similarity for each common layer
 	deff1 := GetLayerDEff(resp1)

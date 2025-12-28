@@ -397,6 +397,9 @@ def compute_layer_trajectory(
             trend = "increasing"
         elif monotonicity < -0.5:
             trend = "decreasing"
+        elif mean_d_eff == 0:
+            # Handle zero-mean case: use absolute threshold
+            trend = "stable" if std_d_eff < 1e-8 else "variable"
         elif std_d_eff < 0.1 * mean_d_eff:
             trend = "stable"
         else:
@@ -685,7 +688,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     trajectory_a = compute_layer_trajectory(test_layers_a)
-    print(f"\nModel A Trajectory:")
+    print("\nModel A Trajectory:")
     print(f"  Layer indices: {trajectory_a.layer_indices}")
     print(f"  D_eff values: {trajectory_a.d_eff_values}")
     print(f"  Trend: {trajectory_a.trend}")
@@ -694,7 +697,7 @@ if __name__ == "__main__":
     print(f"  Max D_eff: {trajectory_a.max_d_eff} at layer {trajectory_a.max_layer}")
 
     trajectory_b = compute_layer_trajectory(test_layers_b)
-    print(f"\nModel B Trajectory:")
+    print("\nModel B Trajectory:")
     print(f"  Trend: {trajectory_b.trend}")
     print(f"  Monotonicity: {trajectory_b.monotonicity:.4f}")
 
@@ -703,7 +706,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     comparison = compare_layer_deff(test_layers_a, test_layers_b)
-    print(f"\nComparison Results:")
+    print("\nComparison Results:")
     print(f"  Common layers: {comparison.common_layers}")
     print(f"  Mean diff (A - B): {comparison.mean_diff:.2f}")
     print(f"  Abs mean diff: {comparison.abs_mean_diff:.2f}")
@@ -728,7 +731,7 @@ if __name__ == "__main__":
     }
 
     bottlenecks = find_bottleneck_layers(bottleneck_test, threshold=0.20)
-    print(f"\nBottleneck Analysis:")
+    print("\nBottleneck Analysis:")
     print(f"  Input D_eff: {bottleneck_test}")
     print(f"  Bottleneck layers: {bottlenecks.bottleneck_layers}")
     print(f"  Drop magnitudes: {bottlenecks.drop_magnitudes}")
@@ -737,7 +740,7 @@ if __name__ == "__main__":
 
     # Test with pre-computed D_eff from trajectory
     bottlenecks_a = find_bottleneck_layers(trajectory_a.trajectory)
-    print(f"\nModel A Bottlenecks:")
+    print("\nModel A Bottlenecks:")
     print(f"  Has bottlenecks: {bottlenecks_a.has_bottlenecks}")
     print(f"  Bottleneck layers: {bottlenecks_a.bottleneck_layers}")
     print(f"  Severity: {bottlenecks_a.severity}")

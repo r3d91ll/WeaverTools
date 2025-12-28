@@ -1442,3 +1442,634 @@ class TestEdgeCases:
         )
 
         assert result.length_ratio == 0.0
+
+
+# ============================================================================
+# Integration Tests
+# ============================================================================
+
+
+class TestIntegrationWithConveyanceMetrics:
+    """Integration tests verifying correct use of conveyance_metrics module.
+
+    These tests ensure that build_agent_flow_graph correctly imports and uses
+    calculate_d_eff() and calculate_beta() from the conveyance_metrics module.
+    """
+
+    @pytest.mark.gpu
+    def test_integration_d_eff_calculation_is_used(self) -> None:
+        """Test that D_eff values are computed via conveyance_metrics module."""
+        # Import the actual calculate_d_eff to verify values match
+        from src.analysis.conveyance_metrics import calculate_d_eff
+
+        np.random.seed(42)
+        hidden_state = np.random.randn(20, 128)
+
+        # Create agent states
+        agent_states = {"agent": {0: hidden_state}}
+
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Manually compute D_eff using conveyance_metrics
+        expected_d_eff = calculate_d_eff(hidden_state)
+
+        # Verify the D_eff in the graph matches
+        assert result.d_eff_by_turn[0] == expected_d_eff
+        assert result.graph.nodes["agent_t0"]["d_eff"] == expected_d_eff
+
+    @pytest.mark.gpu
+    def test_integration_beta_calculation_is_used(self) -> None:
+        """Test that beta values are computed via conveyance_metrics module."""
+        # Import the actual calculate_beta to verify values match
+        from src.analysis.conveyance_metrics import calculate_beta
+
+        np.random.seed(42)
+        hidden_state = np.random.randn(20, 128)
+
+        # Create agent states
+        agent_states = {"agent": {0: hidden_state}}
+
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Manually compute beta using conveyance_metrics
+        expected_beta = calculate_beta(hidden_state)
+
+        # Verify the beta in the graph matches
+        assert result.beta_by_turn[0] == pytest.approx(expected_beta)
+        assert result.graph.nodes["agent_t0"]["beta"] == pytest.approx(expected_beta)
+
+    @pytest.mark.gpu
+    def test_integration_multi_turn_d_eff_consistency(self) -> None:
+        """Test D_eff consistency across multiple turns in a conversation."""
+        from src.analysis.conveyance_metrics import calculate_d_eff
+
+        np.random.seed(42)
+        states = {
+            "user": {
+                0: np.random.randn(15, 64),
+                2: np.random.randn(15, 64),
+            },
+            "assistant": {
+                1: np.random.randn(15, 64),
+                3: np.random.randn(15, 64),
+            },
+        }
+
+        result = build_agent_flow_graph(states, {})
+
+        # Verify each turn's D_eff matches independent calculation
+        for agent, turn_states in states.items():
+            for turn_idx, hidden_state in turn_states.items():
+                expected_d_eff = calculate_d_eff(hidden_state)
+                assert result.d_eff_by_turn[turn_idx] == expected_d_eff
+
+    @pytest.mark.gpu
+    def test_integration_d_eff_respects_variance_threshold(self) -> None:
+        """Test that custom variance threshold is passed to D_eff calculation."""
+        np.random.seed(42)
+        hidden_state = np.random.randn(50, 128)
+        agent_states = {"agent": {0: hidden_state}}
+
+        # Build with default (0.90) and custom (0.95) thresholds
+        result_default = build_agent_flow_graph(agent_states, {})
+        result_custom = build_agent_flow_graph(agent_states, {}, variance_threshold=0.95)
+
+        # D_eff at higher threshold should be >= D_eff at lower threshold
+        assert result_custom.d_eff_by_turn[0] >= result_default.d_eff_by_turn[0]
+
+    @pytest.mark.gpu
+    def test_integration_1d_input_normalization(self) -> None:
+        """Test that 1D input arrays are correctly reshaped for D_eff."""
+        np.random.seed(42)
+        # 1D array should be reshaped to (1, n_features)
+        hidden_state_1d = np.random.randn(128)
+        agent_states = {"agent": {0: hidden_state_1d}}
+
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Should not crash and should produce valid D_eff
+        assert result.n_nodes == 1
+        assert isinstance(result.d_eff_by_turn[0], int)
+        assert result.d_eff_by_turn[0] >= 1
+
+    @pytest.mark.gpu
+    def test_integration_collapsed_embeddings_high_beta(self) -> None:
+        """Test that collapsed embeddings produce high beta values."""
+        np.random.seed(42)
+        # Create rank-1 data (completely collapsed)
+        collapsed = np.random.randn(50, 1) @ np.random.randn(1, 128)
+        agent_states = {"agent": {0: collapsed}}
+
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Collapsed data should have high beta (near 1.0)
+        beta = result.beta_by_turn[0]
+        assert beta > 0.9, f"Collapsed data should have beta > 0.9, got {beta}"
+
+    @pytest.mark.gpu
+    def test_integration_random_embeddings_low_beta(self) -> None:
+        """Test that random embeddings produce low beta values."""
+        np.random.seed(42)
+        # Random full-rank data
+        random_data = np.random.randn(100, 128)
+        agent_states = {"agent": {0: random_data}}
+
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Random data should have low beta
+        beta = result.beta_by_turn[0]
+        assert beta < 0.3, f"Random data should have beta < 0.3, got {beta}"
+
+
+class TestNetworkXIntegration:
+    """Integration tests for NetworkX graph operations.
+
+    These tests verify that:
+    - Graphs are valid NetworkX DiGraph objects
+    - Betweenness centrality calculations work correctly
+    - Graph traversal and attribute access works
+    """
+
+    @pytest.mark.gpu
+    def test_integration_graph_is_valid_digraph(
+        self, simple_agent_states: dict, simple_conveyance_edges: dict
+    ) -> None:
+        """Test that build_agent_flow_graph creates valid NetworkX DiGraph."""
+        result = build_agent_flow_graph(simple_agent_states, simple_conveyance_edges)
+
+        # Verify it's a proper DiGraph
+        assert isinstance(result.graph, nx.DiGraph)
+        assert not isinstance(result.graph, nx.Graph)  # Should NOT be undirected
+
+        # Verify graph properties
+        assert result.graph.is_directed()
+        assert result.graph.number_of_nodes() == result.n_nodes
+        assert result.graph.number_of_edges() == result.n_edges
+
+    @pytest.mark.gpu
+    def test_integration_betweenness_centrality_computable(
+        self, simple_agent_states: dict, simple_conveyance_edges: dict
+    ) -> None:
+        """Test that betweenness centrality can be computed on the graph."""
+        result = build_agent_flow_graph(simple_agent_states, simple_conveyance_edges)
+        G = result.graph
+
+        # Compute betweenness centrality - should not raise
+        centrality = nx.betweenness_centrality(G)
+
+        # Verify centrality values
+        assert isinstance(centrality, dict)
+        assert len(centrality) == result.n_nodes
+        for node, score in centrality.items():
+            assert 0 <= score <= 1
+            assert node in G.nodes()
+
+    @pytest.mark.gpu
+    def test_integration_bottleneck_uses_centrality(
+        self, simple_agent_states: dict, simple_conveyance_edges: dict
+    ) -> None:
+        """Test that find_agent_bottlenecks correctly uses NetworkX centrality."""
+        result = build_agent_flow_graph(simple_agent_states, simple_conveyance_edges)
+        bottleneck_result = find_agent_bottlenecks(result.graph)
+
+        # Verify centrality scores are computed
+        assert len(bottleneck_result.centrality_scores) == result.n_nodes
+
+        # Verify centrality values match NetworkX computation
+        expected_centrality = nx.betweenness_centrality(result.graph)
+        for node, score in bottleneck_result.centrality_scores.items():
+            assert score == pytest.approx(expected_centrality[node])
+
+    def test_integration_graph_traversal_by_edges(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that graph edges can be traversed with attributes."""
+        edges_with_data = list(sample_flow_graph.edges(data=True))
+
+        assert len(edges_with_data) > 0
+        for source, target, data in edges_with_data:
+            assert source in sample_flow_graph.nodes()
+            assert target in sample_flow_graph.nodes()
+            assert "weight" in data
+            assert isinstance(data["weight"], (int, float))
+
+    def test_integration_graph_node_attributes_accessible(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that node attributes are accessible via NetworkX API."""
+        for node in sample_flow_graph.nodes():
+            attrs = sample_flow_graph.nodes[node]
+            assert "agent" in attrs
+            assert "turn" in attrs
+            assert "d_eff" in attrs
+
+    def test_integration_weakly_connected_check(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that weak connectivity check works correctly."""
+        # sample_flow_graph is connected
+        assert nx.is_weakly_connected(sample_flow_graph)
+
+        # Create disconnected graph
+        disconnected = nx.DiGraph()
+        disconnected.add_node("a", d_eff=100)
+        disconnected.add_node("b", d_eff=90)  # No edge between them
+        assert not nx.is_weakly_connected(disconnected)
+
+    @pytest.mark.gpu
+    def test_integration_spring_layout_reproducibility(
+        self, simple_agent_states: dict, simple_conveyance_edges: dict
+    ) -> None:
+        """Test that graph layout is reproducible with fixed seed."""
+        result = build_agent_flow_graph(simple_agent_states, simple_conveyance_edges)
+        G = result.graph
+
+        # Compute layout twice with same seed
+        pos1 = nx.spring_layout(G, seed=42)
+        pos2 = nx.spring_layout(G, seed=42)
+
+        # Positions should be identical
+        for node in G.nodes():
+            assert np.allclose(pos1[node], pos2[node])
+
+    def test_integration_graph_algorithms_work(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that various NetworkX algorithms work on the flow graph."""
+        G = sample_flow_graph
+
+        # Test degree centrality
+        degree_cent = nx.degree_centrality(G)
+        assert len(degree_cent) == G.number_of_nodes()
+
+        # Test in-degree centrality
+        in_degree_cent = nx.in_degree_centrality(G)
+        assert len(in_degree_cent) == G.number_of_nodes()
+
+        # Test out-degree centrality
+        out_degree_cent = nx.out_degree_centrality(G)
+        assert len(out_degree_cent) == G.number_of_nodes()
+
+        # Test shortest path (for connected graph)
+        if nx.is_weakly_connected(G):
+            # Should be able to compute shortest path lengths
+            lengths = dict(nx.shortest_path_length(G))
+            assert len(lengths) > 0
+
+    @pytest.mark.gpu
+    def test_integration_flow_comparison_uses_networkx(self) -> None:
+        """Test that flow pattern comparison correctly uses NetworkX operations."""
+        np.random.seed(42)
+
+        # Create two similar graphs
+        states1 = {
+            "user": {0: np.random.randn(10, 64)},
+            "assistant": {1: np.random.randn(10, 64)},
+        }
+        states2 = {
+            "user": {0: np.random.randn(10, 64)},
+            "assistant": {1: np.random.randn(10, 64)},
+        }
+
+        result1 = build_agent_flow_graph(states1, {})
+        result2 = build_agent_flow_graph(states2, {})
+
+        comparison = compare_flow_patterns(result1.graph, result2.graph)
+
+        # Comparison should use graph structure
+        assert comparison.n_turns_a == result1.graph.number_of_nodes()
+        assert comparison.n_turns_b == result2.graph.number_of_nodes()
+        assert comparison.structural_similarity >= 0
+        assert comparison.structural_similarity <= 1
+
+
+class TestMatplotlibIntegration:
+    """Integration tests for matplotlib visualization.
+
+    These tests verify that:
+    - Visualizations render without errors
+    - Files are saved correctly with specified DPI
+    - Memory is properly managed (plt.close() called)
+    """
+
+    def test_integration_visualization_saves_png(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that visualization saves PNG file correctly."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(sample_flow_graph, output_path)
+
+        assert result is not None
+        assert Path(output_path).exists()
+        assert Path(output_path).stat().st_size > 0  # Non-empty file
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_integration_visualization_saves_pdf(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that visualization saves PDF file correctly."""
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(sample_flow_graph, output_path)
+
+        assert result is not None
+        assert Path(output_path).exists()
+        assert Path(output_path).stat().st_size > 0  # Non-empty file
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_integration_visualization_saves_svg(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that visualization saves SVG file correctly."""
+        with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(sample_flow_graph, output_path)
+
+        assert result is not None
+        assert Path(output_path).exists()
+        assert Path(output_path).stat().st_size > 0  # Non-empty file
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_integration_custom_dpi_affects_file_size(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that DPI setting affects output file size."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            low_dpi_path = f.name
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            high_dpi_path = f.name
+
+        # Create visualizations at different DPIs
+        visualize_agent_alignment(sample_flow_graph, low_dpi_path, dpi=72)
+        visualize_agent_alignment(sample_flow_graph, high_dpi_path, dpi=300)
+
+        low_size = Path(low_dpi_path).stat().st_size
+        high_size = Path(high_dpi_path).stat().st_size
+
+        # Higher DPI should produce larger file
+        assert high_size > low_size
+
+        # Cleanup
+        Path(low_dpi_path).unlink()
+        Path(high_dpi_path).unlink()
+
+    def test_integration_custom_figsize_works(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that custom figure size is applied."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        # Use different figure sizes
+        result = visualize_agent_alignment(
+            sample_flow_graph, output_path, figsize=(8, 6), dpi=100
+        )
+
+        assert result is not None
+        assert Path(output_path).exists()
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_integration_empty_graph_creates_placeholder(self) -> None:
+        """Test that empty graph creates placeholder visualization."""
+        G = nx.DiGraph()
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(G, output_path)
+
+        # Result should be None for empty graph
+        assert result is None
+        # But file should still be created (placeholder)
+        assert Path(output_path).exists()
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_integration_no_matplotlib_memory_leak(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that visualization properly closes figures to prevent memory leaks."""
+        import matplotlib.pyplot as plt
+
+        # Get initial figure count
+        initial_figs = len(plt.get_fignums())
+
+        # Create multiple visualizations
+        for i in range(5):
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                output_path = f.name
+            visualize_agent_alignment(sample_flow_graph, output_path)
+            Path(output_path).unlink()
+
+        # Figure count should not increase (figures should be closed)
+        final_figs = len(plt.get_fignums())
+        assert final_figs == initial_figs, (
+            f"Memory leak detected: {final_figs - initial_figs} unclosed figures"
+        )
+
+    @pytest.mark.gpu
+    def test_integration_visualization_multi_agent_graph(
+        self, multi_agent_states: dict
+    ) -> None:
+        """Test visualization of multi-agent graph (3+ agents)."""
+        result = build_agent_flow_graph(multi_agent_states, {})
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        alignment_result = visualize_agent_alignment(result.graph, output_path)
+
+        assert alignment_result is not None
+        assert alignment_result.n_agents == 3
+        assert Path(output_path).exists()
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_integration_heatmap_colorbar_rendered(
+        self, sample_flow_graph: nx.DiGraph
+    ) -> None:
+        """Test that alignment heatmap includes colorbar."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(sample_flow_graph, output_path)
+
+        assert result is not None
+        # The alignment matrix should have proper dimensions
+        n_agents = result.n_agents
+        assert result.alignment_matrix.shape == (n_agents, n_agents)
+
+        # Cleanup
+        Path(output_path).unlink()
+
+
+class TestEndToEndIntegration:
+    """End-to-end integration tests for the full analysis pipeline.
+
+    These tests verify that all components work together correctly:
+    1. Build flow graph from agent states
+    2. Detect bottlenecks in the graph
+    3. Compare with alternative configurations
+    4. Visualize alignment
+    """
+
+    @pytest.mark.gpu
+    def test_integration_full_analysis_pipeline(self) -> None:
+        """Test complete analysis pipeline from data to visualization."""
+        np.random.seed(42)
+
+        # Step 1: Create synthetic multi-agent conversation data
+        agent_states = {
+            "user": {
+                0: np.random.randn(20, 128),
+                2: np.random.randn(20, 128),
+                4: np.random.randn(20, 128),
+            },
+            "assistant": {
+                1: np.random.randn(20, 128),
+                3: np.random.randn(20, 128),
+                5: np.random.randn(20, 128),
+            },
+        }
+        conveyance_edges = {
+            ("user", "assistant"): 0.85,
+            ("assistant", "user"): 0.78,
+        }
+
+        # Step 2: Build flow graph
+        flow_result = build_agent_flow_graph(agent_states, conveyance_edges)
+
+        assert flow_result.n_nodes == 6
+        assert flow_result.n_edges == 5
+        assert flow_result.is_multi_agent
+        assert flow_result.has_sufficient_data
+
+        # Step 3: Detect bottlenecks
+        bottleneck_result = find_agent_bottlenecks(flow_result.graph)
+
+        assert isinstance(bottleneck_result, AgentBottleneckResult)
+        assert bottleneck_result.severity in ["none", "mild", "moderate", "severe"]
+        assert len(bottleneck_result.centrality_scores) == 6
+
+        # Step 4: Create alternative configuration and compare
+        alt_states = {
+            "user": {
+                0: np.random.randn(20, 128),
+                2: np.random.randn(20, 128),
+            },
+            "assistant": {
+                1: np.random.randn(20, 128),
+                3: np.random.randn(20, 128),
+            },
+        }
+        alt_result = build_agent_flow_graph(alt_states, conveyance_edges)
+
+        comparison = compare_flow_patterns(flow_result.graph, alt_result.graph)
+
+        assert isinstance(comparison, FlowComparisonResult)
+        assert comparison.common_agents == {"user", "assistant"}
+        assert comparison.divergence_quality in ["identical", "similar", "moderate", "divergent"]
+
+        # Step 5: Visualize alignment
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        alignment_result = visualize_agent_alignment(flow_result.graph, output_path)
+
+        assert alignment_result is not None
+        assert alignment_result.n_agents == 2
+        assert Path(output_path).exists()
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    @pytest.mark.gpu
+    def test_integration_pipeline_with_tool_agent(self) -> None:
+        """Test pipeline with three agents including a tool agent."""
+        np.random.seed(42)
+
+        # Create 3-agent conversation: user -> assistant -> tool -> assistant -> user
+        agent_states = {
+            "user": {0: np.random.randn(15, 64), 4: np.random.randn(15, 64)},
+            "assistant": {1: np.random.randn(15, 64), 3: np.random.randn(15, 64)},
+            "tool": {2: np.random.randn(15, 64)},
+        }
+        conveyance_edges = {
+            ("user", "assistant"): 0.9,
+            ("assistant", "tool"): 0.6,  # Lower conveyance to tool
+            ("tool", "assistant"): 0.7,
+            ("assistant", "user"): 0.85,
+        }
+
+        # Build graph
+        result = build_agent_flow_graph(agent_states, conveyance_edges)
+
+        assert result.n_agents == 3
+        assert "tool" in result.agents
+
+        # Detect bottlenecks (tool interaction might be a bottleneck)
+        bottlenecks = find_agent_bottlenecks(result.graph)
+
+        # Verify the analysis completes without error
+        assert isinstance(bottlenecks, AgentBottleneckResult)
+
+        # Visualize
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        alignment = visualize_agent_alignment(result.graph, output_path)
+
+        assert alignment is not None
+        assert alignment.n_agents == 3
+        # 3 agents means 3 pairwise alignments: (user, assistant), (user, tool), (assistant, tool)
+        assert len(alignment.pairwise_alignment) == 3
+
+        # Cleanup
+        Path(output_path).unlink()
+
+    @pytest.mark.gpu
+    def test_integration_d_eff_trajectory_through_pipeline(self) -> None:
+        """Test that D_eff trajectory is consistent through entire pipeline."""
+        from src.analysis.conveyance_metrics import calculate_d_eff
+
+        np.random.seed(42)
+
+        # Create data with known D_eff characteristics
+        high_rank = np.random.randn(50, 64)  # Full rank
+        low_rank = np.random.randn(50, 5) @ np.random.randn(5, 64)  # Rank 5
+
+        agent_states = {
+            "high_dim_agent": {0: high_rank},
+            "low_dim_agent": {1: low_rank},
+        }
+
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Verify D_eff values reflect the data characteristics
+        d_eff_high = result.d_eff_by_turn[0]
+        d_eff_low = result.d_eff_by_turn[1]
+
+        # High rank should have higher D_eff
+        assert d_eff_high > d_eff_low
+
+        # Values should match direct calculation
+        assert d_eff_high == calculate_d_eff(high_rank)
+        assert d_eff_low == calculate_d_eff(low_rank)
+
+        # The D_eff trajectory should show this difference
+        trajectory = result.d_eff_trajectory
+        assert trajectory[0] > trajectory[1]

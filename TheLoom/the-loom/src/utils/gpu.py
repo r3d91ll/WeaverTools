@@ -21,6 +21,7 @@ class GPUInfo:
     total_memory_gb: float
     free_memory_gb: float
     used_memory_gb: float
+    peak_memory_gb: float  # Peak memory allocated by PyTorch tensors
     utilization_percent: float | None  # Requires pynvml for accurate reading
     compute_capability: tuple[int, int]
 
@@ -242,12 +243,12 @@ class GPUManager:
     def _get_single_gpu_info(self, device_idx: int) -> GPUInfo:
         """
         Return detailed information about a single GPU device identified by index.
-        
+
         Parameters:
             device_idx (int): Index of the CUDA device to query.
-        
+
         Returns:
-            GPUInfo: Information for the specified GPU including index, name, total_memory_gb, free_memory_gb, used_memory_gb, utilization_percent (`None` if unavailable), and compute_capability as a (major, minor) tuple.
+            GPUInfo: Information for the specified GPU including index, name, total_memory_gb, free_memory_gb, used_memory_gb, peak_memory_gb, utilization_percent (`None` if unavailable), and compute_capability as a (major, minor) tuple.
         """
         props = torch.cuda.get_device_properties(device_idx)
 
@@ -258,12 +259,17 @@ class GPUManager:
         free_memory_gb = free_memory / (1024**3)
         used_memory_gb = total_memory - free_memory_gb
 
+        # Get peak memory allocated by PyTorch tensors
+        peak_memory = torch.cuda.max_memory_allocated(device_idx)
+        peak_memory_gb = peak_memory / (1024**3)
+
         return GPUInfo(
             index=device_idx,
             name=props.name,
             total_memory_gb=total_memory,
             free_memory_gb=free_memory_gb,
             used_memory_gb=used_memory_gb,
+            peak_memory_gb=peak_memory_gb,
             utilization_percent=None,  # Would need pynvml
             compute_capability=(props.major, props.minor),
         )
@@ -377,6 +383,7 @@ class GPUManager:
                     - total_memory_gb (float): Total memory in gigabytes (rounded to 2 decimals).
                     - free_memory_gb (float): Free memory in gigabytes (rounded to 2 decimals).
                     - used_memory_gb (float): Used memory in gigabytes (rounded to 2 decimals).
+                    - peak_memory_gb (float): Peak memory allocated in gigabytes (rounded to 2 decimals).
                     - compute_capability (str): Compute capability formatted as "major.minor".
         """
         # Acquire lock for consistent read of runtime-configurable values
@@ -403,6 +410,7 @@ class GPUManager:
                     "total_memory_gb": round(gpu.total_memory_gb, 2),
                     "free_memory_gb": round(gpu.free_memory_gb, 2),
                     "used_memory_gb": round(gpu.used_memory_gb, 2),
+                    "peak_memory_gb": round(gpu.peak_memory_gb, 2),
                     "compute_capability": f"{gpu.compute_capability[0]}.{gpu.compute_capability[1]}",
                 }
                 for gpu in gpu_list

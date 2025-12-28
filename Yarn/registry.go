@@ -4,6 +4,7 @@ package yarn
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -244,6 +245,17 @@ func (r *SessionRegistry) Count() int {
 // -----------------------------------------------------------------------------
 // Helper Functions
 // -----------------------------------------------------------------------------
+
+// listSessionNamesLocked returns a sorted list of registered session names.
+// Must be called while holding at least a read lock on r.mu.
+func (r *SessionRegistry) listSessionNamesLocked() []string {
+	names := make([]string, 0, len(r.sessions))
+	for name := range r.sessions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
 
 // suggestSimilarSessions returns suggestions for similar session names.
 // It checks for case-insensitive matches and substring/partial matches.

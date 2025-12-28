@@ -4,6 +4,7 @@ package export
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1140,5 +1141,688 @@ func TestCSVExport_LargeDataset(t *testing.T) {
 	// Should have header + 1000 data rows
 	if len(records) != 1001 {
 		t.Errorf("expected 1001 records, got %d", len(records))
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Metadata Export Tests
+// -----------------------------------------------------------------------------
+
+func TestMetadataExport_ColumnTypes(t *testing.T) {
+	// Test that ColumnType constants are defined correctly
+	tests := []struct {
+		ct   ColumnType
+		want string
+	}{
+		{TypeString, "string"},
+		{TypeInteger, "integer"},
+		{TypeFloat, "float"},
+		{TypeBoolean, "boolean"},
+		{TypeDatetime, "datetime"},
+		{TypeCategorical, "categorical"},
+	}
+
+	for _, tt := range tests {
+		if string(tt.ct) != tt.want {
+			t.Errorf("ColumnType %v: expected %q, got %q", tt.ct, tt.want, string(tt.ct))
+		}
+	}
+}
+
+func TestMetadataExport_GetColumnMetadata(t *testing.T) {
+	columns := GetColumnMetadata()
+
+	// Should have 16 core columns
+	if len(columns) != 16 {
+		t.Errorf("expected 16 core columns, got %d", len(columns))
+	}
+
+	// Verify first column is 'id'
+	if columns[0].Name != "id" {
+		t.Errorf("first column should be 'id', got %q", columns[0].Name)
+	}
+
+	// Verify all columns have required fields
+	for i, col := range columns {
+		if col.Name == "" {
+			t.Errorf("column %d: Name is empty", i)
+		}
+		if col.Type == "" {
+			t.Errorf("column %d (%s): Type is empty", i, col.Name)
+		}
+		if col.Description == "" {
+			t.Errorf("column %d (%s): Description is empty", i, col.Name)
+		}
+		if col.RType == "" {
+			t.Errorf("column %d (%s): RType is empty", i, col.Name)
+		}
+		if col.PandasType == "" {
+			t.Errorf("column %d (%s): PandasType is empty", i, col.Name)
+		}
+	}
+}
+
+func TestMetadataExport_CoreColumnDetails(t *testing.T) {
+	columns := GetColumnMetadata()
+
+	// Create a map for easy lookup
+	colMap := make(map[string]ColumnMetadata)
+	for _, c := range columns {
+		colMap[c.Name] = c
+	}
+
+	// Test specific column details
+	tests := []struct {
+		name       string
+		wantType   ColumnType
+		wantRType  string
+		wantPandas string
+	}{
+		{"id", TypeString, "character", "object"},
+		{"timestamp", TypeDatetime, "POSIXct", "datetime64[ns]"},
+		{"turn_number", TypeInteger, "integer", "int64"},
+		{"d_eff", TypeInteger, "integer", "int64"},
+		{"beta", TypeFloat, "numeric", "float64"},
+		{"alignment", TypeFloat, "numeric", "float64"},
+		{"c_pair", TypeFloat, "numeric", "float64"},
+		{"is_unilateral", TypeBoolean, "logical", "bool"},
+		{"sender_role", TypeCategorical, "factor", "category"},
+		{"receiver_role", TypeCategorical, "factor", "category"},
+	}
+
+	for _, tt := range tests {
+		col, ok := colMap[tt.name]
+		if !ok {
+			t.Errorf("column %q not found", tt.name)
+			continue
+		}
+		if col.Type != tt.wantType {
+			t.Errorf("column %q: expected type %q, got %q", tt.name, tt.wantType, col.Type)
+		}
+		if col.RType != tt.wantRType {
+			t.Errorf("column %q: expected R type %q, got %q", tt.name, tt.wantRType, col.RType)
+		}
+		if col.PandasType != tt.wantPandas {
+			t.Errorf("column %q: expected pandas type %q, got %q", tt.name, tt.wantPandas, col.PandasType)
+		}
+	}
+}
+
+func TestMetadataExport_ValidRanges(t *testing.T) {
+	columns := GetColumnMetadata()
+
+	// Create a map for easy lookup
+	colMap := make(map[string]ColumnMetadata)
+	for _, c := range columns {
+		colMap[c.Name] = c
+	}
+
+	// Check valid ranges for numeric columns
+	tests := []struct {
+		name      string
+		wantRange string
+	}{
+		{"turn_number", "≥ 0"},
+		{"d_eff", "≥ 0"},
+		{"beta", "≥ 0"},
+		{"alignment", "[-1, 1]"},
+		{"c_pair", "[0, 1]"},
+	}
+
+	for _, tt := range tests {
+		col := colMap[tt.name]
+		if col.ValidRange != tt.wantRange {
+			t.Errorf("column %q: expected ValidRange %q, got %q", tt.name, tt.wantRange, col.ValidRange)
+		}
+	}
+}
+
+func TestMetadataExport_CategoricalValidValues(t *testing.T) {
+	columns := GetColumnMetadata()
+
+	// Create a map for easy lookup
+	colMap := make(map[string]ColumnMetadata)
+	for _, c := range columns {
+		colMap[c.Name] = c
+	}
+
+	// Check sender_role has valid values
+	senderRole := colMap["sender_role"]
+	if len(senderRole.ValidValues) != 3 {
+		t.Errorf("sender_role should have 3 valid values, got %d", len(senderRole.ValidValues))
+	}
+
+	expectedRoles := []string{"user", "assistant", "system"}
+	for i, role := range expectedRoles {
+		if senderRole.ValidValues[i] != role {
+			t.Errorf("sender_role valid value %d: expected %q, got %q", i, role, senderRole.ValidValues[i])
+		}
+	}
+
+	// Check receiver_role has valid values
+	receiverRole := colMap["receiver_role"]
+	if len(receiverRole.ValidValues) != 3 {
+		t.Errorf("receiver_role should have 3 valid values, got %d", len(receiverRole.ValidValues))
+	}
+}
+
+func TestMetadataExport_BetaStatusMetadata(t *testing.T) {
+	meta := GetBetaStatusMetadata()
+
+	if meta.Name != "beta_status" {
+		t.Errorf("expected name 'beta_status', got %q", meta.Name)
+	}
+	if meta.Type != TypeCategorical {
+		t.Errorf("expected type TypeCategorical, got %v", meta.Type)
+	}
+	if meta.RType != "factor" {
+		t.Errorf("expected R type 'factor', got %q", meta.RType)
+	}
+	if meta.PandasType != "category" {
+		t.Errorf("expected pandas type 'category', got %q", meta.PandasType)
+	}
+
+	// Should have 5 valid values
+	expectedValues := []string{"optimal", "monitor", "concerning", "critical", "unknown"}
+	if len(meta.ValidValues) != len(expectedValues) {
+		t.Errorf("expected %d valid values, got %d", len(expectedValues), len(meta.ValidValues))
+	}
+	for i, v := range expectedValues {
+		if meta.ValidValues[i] != v {
+			t.Errorf("valid value %d: expected %q, got %q", i, v, meta.ValidValues[i])
+		}
+	}
+}
+
+func TestMetadataExport_MessageContentMetadata(t *testing.T) {
+	meta := GetMessageContentMetadata()
+
+	if meta.Name != "message_content" {
+		t.Errorf("expected name 'message_content', got %q", meta.Name)
+	}
+	if meta.Type != TypeString {
+		t.Errorf("expected type TypeString, got %v", meta.Type)
+	}
+	if meta.RType != "character" {
+		t.Errorf("expected R type 'character', got %q", meta.RType)
+	}
+	if meta.PandasType != "object" {
+		t.Errorf("expected pandas type 'object', got %q", meta.PandasType)
+	}
+}
+
+func TestMetadataExport_TokenCountMetadata(t *testing.T) {
+	meta := GetTokenCountMetadata()
+
+	if meta.Name != "token_count" {
+		t.Errorf("expected name 'token_count', got %q", meta.Name)
+	}
+	if meta.Type != TypeInteger {
+		t.Errorf("expected type TypeInteger, got %v", meta.Type)
+	}
+	if meta.Unit != "tokens" {
+		t.Errorf("expected unit 'tokens', got %q", meta.Unit)
+	}
+	if meta.ValidRange != "≥ 0" {
+		t.Errorf("expected valid range '≥ 0', got %q", meta.ValidRange)
+	}
+}
+
+func TestMetadataExport_GenerateDataDictionaryMetadata_Default(t *testing.T) {
+	metadata := GenerateDataDictionaryMetadata(nil)
+
+	if metadata == nil {
+		t.Fatal("GenerateDataDictionaryMetadata() returned nil")
+	}
+
+	if metadata.Version != "1.0" {
+		t.Errorf("expected version '1.0', got %q", metadata.Version)
+	}
+
+	if metadata.GeneratedAt.IsZero() {
+		t.Error("GeneratedAt should not be zero")
+	}
+
+	if metadata.Description == "" {
+		t.Error("Description should not be empty")
+	}
+
+	// Default config includes beta_status but not message_content or token_count
+	// So should have 16 + 1 = 17 columns
+	if len(metadata.Columns) != 17 {
+		t.Errorf("expected 17 columns with default config, got %d", len(metadata.Columns))
+	}
+
+	if metadata.NAString != "NA" {
+		t.Errorf("expected NAString 'NA', got %q", metadata.NAString)
+	}
+
+	if metadata.TimestampFormat != time.RFC3339 {
+		t.Errorf("expected TimestampFormat %q, got %q", time.RFC3339, metadata.TimestampFormat)
+	}
+
+	if metadata.FloatPrecision != 6 {
+		t.Errorf("expected FloatPrecision 6, got %d", metadata.FloatPrecision)
+	}
+
+	if metadata.BooleanFormat != "TRUE/FALSE" {
+		t.Errorf("expected BooleanFormat 'TRUE/FALSE', got %q", metadata.BooleanFormat)
+	}
+
+	if len(metadata.Notes) == 0 {
+		t.Error("expected notes to be present")
+	}
+}
+
+func TestMetadataExport_GenerateDataDictionaryMetadata_AllOptionalColumns(t *testing.T) {
+	config := DefaultCSVConfig()
+	config.IncludeBetaStatus = true
+	config.IncludeMessageContent = true
+	config.IncludeTokenCount = true
+
+	metadata := GenerateDataDictionaryMetadata(config)
+
+	// Should have 16 + 3 = 19 columns
+	if len(metadata.Columns) != 19 {
+		t.Errorf("expected 19 columns with all optional columns, got %d", len(metadata.Columns))
+	}
+
+	// Verify optional columns are present
+	columnNames := make([]string, len(metadata.Columns))
+	for i, c := range metadata.Columns {
+		columnNames[i] = c.Name
+	}
+
+	optionalCols := []string{"beta_status", "message_content", "token_count"}
+	for _, name := range optionalCols {
+		found := false
+		for _, cn := range columnNames {
+			if cn == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("optional column %q not found", name)
+		}
+	}
+}
+
+func TestMetadataExport_GenerateDataDictionaryMetadata_NoOptionalColumns(t *testing.T) {
+	config := DefaultCSVConfig()
+	config.IncludeBetaStatus = false
+	config.IncludeMessageContent = false
+	config.IncludeTokenCount = false
+
+	metadata := GenerateDataDictionaryMetadata(config)
+
+	// Should have only 16 core columns
+	if len(metadata.Columns) != 16 {
+		t.Errorf("expected 16 core columns only, got %d", len(metadata.Columns))
+	}
+}
+
+func TestMetadataExport_ExportToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Should be valid JSON
+	var metadata DataDictionaryMetadata
+	if err := json.Unmarshal([]byte(result), &metadata); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	// Verify key fields are present in the output
+	mustContain := []string{
+		"version",
+		"generated_at",
+		"description",
+		"columns",
+		"na_string",
+		"timestamp_format",
+		"float_precision",
+		"boolean_format",
+	}
+
+	for _, field := range mustContain {
+		if !strings.Contains(result, field) {
+			t.Errorf("expected field %q in JSON output", field)
+		}
+	}
+}
+
+func TestMetadataExport_ExportToJSONBytes(t *testing.T) {
+	data, err := ExportMetadataToJSONBytes(nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSONBytes() failed: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Error("expected non-empty byte slice")
+	}
+
+	// Should be valid JSON
+	var metadata DataDictionaryMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	if metadata.Version != "1.0" {
+		t.Errorf("expected version '1.0', got %q", metadata.Version)
+	}
+}
+
+func TestMetadataExport_JSONFormatting(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Should be pretty-printed (indented)
+	if !strings.Contains(result, "\n  ") {
+		t.Error("JSON should be pretty-printed with indentation")
+	}
+}
+
+func TestMetadataExport_IncludesFieldTypes(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify field types are present
+	types := []string{"string", "integer", "float", "boolean", "datetime", "categorical"}
+	for _, typ := range types {
+		if !strings.Contains(result, typ) {
+			t.Errorf("expected type %q in output", typ)
+		}
+	}
+}
+
+func TestMetadataExport_IncludesDescriptions(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify descriptions are present for key columns
+	descriptions := []string{
+		"Unique identifier",
+		"ISO 8601 timestamp",
+		"Effective dimensionality",
+		"Collapse indicator",
+		"Cosine similarity",
+		"Bilateral conveyance",
+	}
+
+	for _, desc := range descriptions {
+		if !strings.Contains(result, desc) {
+			t.Errorf("expected description containing %q in output", desc)
+		}
+	}
+}
+
+func TestMetadataExport_IncludesRTypes(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify R types are present
+	rTypes := []string{"character", "POSIXct", "integer", "numeric", "logical", "factor"}
+	for _, rt := range rTypes {
+		if !strings.Contains(result, rt) {
+			t.Errorf("expected R type %q in output", rt)
+		}
+	}
+}
+
+func TestMetadataExport_IncludesPandasTypes(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify pandas types are present
+	pandasTypes := []string{"object", "datetime64[ns]", "int64", "float64", "bool", "category"}
+	for _, pt := range pandasTypes {
+		if !strings.Contains(result, pt) {
+			t.Errorf("expected pandas type %q in output", pt)
+		}
+	}
+}
+
+func TestMetadataExport_IncludesValidRanges(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify valid ranges are present
+	ranges := []string{"≥ 0", "[-1, 1]", "[0, 1]"}
+	for _, rng := range ranges {
+		if !strings.Contains(result, rng) {
+			t.Errorf("expected valid range %q in output", rng)
+		}
+	}
+}
+
+func TestMetadataExport_IncludesValidValues(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify valid values are present for categorical columns
+	values := []string{"user", "assistant", "system", "optimal", "monitor", "concerning", "critical", "unknown"}
+	for _, val := range values {
+		if !strings.Contains(result, val) {
+			t.Errorf("expected valid value %q in output", val)
+		}
+	}
+}
+
+func TestMetadataExport_IncludesNotes(t *testing.T) {
+	var buf bytes.Buffer
+	err := ExportMetadataToJSON(&buf, nil)
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	result := buf.String()
+
+	// Verify notes are present
+	notes := []string{
+		"R users",
+		"Python users",
+		"pandas.read_csv",
+		"Beta status thresholds",
+	}
+
+	for _, note := range notes {
+		if !strings.Contains(result, note) {
+			t.Errorf("expected note containing %q in output", note)
+		}
+	}
+}
+
+func TestMetadataExport_WriteToFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "metadata.json")
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	err = ExportMetadataToJSON(f, nil)
+	f.Close()
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	// Read back and verify
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	// Should be valid JSON
+	var metadata DataDictionaryMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("file content is not valid JSON: %v", err)
+	}
+
+	if len(metadata.Columns) == 0 {
+		t.Error("expected columns in metadata")
+	}
+}
+
+// TestMetadataExport_WriteTempFileForValidation writes a metadata.json file to /tmp
+// for external validation. This is used by the verification command.
+func TestMetadataExport_WriteTempFileForValidation(t *testing.T) {
+	filePath := "/tmp/metadata.json"
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+
+	err = ExportMetadataToJSON(f, nil)
+	f.Close()
+	if err != nil {
+		t.Fatalf("ExportMetadataToJSON() failed: %v", err)
+	}
+
+	// Verify file was created and has content
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("expected non-empty file")
+	}
+
+	// Read and verify basic structure
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	var metadata DataDictionaryMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("file content is not valid JSON: %v", err)
+	}
+
+	// Verify key properties
+	if metadata.Version != "1.0" {
+		t.Errorf("expected version '1.0', got %q", metadata.Version)
+	}
+
+	// Should include field types and descriptions
+	hasTypes := false
+	hasDescriptions := false
+	for _, col := range metadata.Columns {
+		if col.Type != "" {
+			hasTypes = true
+		}
+		if col.Description != "" {
+			hasDescriptions = true
+		}
+	}
+
+	if !hasTypes {
+		t.Error("metadata.json should include field types")
+	}
+	if !hasDescriptions {
+		t.Error("metadata.json should include field descriptions")
+	}
+
+	t.Logf("Created validation file at %s with %d bytes", filePath, info.Size())
+}
+
+func TestMetadataExport_ColumnOrderMatchesCSV(t *testing.T) {
+	// Generate metadata
+	config := DefaultCSVConfig()
+	metadata := GenerateDataDictionaryMetadata(config)
+
+	// Generate CSV header
+	var buf bytes.Buffer
+	cw := NewCSVWriter(&buf, config)
+	cw.WriteHeader()
+	cw.Flush()
+
+	// Parse CSV header
+	reader := csv.NewReader(strings.NewReader(buf.String()))
+	header, err := reader.Read()
+	if err != nil {
+		t.Fatalf("failed to parse CSV header: %v", err)
+	}
+
+	// Verify column order matches
+	if len(header) != len(metadata.Columns) {
+		t.Fatalf("column count mismatch: CSV has %d, metadata has %d", len(header), len(metadata.Columns))
+	}
+
+	for i, colName := range header {
+		if metadata.Columns[i].Name != colName {
+			t.Errorf("column %d: CSV has %q, metadata has %q", i, colName, metadata.Columns[i].Name)
+		}
+	}
+}
+
+func TestMetadataExport_CustomConfig(t *testing.T) {
+	config := &CSVConfig{
+		Dialect:               DialectTSV,
+		IncludeHeader:         true,
+		TimestampFormat:       "2006-01-02",
+		Precision:             3,
+		NAString:              "NULL",
+		IncludeBetaStatus:     false,
+		IncludeMessageContent: true,
+		IncludeTokenCount:     true,
+	}
+
+	metadata := GenerateDataDictionaryMetadata(config)
+
+	if metadata.NAString != "NULL" {
+		t.Errorf("expected NAString 'NULL', got %q", metadata.NAString)
+	}
+	if metadata.TimestampFormat != "2006-01-02" {
+		t.Errorf("expected TimestampFormat '2006-01-02', got %q", metadata.TimestampFormat)
+	}
+	if metadata.FloatPrecision != 3 {
+		t.Errorf("expected FloatPrecision 3, got %d", metadata.FloatPrecision)
+	}
+
+	// Should have 16 + 2 = 18 columns (no beta_status, but has message_content and token_count)
+	if len(metadata.Columns) != 18 {
+		t.Errorf("expected 18 columns, got %d", len(metadata.Columns))
 	}
 }

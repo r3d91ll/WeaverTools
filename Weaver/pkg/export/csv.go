@@ -4,6 +4,7 @@ package export
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -353,4 +354,338 @@ func MeasurementRowsToCSV(rows []MeasurementRow) []*CSVMeasurement {
 		result[i] = MeasurementRowToCSV(row)
 	}
 	return result
+}
+
+// -----------------------------------------------------------------------------
+// Metadata Export for Data Dictionary
+// -----------------------------------------------------------------------------
+
+// ColumnType represents the data type of a column.
+type ColumnType string
+
+const (
+	// TypeString is a text/string column.
+	TypeString ColumnType = "string"
+
+	// TypeInteger is an integer numeric column.
+	TypeInteger ColumnType = "integer"
+
+	// TypeFloat is a floating-point numeric column.
+	TypeFloat ColumnType = "float"
+
+	// TypeBoolean is a true/false column.
+	TypeBoolean ColumnType = "boolean"
+
+	// TypeDatetime is a timestamp/datetime column.
+	TypeDatetime ColumnType = "datetime"
+
+	// TypeCategorical is a categorical/factor column with defined levels.
+	TypeCategorical ColumnType = "categorical"
+)
+
+// ColumnMetadata describes a single column in the data dictionary.
+type ColumnMetadata struct {
+	// Name is the column name as it appears in the CSV header.
+	Name string `json:"name"`
+
+	// Type is the data type of the column.
+	Type ColumnType `json:"type"`
+
+	// Description is a human-readable description of the column.
+	Description string `json:"description"`
+
+	// Unit is the unit of measurement (if applicable).
+	// Empty for dimensionless values.
+	Unit string `json:"unit,omitempty"`
+
+	// RType is the corresponding R type (for R users).
+	RType string `json:"r_type"`
+
+	// PandasType is the corresponding pandas dtype (for Python users).
+	PandasType string `json:"pandas_type"`
+
+	// ValidRange specifies the valid range for numeric columns.
+	// Format: "[min, max]" or "(min, max)" or "≥ 0", etc.
+	ValidRange string `json:"valid_range,omitempty"`
+
+	// ValidValues lists valid values for categorical columns.
+	ValidValues []string `json:"valid_values,omitempty"`
+
+	// NAHandling describes how NA/missing values are represented.
+	NAHandling string `json:"na_handling,omitempty"`
+}
+
+// DataDictionaryMetadata is the complete metadata for a CSV export.
+// This provides a data dictionary describing all columns, their types,
+// and semantics for use in R and Python analysis workflows.
+type DataDictionaryMetadata struct {
+	// Version is the metadata format version.
+	Version string `json:"version"`
+
+	// GeneratedAt is when this metadata was generated.
+	GeneratedAt time.Time `json:"generated_at"`
+
+	// Description is an overview of the dataset.
+	Description string `json:"description"`
+
+	// Columns is the ordered list of column metadata.
+	Columns []ColumnMetadata `json:"columns"`
+
+	// NAString is the string used to represent missing values.
+	NAString string `json:"na_string"`
+
+	// TimestampFormat is the format used for datetime columns.
+	TimestampFormat string `json:"timestamp_format"`
+
+	// FloatPrecision is the number of decimal places for floats.
+	FloatPrecision int `json:"float_precision"`
+
+	// BooleanFormat describes the boolean representation.
+	BooleanFormat string `json:"boolean_format"`
+
+	// Notes contains additional notes for data consumers.
+	Notes []string `json:"notes,omitempty"`
+}
+
+// GetColumnMetadata returns the standard column metadata for CSVMeasurement exports.
+// This includes core columns that are always present in the export.
+func GetColumnMetadata() []ColumnMetadata {
+	return []ColumnMetadata{
+		{
+			Name:        "id",
+			Type:        TypeString,
+			Description: "Unique identifier for the measurement (UUID format)",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:            "timestamp",
+			Type:            TypeDatetime,
+			Description:     "ISO 8601 timestamp when the measurement was recorded",
+			RType:           "POSIXct",
+			PandasType:      "datetime64[ns]",
+			NAHandling:      "Represented as 'NA'",
+		},
+		{
+			Name:        "session_id",
+			Type:        TypeString,
+			Description: "Identifier for the session containing this measurement",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:        "conversation_id",
+			Type:        TypeString,
+			Description: "Identifier for the conversation within the session",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:        "turn_number",
+			Type:        TypeInteger,
+			Description: "Sequential turn number within the conversation (0-indexed)",
+			RType:       "integer",
+			PandasType:  "int64",
+			ValidRange:  "≥ 0",
+		},
+		{
+			Name:        "sender_id",
+			Type:        TypeString,
+			Description: "Identifier for the message sender",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:        "sender_name",
+			Type:        TypeString,
+			Description: "Display name of the message sender",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:            "sender_role",
+			Type:            TypeCategorical,
+			Description:     "Role of the message sender in the conversation",
+			RType:           "factor",
+			PandasType:      "category",
+			ValidValues:     []string{"user", "assistant", "system"},
+			NAHandling:      "Represented as 'NA'",
+		},
+		{
+			Name:        "receiver_id",
+			Type:        TypeString,
+			Description: "Identifier for the message receiver",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:        "receiver_name",
+			Type:        TypeString,
+			Description: "Display name of the message receiver",
+			RType:       "character",
+			PandasType:  "object",
+			NAHandling:  "Represented as 'NA'",
+		},
+		{
+			Name:            "receiver_role",
+			Type:            TypeCategorical,
+			Description:     "Role of the message receiver in the conversation",
+			RType:           "factor",
+			PandasType:      "category",
+			ValidValues:     []string{"user", "assistant", "system"},
+			NAHandling:      "Represented as 'NA'",
+		},
+		{
+			Name:        "d_eff",
+			Type:        TypeInteger,
+			Description: "Effective dimensionality of the hidden state representation",
+			Unit:        "dimensions",
+			RType:       "integer",
+			PandasType:  "int64",
+			ValidRange:  "≥ 0",
+		},
+		{
+			Name:        "beta",
+			Type:        TypeFloat,
+			Description: "Collapse indicator (β) from the Conveyance Framework. Lower values indicate better dimensional preservation.",
+			RType:       "numeric",
+			PandasType:  "float64",
+			ValidRange:  "≥ 0",
+		},
+		{
+			Name:        "alignment",
+			Type:        TypeFloat,
+			Description: "Cosine similarity between sender and receiver hidden states",
+			RType:       "numeric",
+			PandasType:  "float64",
+			ValidRange:  "[-1, 1]",
+		},
+		{
+			Name:        "c_pair",
+			Type:        TypeFloat,
+			Description: "Bilateral conveyance score measuring communication effectiveness",
+			RType:       "numeric",
+			PandasType:  "float64",
+			ValidRange:  "[0, 1]",
+		},
+		{
+			Name:        "is_unilateral",
+			Type:        TypeBoolean,
+			Description: "Whether the measurement is unilateral (only one hidden state available)",
+			RType:       "logical",
+			PandasType:  "bool",
+			NAHandling:  "FALSE if missing",
+		},
+	}
+}
+
+// GetBetaStatusMetadata returns metadata for the optional beta_status column.
+func GetBetaStatusMetadata() ColumnMetadata {
+	return ColumnMetadata{
+		Name:        "beta_status",
+		Type:        TypeCategorical,
+		Description: "Quality classification of the β value indicating dimensional preservation status",
+		RType:       "factor",
+		PandasType:  "category",
+		ValidValues: []string{"optimal", "monitor", "concerning", "critical", "unknown"},
+		NAHandling:  "Represented as 'NA'",
+	}
+}
+
+// GetMessageContentMetadata returns metadata for the optional message_content column.
+func GetMessageContentMetadata() ColumnMetadata {
+	return ColumnMetadata{
+		Name:        "message_content",
+		Type:        TypeString,
+		Description: "Full text content of the message (may be large)",
+		RType:       "character",
+		PandasType:  "object",
+		NAHandling:  "Represented as 'NA'",
+	}
+}
+
+// GetTokenCountMetadata returns metadata for the optional token_count column.
+func GetTokenCountMetadata() ColumnMetadata {
+	return ColumnMetadata{
+		Name:        "token_count",
+		Type:        TypeInteger,
+		Description: "Number of tokens in the message",
+		Unit:        "tokens",
+		RType:       "integer",
+		PandasType:  "int64",
+		ValidRange:  "≥ 0",
+	}
+}
+
+// GenerateDataDictionaryMetadata creates complete metadata for a CSV export.
+// The config parameter determines which optional columns are included.
+func GenerateDataDictionaryMetadata(config *CSVConfig) *DataDictionaryMetadata {
+	if config == nil {
+		config = DefaultCSVConfig()
+	}
+
+	// Start with core columns
+	columns := GetColumnMetadata()
+
+	// Add optional columns based on config
+	if config.IncludeBetaStatus {
+		columns = append(columns, GetBetaStatusMetadata())
+	}
+	if config.IncludeMessageContent {
+		columns = append(columns, GetMessageContentMetadata())
+	}
+	if config.IncludeTokenCount {
+		columns = append(columns, GetTokenCountMetadata())
+	}
+
+	metadata := &DataDictionaryMetadata{
+		Version:         "1.0",
+		GeneratedAt:     time.Now().UTC(),
+		Description:     "Conveyance measurement data from WeaverTools. Contains metrics capturing information transfer quality between agents in multi-agent conversations.",
+		Columns:         columns,
+		NAString:        config.NAString,
+		TimestampFormat: config.TimestampFormat,
+		FloatPrecision:  config.Precision,
+		BooleanFormat:   "TRUE/FALSE",
+		Notes: []string{
+			"R users: Use read.csv() with default settings. NA values are recognized automatically.",
+			"Python users: Use pandas.read_csv() with parse_dates=['timestamp'] for datetime parsing.",
+			"Beta status thresholds: optimal=[1.5,2.0), monitor=[2.0,2.5), concerning=[2.5,3.0), critical=≥3.0",
+			"Alignment values near 1.0 indicate high similarity; values near -1.0 indicate opposition.",
+		},
+	}
+
+	return metadata
+}
+
+// ExportMetadataToJSON writes the data dictionary metadata to JSON format.
+func ExportMetadataToJSON(w io.Writer, config *CSVConfig) error {
+	metadata := GenerateDataDictionaryMetadata(config)
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(metadata); err != nil {
+		return fmt.Errorf("failed to encode metadata to JSON: %w", err)
+	}
+
+	return nil
+}
+
+// ExportMetadataToJSONBytes returns the data dictionary metadata as a JSON byte slice.
+func ExportMetadataToJSONBytes(config *CSVConfig) ([]byte, error) {
+	metadata := GenerateDataDictionaryMetadata(config)
+
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata to JSON: %w", err)
+	}
+
+	return data, nil
 }

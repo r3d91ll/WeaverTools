@@ -814,17 +814,21 @@ def collect_streaming_results(
 
 
 @dataclass
-class CheckpointingResult:
-    """Container for gradient checkpointing extraction results.
+class TrainingExtractionResult:
+    """Container for training-mode hidden state extraction results.
 
-    This dataclass holds the results of running a model with gradient
-    checkpointing enabled, which trades ~30% compute overhead for ~50%
-    memory savings during training with backward passes.
+    This dataclass holds the results of running a model with gradients enabled,
+    suitable for use in training loops where backward passes will be performed.
+
+    Note:
+        This does NOT automatically enable gradient checkpointing. To benefit
+        from gradient checkpointing memory savings, configure it at the model
+        level (e.g., model.cfg.use_checkpointing = True) before extraction.
     """
 
     hidden_states: dict[int, torch.Tensor]  # Layer index -> hidden state tensor
     logits: torch.Tensor | None  # Model output logits
-    checkpointing_enabled: bool  # Whether checkpointing was actually used
+    gradients_enabled: bool  # Whether gradients were enabled during extraction
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_hidden_states_dict(self) -> dict[int, torch.Tensor]:
@@ -851,41 +855,39 @@ class CheckpointingResult:
         return extract_hidden_states(self.hidden_states, normalize=normalize)
 
 
-def extract_with_checkpointing(
+def extract_for_training(
     model: HookedTransformer,
     tokens: torch.Tensor,
     layers: list[int] | None = None,
     precision: str | None = None,
-    use_reentrant: bool = True,
-) -> CheckpointingResult:
+) -> TrainingExtractionResult:
     """
-    Extract hidden states with gradient checkpointing for memory-efficient training.
+    Extract hidden states with gradients enabled for use in training loops.
 
-    This function enables gradient checkpointing (also called activation checkpointing)
-    which trades ~30% additional compute time for ~50% memory reduction during training.
-    This is achieved by not storing intermediate activations during the forward pass,
-    and instead recomputing them during the backward pass.
+    This function extracts hidden states while preserving gradient computation,
+    making the results suitable for training workflows where backward passes
+    will be performed. The extracted tensors retain their computation graph.
 
-    IMPORTANT: Gradient checkpointing ONLY provides memory benefits when there is a
-    backward pass (i.e., during training). For pure inference without backpropagation,
-    use extract_with_selective_cache() or extract_inference_optimized() instead,
-    as checkpointing adds compute overhead without any memory benefit.
+    IMPORTANT: This function does NOT automatically enable gradient checkpointing.
+    To benefit from gradient checkpointing memory savings (~50% reduction with
+    ~30% compute overhead), configure it at the model level before calling:
+
+        model.cfg.use_checkpointing = True  # Enable before extraction
+
+    For pure inference without backpropagation, use extract_inference_optimized()
+    instead, which disables gradients for better memory efficiency.
 
     Parameters:
-        model (HookedTransformer): TransformerLens model to run. The model should
-            support gradient checkpointing via its forward method.
+        model (HookedTransformer): TransformerLens model to run.
         tokens (torch.Tensor): Input token IDs of shape [batch, seq_len] or [seq_len].
         layers (list[int] | None): Specific layer indices to extract hidden states
             from. If None, extracts from all layers.
         precision (str | None): Target precision for extracted tensors. Supported:
             'fp16', 'fp32', 'bf16'. If None, uses model's native precision.
-        use_reentrant (bool): Whether to use reentrant checkpointing. Default True.
-            - True: Traditional reentrant checkpointing (more compatible)
-            - False: Non-reentrant checkpointing (more efficient but stricter)
 
     Returns:
-        CheckpointingResult: Container with hidden states, logits, and metadata
-            about whether checkpointing was enabled.
+        TrainingExtractionResult: Container with hidden states, logits, and metadata
+            indicating whether gradients were enabled.
 
     Raises:
         ImportError: If TransformerLens is not installed.
@@ -897,25 +899,26 @@ def extract_with_checkpointing(
         >>> model = HookedTransformer.from_pretrained("gpt2")
         >>> tokens = model.to_tokens("Training example text")
         >>>
-        >>> # Extract with checkpointing for training
-        >>> result = extract_with_checkpointing(model, tokens, layers=[0, 5, 11])
+        >>> # Optional: Enable gradient checkpointing at model level
+        >>> # model.cfg.use_checkpointing = True
+        >>>
+        >>> # Extract with gradients for training
+        >>> result = extract_for_training(model, tokens, layers=[0, 5, 11])
         >>>
         >>> # Use in training loop with backward pass
         >>> loss = compute_loss(result.hidden_states)
-        >>> loss.backward()  # Checkpointing saves memory here
+        >>> loss.backward()
 
     Note:
-        - Memory savings only realized during backward() call
-        - Adds ~30% compute overhead due to recomputation
-        - Recommended for training large models on limited GPU memory
+        - Gradients are preserved based on torch.is_grad_enabled() context
+        - For gradient checkpointing benefits, set model.cfg.use_checkpointing = True
         - For inference, use extract_inference_optimized() instead
-        - Disabled by default in MemoryConfig (enable_gradient_checkpointing=False)
     """
     try:
         from transformer_lens import HookedTransformer as TL_HookedTransformer
     except ImportError as e:
         raise ImportError(
-            "TransformerLens is required for gradient checkpointing. "
+            "TransformerLens is required for training extraction. "
             "Install with: pip install transformer-lens"
         ) from e
 
@@ -933,26 +936,18 @@ def extract_with_checkpointing(
     # Build hook filter for selective caching
     names_filter = build_hook_filter(layers=target_layers)
 
-    # Note: torch.utils.checkpoint requires gradients to be enabled
-    # for the checkpointing to actually work (it's a no-op otherwise)
-    requires_grad = torch.is_grad_enabled()
+    # Check if gradients are enabled (training mode)
+    gradients_enabled = torch.is_grad_enabled()
 
-    # Use run_with_cache for a single forward pass that captures both
-    # logits and hidden states. This avoids the double forward pass issue.
-    #
-    # For gradient checkpointing benefits during training, configure
-    # checkpointing at the model level (e.g., model.cfg.use_checkpointing)
-    # rather than wrapping our extraction function.
-    with torch.set_grad_enabled(requires_grad):
+    # Run forward pass with caching, preserving gradient state
+    # For gradient checkpointing benefits, configure model.cfg.use_checkpointing
+    # before calling this function
+    with torch.set_grad_enabled(gradients_enabled):
         logits, cache = model.run_with_cache(
             tokens,
             names_filter=names_filter,
             return_type="logits",
         )
-
-    # Gradient checkpointing is enabled at model config level, not here
-    # This flag indicates if gradients are enabled (training mode)
-    checkpointing_enabled = requires_grad
 
     # Extract hidden states from cache
     hidden_states: dict[int, torch.Tensor] = {}
@@ -967,16 +962,15 @@ def extract_with_checkpointing(
 
             hidden_states[layer_idx] = tensor
 
-    return CheckpointingResult(
+    return TrainingExtractionResult(
         hidden_states=hidden_states,
         logits=logits,
-        checkpointing_enabled=checkpointing_enabled,
+        gradients_enabled=gradients_enabled,
         metadata={
             "layers_extracted": target_layers,
             "precision": precision,
-            "use_reentrant": use_reentrant,
             "n_tokens": tokens.shape[-1] if tokens.dim() > 0 else 0,
-            "requires_grad_enabled": requires_grad,
+            "gradients_enabled": gradients_enabled,
         },
     )
 
@@ -1081,7 +1075,7 @@ def extract_inference_optimized(
         - torch.inference_mode() is more efficient than torch.no_grad() because
           it also disables version tracking for autograd.
         - This function should be used for all pure inference workloads.
-        - For training with backward passes, use extract_with_checkpointing() instead.
+        - For training with backward passes, use extract_for_training() instead.
         - Combines well with precision='fp16' for additional memory savings.
     """
     try:
@@ -1156,3 +1150,12 @@ def extract_inference_optimized(
             "n_tokens": tokens.shape[-1] if tokens.dim() > 0 else 0,
         },
     )
+
+
+# Backward compatibility aliases (deprecated)
+# These will be removed in a future version
+CheckpointingResult = TrainingExtractionResult
+"""Deprecated alias for TrainingExtractionResult. Use TrainingExtractionResult instead."""
+
+extract_with_checkpointing = extract_for_training
+"""Deprecated alias for extract_for_training. Use extract_for_training instead."""

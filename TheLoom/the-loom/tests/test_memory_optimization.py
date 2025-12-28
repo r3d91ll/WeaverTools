@@ -16,11 +16,11 @@ import torch
 from src.config import MemoryConfig, PrecisionValidationResult, VALID_PRECISION_MODES
 from src.extraction.hidden_states import (
     PRECISION_DTYPE_MAP,
-    CheckpointingResult,
     HiddenStateResult,
     InferenceResult,
     SelectiveCacheResult,
     StreamingChunkResult,
+    TrainingExtractionResult,
     build_hook_filter,
     collect_streaming_results,
     extract_hidden_states,
@@ -395,46 +395,46 @@ class TestStreamingChunking:
         assert result.metadata["chunk_size"] == 512
 
 
-class TestGradientCheckpointing:
-    """Tests for gradient checkpointing in training scenarios."""
+class TestTrainingExtraction:
+    """Tests for training-mode extraction with gradients enabled."""
 
-    def test_checkpointing_result_creation(self):
-        """Verify CheckpointingResult is created correctly."""
+    def test_training_extraction_result_creation(self):
+        """Verify TrainingExtractionResult is created correctly."""
         hidden_states = {0: torch.randn(1, 10, 768)}
         logits = torch.randn(1, 10, 50257)
 
-        result = CheckpointingResult(
+        result = TrainingExtractionResult(
             hidden_states=hidden_states,
             logits=logits,
-            checkpointing_enabled=True,
+            gradients_enabled=True,
             metadata={"layers_extracted": [0, 5, 11]},
         )
 
-        assert result.checkpointing_enabled is True
+        assert result.gradients_enabled is True
         assert result.logits is not None
         assert 0 in result.hidden_states
         assert result.metadata["layers_extracted"] == [0, 5, 11]
 
-    def test_checkpointing_result_to_hidden_states_dict(self):
-        """Verify CheckpointingResult.to_hidden_states_dict works."""
+    def test_training_extraction_result_to_hidden_states_dict(self):
+        """Verify TrainingExtractionResult.to_hidden_states_dict works."""
         hidden_states = {0: torch.randn(1, 10, 768), 5: torch.randn(1, 10, 768)}
-        result = CheckpointingResult(
+        result = TrainingExtractionResult(
             hidden_states=hidden_states,
             logits=None,
-            checkpointing_enabled=False,
+            gradients_enabled=False,
         )
 
         hs_dict = result.to_hidden_states_dict()
 
         assert hs_dict is hidden_states  # Should return the same dict
 
-    def test_checkpointing_result_to_hidden_state_results(self):
+    def test_training_extraction_result_to_hidden_state_results(self):
         """Verify conversion to HiddenStateResult objects."""
         hidden_states = {0: torch.randn(1, 10, 768)}
-        result = CheckpointingResult(
+        result = TrainingExtractionResult(
             hidden_states=hidden_states,
             logits=None,
-            checkpointing_enabled=True,
+            gradients_enabled=True,
         )
 
         hs_results = result.to_hidden_state_results()

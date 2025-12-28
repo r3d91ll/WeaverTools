@@ -800,4 +800,393 @@ def find_agent_bottlenecks(
     )
 
 
-# Additional core functions will be implemented in subtasks 2-5 through 2-6
+def compare_flow_patterns(
+    G1: nx.DiGraph,
+    G2: nx.DiGraph,
+) -> FlowComparisonResult:
+    """Compare information flow patterns between two agent graphs.
+
+    Quantifies similarity between two multi-agent conversation flow graphs
+    by comparing their D_eff trajectories, conveyance metrics, agent
+    participation, and structural properties.
+
+    COMPARISON METRICS
+    ==================
+    1. Trajectory Correlation: Pearson correlation of D_eff values across
+       turns. High correlation indicates similar information compression
+       patterns even if absolute values differ.
+
+    2. Structural Similarity: Based on normalized graph edit distance
+       considering node/edge counts. Measures how similar the graph
+       topologies are.
+
+    3. Agent Overlap: Jaccard similarity of agent sets. Indicates how
+       much overlap in participating agents between conversations.
+
+    4. Conveyance Ratio: Ratio of total edge weights (conveyance).
+       Values near 1.0 indicate similar overall information transfer.
+
+    Parameters:
+        G1: nx.DiGraph
+            First agent information flow graph.
+            Expected node attributes: 'agent', 'turn', 'd_eff'.
+            Expected edge attributes: 'weight' or 'conveyance'.
+        G2: nx.DiGraph
+            Second agent information flow graph (same format).
+
+    Returns:
+        FlowComparisonResult containing:
+        - trajectory_correlation: Pearson correlation of D_eff trajectories
+        - structural_similarity: Graph structure similarity (0-1)
+        - agent_overlap: Jaccard similarity of agent sets (via property)
+        - conveyance_ratio: Ratio of total conveyance (G1 / G2)
+        - d_eff_mean_diff: Mean D_eff difference (G1 - G2)
+        - divergence_quality: Classification ("identical", "similar", etc.)
+
+    Example:
+        >>> import networkx as nx
+        >>> from src.analysis.agent_flow import compare_flow_patterns
+        >>> # Create two similar flow graphs
+        >>> G1 = nx.DiGraph()
+        >>> G1.add_node("user_t0", agent="user", turn=0, d_eff=100)
+        >>> G1.add_node("assistant_t1", agent="assistant", turn=1, d_eff=90)
+        >>> G1.add_edge("user_t0", "assistant_t1", weight=0.8)
+        >>> G2 = nx.DiGraph()
+        >>> G2.add_node("user_t0", agent="user", turn=0, d_eff=95)
+        >>> G2.add_node("assistant_t1", agent="assistant", turn=1, d_eff=85)
+        >>> G2.add_edge("user_t0", "assistant_t1", weight=0.75)
+        >>> result = compare_flow_patterns(G1, G2)
+        >>> print(f"Trajectory correlation: {result.trajectory_correlation:.4f}")
+        >>> print(f"Divergence: {result.divergence_quality}")
+
+    Notes:
+        - Empty graphs return zero correlation and similarity
+        - Graphs of different lengths can still be compared via correlation
+        - Missing 'd_eff' node attributes default to 0
+        - Missing 'weight'/'conveyance' edge attributes default to 1.0
+    """
+    # Extract graph statistics
+    graph_a_stats = _compute_graph_stats(G1)
+    graph_b_stats = _compute_graph_stats(G2)
+
+    # Extract agent sets
+    agents_a = _get_agents_from_graph(G1)
+    agents_b = _get_agents_from_graph(G2)
+
+    common_agents = agents_a & agents_b
+    agents_only_in_a = agents_a - agents_b
+    agents_only_in_b = agents_b - agents_a
+
+    # Extract D_eff trajectories (ordered by turn)
+    trajectory_a = _get_d_eff_trajectory(G1)
+    trajectory_b = _get_d_eff_trajectory(G2)
+
+    # Compute trajectory correlation
+    trajectory_correlation = _compute_trajectory_correlation(trajectory_a, trajectory_b)
+
+    # Compute D_eff differences
+    d_eff_mean_diff, d_eff_abs_mean_diff = _compute_d_eff_differences(
+        trajectory_a, trajectory_b
+    )
+
+    # Compute conveyance ratio
+    conveyance_a = _compute_total_conveyance(G1)
+    conveyance_b = _compute_total_conveyance(G2)
+
+    if conveyance_b > 0:
+        conveyance_ratio = conveyance_a / conveyance_b
+    elif conveyance_a > 0:
+        conveyance_ratio = float("inf")
+    else:
+        conveyance_ratio = 1.0  # Both zero
+
+    # Compute structural similarity
+    structural_similarity = _compute_structural_similarity(G1, G2)
+
+    # Get turn counts
+    n_turns_a = G1.number_of_nodes()
+    n_turns_b = G2.number_of_nodes()
+
+    return FlowComparisonResult(
+        graph_a_stats=graph_a_stats,
+        graph_b_stats=graph_b_stats,
+        common_agents=common_agents,
+        agents_only_in_a=agents_only_in_a,
+        agents_only_in_b=agents_only_in_b,
+        trajectory_correlation=trajectory_correlation,
+        d_eff_mean_diff=d_eff_mean_diff,
+        d_eff_abs_mean_diff=d_eff_abs_mean_diff,
+        conveyance_ratio=conveyance_ratio,
+        structural_similarity=structural_similarity,
+        n_turns_a=n_turns_a,
+        n_turns_b=n_turns_b,
+    )
+
+
+# ============================================================================
+# Helper Functions for Flow Comparison
+# ============================================================================
+
+
+def _compute_graph_stats(G: nx.DiGraph) -> dict[str, Any]:
+    """Compute summary statistics for an agent flow graph.
+
+    Parameters:
+        G: nx.DiGraph - Agent flow graph with node/edge attributes.
+
+    Returns:
+        dict with summary statistics including node count, edge count,
+        agent count, total conveyance, and D_eff statistics.
+    """
+    n_nodes = G.number_of_nodes()
+    n_edges = G.number_of_edges()
+
+    # Extract agents
+    agents = _get_agents_from_graph(G)
+
+    # Extract D_eff values
+    d_eff_values = [G.nodes[node].get("d_eff", 0) for node in G.nodes()]
+
+    # Compute D_eff statistics
+    if d_eff_values:
+        mean_d_eff = float(np.mean(d_eff_values))
+        std_d_eff = float(np.std(d_eff_values))
+        min_d_eff = int(min(d_eff_values))
+        max_d_eff = int(max(d_eff_values))
+    else:
+        mean_d_eff = 0.0
+        std_d_eff = 0.0
+        min_d_eff = 0
+        max_d_eff = 0
+
+    # Compute total conveyance
+    total_conveyance = _compute_total_conveyance(G)
+
+    return {
+        "n_nodes": n_nodes,
+        "n_edges": n_edges,
+        "n_agents": len(agents),
+        "agents": list(agents),
+        "total_conveyance": total_conveyance,
+        "mean_d_eff": mean_d_eff,
+        "std_d_eff": std_d_eff,
+        "min_d_eff": min_d_eff,
+        "max_d_eff": max_d_eff,
+    }
+
+
+def _get_agents_from_graph(G: nx.DiGraph) -> set[str]:
+    """Extract unique agent names from graph node attributes.
+
+    Parameters:
+        G: nx.DiGraph - Agent flow graph with 'agent' node attributes.
+
+    Returns:
+        Set of unique agent names found in the graph.
+    """
+    agents: set[str] = set()
+    for node in G.nodes():
+        agent = G.nodes[node].get("agent")
+        if agent is not None:
+            agents.add(str(agent))
+    return agents
+
+
+def _get_d_eff_trajectory(G: nx.DiGraph) -> list[int]:
+    """Extract D_eff values ordered by turn index.
+
+    Parameters:
+        G: nx.DiGraph - Agent flow graph with 'turn' and 'd_eff' node attributes.
+
+    Returns:
+        List of D_eff values in turn order. Empty list if no nodes.
+    """
+    if G.number_of_nodes() == 0:
+        return []
+
+    # Collect (turn, d_eff) pairs
+    turn_d_eff_pairs: list[tuple[int, int]] = []
+    for node in G.nodes():
+        turn = G.nodes[node].get("turn", 0)
+        d_eff = G.nodes[node].get("d_eff", 0)
+        turn_d_eff_pairs.append((turn, d_eff))
+
+    # Sort by turn and extract D_eff values
+    turn_d_eff_pairs.sort(key=lambda x: x[0])
+    return [d_eff for _, d_eff in turn_d_eff_pairs]
+
+
+def _compute_trajectory_correlation(
+    trajectory_a: list[int],
+    trajectory_b: list[int],
+) -> float:
+    """Compute Pearson correlation between two D_eff trajectories.
+
+    For trajectories of different lengths, compares the overlapping portion
+    (shorter trajectory determines comparison length).
+
+    Parameters:
+        trajectory_a: D_eff values in turn order for graph A.
+        trajectory_b: D_eff values in turn order for graph B.
+
+    Returns:
+        Pearson correlation coefficient in [-1, 1].
+        Returns 0.0 for empty trajectories.
+        Returns 1.0 if both trajectories are identical constants.
+    """
+    # Handle empty trajectories
+    if not trajectory_a or not trajectory_b:
+        return 0.0
+
+    # Use minimum length for comparison
+    min_len = min(len(trajectory_a), len(trajectory_b))
+
+    if min_len < 2:
+        # Cannot compute correlation with < 2 points
+        # Return 1.0 if values are equal, 0.0 otherwise
+        if min_len == 1:
+            return 1.0 if trajectory_a[0] == trajectory_b[0] else 0.0
+        return 0.0
+
+    vals_a = np.array(trajectory_a[:min_len], dtype=float)
+    vals_b = np.array(trajectory_b[:min_len], dtype=float)
+
+    # Handle constant trajectories
+    std_a = np.std(vals_a)
+    std_b = np.std(vals_b)
+
+    if std_a == 0 and std_b == 0:
+        # Both constant - identical if same value
+        return 1.0 if vals_a[0] == vals_b[0] else 0.0
+    elif std_a == 0 or std_b == 0:
+        # One constant, one varying - undefined correlation
+        return 0.0
+
+    # Compute Pearson correlation
+    correlation = float(np.corrcoef(vals_a, vals_b)[0, 1])
+
+    # Handle NaN (shouldn't occur with std checks, but be safe)
+    if np.isnan(correlation):
+        return 0.0
+
+    return correlation
+
+
+def _compute_d_eff_differences(
+    trajectory_a: list[int],
+    trajectory_b: list[int],
+) -> tuple[float, float]:
+    """Compute mean and absolute mean D_eff differences.
+
+    Parameters:
+        trajectory_a: D_eff values in turn order for graph A.
+        trajectory_b: D_eff values in turn order for graph B.
+
+    Returns:
+        tuple of (mean_diff, abs_mean_diff) where:
+        - mean_diff: Average of (A - B) differences
+        - abs_mean_diff: Average of absolute differences
+        Returns (0.0, 0.0) for empty or mismatched-length trajectories.
+    """
+    if not trajectory_a or not trajectory_b:
+        return 0.0, 0.0
+
+    # Use minimum length for comparison
+    min_len = min(len(trajectory_a), len(trajectory_b))
+
+    vals_a = np.array(trajectory_a[:min_len], dtype=float)
+    vals_b = np.array(trajectory_b[:min_len], dtype=float)
+
+    diffs = vals_a - vals_b
+    mean_diff = float(np.mean(diffs))
+    abs_mean_diff = float(np.mean(np.abs(diffs)))
+
+    return mean_diff, abs_mean_diff
+
+
+def _compute_total_conveyance(G: nx.DiGraph) -> float:
+    """Compute total conveyance (sum of edge weights) for a graph.
+
+    Parameters:
+        G: nx.DiGraph - Agent flow graph with 'weight' or 'conveyance' edge attributes.
+
+    Returns:
+        Sum of all edge weights. Returns 0.0 for empty graph.
+    """
+    total = 0.0
+    for _, _, data in G.edges(data=True):
+        # Try 'weight' first, then 'conveyance', default to 1.0
+        weight = data.get("weight", data.get("conveyance", 1.0))
+        total += float(weight)
+    return total
+
+
+def _compute_structural_similarity(
+    G1: nx.DiGraph,
+    G2: nx.DiGraph,
+) -> float:
+    """Compute structural similarity between two graphs.
+
+    Uses a combination of node count ratio, edge count ratio, and
+    edge density comparison to approximate structural similarity
+    without expensive graph edit distance computation.
+
+    The similarity score is computed as:
+        similarity = (node_sim + edge_sim + density_sim) / 3
+
+    where each component is min(x, y) / max(x, y) for the respective metric.
+
+    Parameters:
+        G1: First graph.
+        G2: Second graph.
+
+    Returns:
+        Structural similarity in [0, 1]. 1.0 means identical structure.
+        Returns 1.0 if both graphs are empty.
+    """
+    n1 = G1.number_of_nodes()
+    n2 = G2.number_of_nodes()
+    e1 = G1.number_of_edges()
+    e2 = G2.number_of_edges()
+
+    # Handle empty graphs
+    if n1 == 0 and n2 == 0:
+        return 1.0
+    if n1 == 0 or n2 == 0:
+        return 0.0
+
+    # Node count similarity: min/max ratio
+    node_sim = min(n1, n2) / max(n1, n2)
+
+    # Edge count similarity: min/max ratio (handle 0 edges)
+    if e1 == 0 and e2 == 0:
+        edge_sim = 1.0
+    elif e1 == 0 or e2 == 0:
+        edge_sim = 0.0
+    else:
+        edge_sim = min(e1, e2) / max(e1, e2)
+
+    # Density similarity: compare edge densities
+    # Density = edges / (nodes * (nodes - 1)) for directed graph
+    if n1 > 1:
+        density1 = e1 / (n1 * (n1 - 1))
+    else:
+        density1 = 0.0
+
+    if n2 > 1:
+        density2 = e2 / (n2 * (n2 - 1))
+    else:
+        density2 = 0.0
+
+    if density1 == 0 and density2 == 0:
+        density_sim = 1.0
+    elif density1 == 0 or density2 == 0:
+        density_sim = 0.0
+    else:
+        density_sim = min(density1, density2) / max(density1, density2)
+
+    # Average of all similarity components
+    return (node_sim + edge_sim + density_sim) / 3.0
+
+
+# Additional core functions will be implemented in subtask 2-6

@@ -368,3 +368,318 @@ func FormatPercent(value float64, precision int) string {
 	format := fmt.Sprintf("%%.%df", precision)
 	return fmt.Sprintf(format, pct) + `\%`
 }
+
+// -----------------------------------------------------------------------------
+// Measurement Summary Tables
+// -----------------------------------------------------------------------------
+
+// MeasurementRow represents a single row of measurement data for table export.
+// This is a simplified view of measurement data optimized for academic tables.
+type MeasurementRow struct {
+	Turn       int     // Turn number in conversation
+	Sender     string  // Sender name or identifier
+	Receiver   string  // Receiver name or identifier
+	DEff       int     // Effective dimensionality
+	Beta       float64 // Collapse indicator
+	Alignment  float64 // Cosine similarity [-1, 1]
+	CPair      float64 // Bilateral conveyance
+	BetaStatus string  // Quality indicator (optimal, monitor, concerning, critical, unknown)
+}
+
+// MeasurementTableConfig specifies options for measurement summary tables.
+type MeasurementTableConfig struct {
+	// TableConfig provides base table configuration.
+	TableConfig
+
+	// IncludeTurn includes the turn number column.
+	IncludeTurn bool
+
+	// IncludeParticipants includes sender/receiver columns.
+	IncludeParticipants bool
+
+	// IncludeBetaStatus includes the beta status column.
+	IncludeBetaStatus bool
+
+	// Precision is the number of decimal places for floating-point values.
+	// Default: 3
+	Precision int
+
+	// AlignmentAsPercent formats alignment as percentage instead of decimal.
+	AlignmentAsPercent bool
+}
+
+// DefaultMeasurementTableConfig returns a config with sensible defaults.
+// Includes DEff, Beta, Alignment, CPair columns with booktabs style.
+func DefaultMeasurementTableConfig() *MeasurementTableConfig {
+	return &MeasurementTableConfig{
+		TableConfig: TableConfig{
+			Style: StyleBooktabs,
+		},
+		IncludeTurn:         true,
+		IncludeParticipants: true,
+		IncludeBetaStatus:   false,
+		Precision:           3,
+		AlignmentAsPercent:  false,
+	}
+}
+
+// MeasurementTableBuilder builds LaTeX tables from measurement data.
+type MeasurementTableBuilder struct {
+	config *MeasurementTableConfig
+	rows   []MeasurementRow
+}
+
+// NewMeasurementTableBuilder creates a new measurement table builder.
+// If config is nil, DefaultMeasurementTableConfig() is used.
+func NewMeasurementTableBuilder(config *MeasurementTableConfig) *MeasurementTableBuilder {
+	if config == nil {
+		config = DefaultMeasurementTableConfig()
+	}
+	return &MeasurementTableBuilder{
+		config: config,
+		rows:   make([]MeasurementRow, 0),
+	}
+}
+
+// AddRow adds a measurement row to the table.
+func (mtb *MeasurementTableBuilder) AddRow(row MeasurementRow) *MeasurementTableBuilder {
+	mtb.rows = append(mtb.rows, row)
+	return mtb
+}
+
+// AddRows adds multiple measurement rows to the table.
+func (mtb *MeasurementTableBuilder) AddRows(rows []MeasurementRow) *MeasurementTableBuilder {
+	mtb.rows = append(mtb.rows, rows...)
+	return mtb
+}
+
+// Build generates the complete LaTeX table code for measurements.
+func (mtb *MeasurementTableBuilder) Build() string {
+	if len(mtb.rows) == 0 {
+		return ""
+	}
+
+	// Build headers based on config
+	headers := mtb.buildHeaders()
+
+	// Build column alignments
+	alignments := mtb.buildAlignments()
+
+	// Create table config
+	tableConfig := &TableConfig{
+		Style:            mtb.config.Style,
+		Caption:          mtb.config.Caption,
+		Label:            mtb.config.Label,
+		ColumnAlignments: alignments,
+	}
+
+	// Create table builder
+	tb := NewTableBuilder(tableConfig)
+	tb.SetHeaders(headers...)
+
+	// Add data rows
+	for _, row := range mtb.rows {
+		rowData := mtb.formatRow(row)
+		tb.AddRow(rowData...)
+	}
+
+	return tb.Build()
+}
+
+// buildHeaders generates the column headers based on configuration.
+func (mtb *MeasurementTableBuilder) buildHeaders() []string {
+	headers := make([]string, 0, 8)
+
+	if mtb.config.IncludeTurn {
+		headers = append(headers, "Turn")
+	}
+	if mtb.config.IncludeParticipants {
+		headers = append(headers, "Sender", "Receiver")
+	}
+
+	// Core metric columns are always included
+	headers = append(headers, "$D_{eff}$", "$\\beta$", "Alignment", "$C_{pair}$")
+
+	if mtb.config.IncludeBetaStatus {
+		headers = append(headers, "$\\beta$ Status")
+	}
+
+	return headers
+}
+
+// buildAlignments generates column alignment specifications.
+func (mtb *MeasurementTableBuilder) buildAlignments() []string {
+	alignments := make([]string, 0, 8)
+
+	if mtb.config.IncludeTurn {
+		alignments = append(alignments, AlignCenter) // Turn number centered
+	}
+	if mtb.config.IncludeParticipants {
+		alignments = append(alignments, AlignLeft, AlignLeft) // Names left-aligned
+	}
+
+	// Numeric columns right-aligned
+	alignments = append(alignments, AlignRight, AlignRight, AlignRight, AlignRight)
+
+	if mtb.config.IncludeBetaStatus {
+		alignments = append(alignments, AlignLeft) // Status text left-aligned
+	}
+
+	return alignments
+}
+
+// formatRow converts a MeasurementRow to string values for the table.
+func (mtb *MeasurementTableBuilder) formatRow(row MeasurementRow) []string {
+	values := make([]string, 0, 8)
+	precision := mtb.config.Precision
+
+	if mtb.config.IncludeTurn {
+		values = append(values, fmt.Sprintf("%d", row.Turn))
+	}
+	if mtb.config.IncludeParticipants {
+		values = append(values, row.Sender, row.Receiver)
+	}
+
+	// Core metrics
+	values = append(values, fmt.Sprintf("%d", row.DEff))
+	values = append(values, FormatNumber(row.Beta, precision))
+
+	if mtb.config.AlignmentAsPercent {
+		values = append(values, FormatPercent(row.Alignment, precision-1))
+	} else {
+		values = append(values, FormatNumber(row.Alignment, precision))
+	}
+
+	values = append(values, FormatNumber(row.CPair, precision))
+
+	if mtb.config.IncludeBetaStatus {
+		values = append(values, row.BetaStatus)
+	}
+
+	return values
+}
+
+// GenerateMeasurementTable is a convenience function to generate a measurement
+// summary table from a slice of MeasurementRow data.
+// If config is nil, DefaultMeasurementTableConfig() is used.
+func GenerateMeasurementTable(rows []MeasurementRow, config *MeasurementTableConfig) string {
+	mtb := NewMeasurementTableBuilder(config)
+	mtb.AddRows(rows)
+	return mtb.Build()
+}
+
+// SummaryStats holds aggregate statistics for a measurement set.
+type SummaryStats struct {
+	MeasurementCount int
+	AvgDEff          float64
+	AvgBeta          float64
+	AvgAlignment     float64
+	AvgCPair         float64
+	MinBeta          float64
+	MaxBeta          float64
+	BilateralCount   int
+}
+
+// ComputeSummaryStats calculates aggregate statistics from measurement rows.
+func ComputeSummaryStats(rows []MeasurementRow) SummaryStats {
+	if len(rows) == 0 {
+		return SummaryStats{}
+	}
+
+	stats := SummaryStats{
+		MeasurementCount: len(rows),
+		MinBeta:          rows[0].Beta,
+		MaxBeta:          rows[0].Beta,
+	}
+
+	var totalDEff, totalBeta, totalAlignment, totalCPair float64
+
+	for _, row := range rows {
+		totalDEff += float64(row.DEff)
+		totalBeta += row.Beta
+		totalAlignment += row.Alignment
+		totalCPair += row.CPair
+
+		if row.Beta < stats.MinBeta {
+			stats.MinBeta = row.Beta
+		}
+		if row.Beta > stats.MaxBeta {
+			stats.MaxBeta = row.Beta
+		}
+
+		// Count bilateral measurements (non-zero CPair indicates bilateral)
+		if row.CPair > 0 {
+			stats.BilateralCount++
+		}
+	}
+
+	n := float64(len(rows))
+	stats.AvgDEff = totalDEff / n
+	stats.AvgBeta = totalBeta / n
+	stats.AvgAlignment = totalAlignment / n
+	stats.AvgCPair = totalCPair / n
+
+	return stats
+}
+
+// SummaryTableConfig specifies options for summary statistics tables.
+type SummaryTableConfig struct {
+	TableConfig
+
+	// Precision is the number of decimal places for floating-point values.
+	Precision int
+
+	// IncludeMinMax includes min/max values for Beta.
+	IncludeMinMax bool
+
+	// IncludeBilateralCount includes count of bilateral measurements.
+	IncludeBilateralCount bool
+}
+
+// DefaultSummaryTableConfig returns a config with sensible defaults.
+func DefaultSummaryTableConfig() *SummaryTableConfig {
+	return &SummaryTableConfig{
+		TableConfig: TableConfig{
+			Style: StyleBooktabs,
+		},
+		Precision:             3,
+		IncludeMinMax:         true,
+		IncludeBilateralCount: true,
+	}
+}
+
+// GenerateSummaryTable creates a LaTeX table showing aggregate statistics.
+func GenerateSummaryTable(stats SummaryStats, config *SummaryTableConfig) string {
+	if config == nil {
+		config = DefaultSummaryTableConfig()
+	}
+
+	tableConfig := &TableConfig{
+		Style:            config.Style,
+		Caption:          config.Caption,
+		Label:            config.Label,
+		ColumnAlignments: []string{AlignLeft, AlignRight},
+	}
+
+	tb := NewTableBuilder(tableConfig)
+	tb.SetHeaders("Metric", "Value")
+
+	precision := config.Precision
+
+	tb.AddRow("Measurements", fmt.Sprintf("%d", stats.MeasurementCount))
+	tb.AddRow("Avg. $D_{eff}$", FormatNumber(stats.AvgDEff, precision))
+	tb.AddRow("Avg. $\\beta$", FormatNumber(stats.AvgBeta, precision))
+	tb.AddRow("Avg. Alignment", FormatNumber(stats.AvgAlignment, precision))
+	tb.AddRow("Avg. $C_{pair}$", FormatNumber(stats.AvgCPair, precision))
+
+	if config.IncludeMinMax {
+		tb.AddRow("Min $\\beta$", FormatNumber(stats.MinBeta, precision))
+		tb.AddRow("Max $\\beta$", FormatNumber(stats.MaxBeta, precision))
+	}
+
+	if config.IncludeBilateralCount {
+		tb.AddRow("Bilateral Count", fmt.Sprintf("%d", stats.BilateralCount))
+	}
+
+	return tb.Build()
+}

@@ -85,10 +85,6 @@ MIN_NODES_FOR_BOTTLENECK = 3
 # Single-agent conversations have no edges.
 MIN_EDGES_FOR_FLOW = 1
 
-# Warning threshold for large graphs where layout computation becomes slow.
-# Consider using kamada_kawai_layout instead of spring_layout above this.
-LARGE_GRAPH_NODE_THRESHOLD = 1000
-
 # Default k parameter for spring layout (optimal distance between nodes).
 # Higher values spread nodes further apart.
 DEFAULT_SPRING_LAYOUT_K = 0.5
@@ -1281,7 +1277,6 @@ def visualize_agent_alignment(
     # Extract agent data from graph
     agents_data = _extract_agent_data(G)
     agent_names = sorted(agents_data.keys())
-    n_agents = len(agent_names)
 
     # Single-node graph handling
     if G.number_of_nodes() == 1:
@@ -1521,6 +1516,8 @@ def _plot_deff_trajectory(ax: Any, G: nx.DiGraph) -> None:
         ax: Matplotlib axes to plot on.
         G: Agent flow graph with 'turn' and 'd_eff' node attributes.
     """
+    import matplotlib.pyplot as plt
+
     # Extract turn and D_eff data
     turn_data: list[tuple[int, int, str]] = []
 

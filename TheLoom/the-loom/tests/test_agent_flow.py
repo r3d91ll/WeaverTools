@@ -834,8 +834,9 @@ class TestAgentAlignmentResultProperties:
         )
         # min_alignment (0.1) < mean (0.37) - 2*std (0.8) = -0.43
         # So 0.1 > -0.43, no outlier by this definition
-        # Let's test with different values
+        assert not result.has_outlier
 
+        # Test with values that produce an outlier
         result2 = AgentAlignmentResult(
             agent_names=["a", "b", "c"],
             alignment_matrix=np.array([

@@ -53,7 +53,7 @@ func newTestManager(agentNames ...string) *runtime.Manager {
 // TestNewShellCompleter tests completer creation.
 func TestNewShellCompleter(t *testing.T) {
 	t.Run("with nil manager", func(t *testing.T) {
-		c := NewShellCompleter(nil)
+		c := NewShellCompleter(nil, nil)
 		if c == nil {
 			t.Fatal("expected non-nil completer")
 		}
@@ -64,7 +64,7 @@ func TestNewShellCompleter(t *testing.T) {
 
 	t.Run("with manager", func(t *testing.T) {
 		m := newTestManager()
-		c := NewShellCompleter(m)
+		c := NewShellCompleter(m, nil)
 		if c == nil {
 			t.Fatal("expected non-nil completer")
 		}
@@ -76,7 +76,7 @@ func TestNewShellCompleter(t *testing.T) {
 
 // TestDoCommandCompletion tests command completion functionality.
 func TestDoCommandCompletion(t *testing.T) {
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	tests := []struct {
 		name     string
@@ -191,7 +191,7 @@ func TestDoCommandCompletion(t *testing.T) {
 // TestDoAgentCompletion tests agent name completion functionality.
 func TestDoAgentCompletion(t *testing.T) {
 	manager := newTestManager("senior", "junior", "specialist", "supervisor")
-	c := NewShellCompleter(manager)
+	c := NewShellCompleter(manager, nil)
 
 	tests := []struct {
 		name     string
@@ -291,7 +291,7 @@ func TestDoAgentCompletion(t *testing.T) {
 
 // TestDoNilAgentManager tests agent completion with nil manager.
 func TestDoNilAgentManager(t *testing.T) {
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	results, length := c.Do([]rune("@se"), 3)
 	if len(results) != 0 {
@@ -304,7 +304,7 @@ func TestDoNilAgentManager(t *testing.T) {
 
 // TestDoEdgeCases tests edge cases and boundary conditions.
 func TestDoEdgeCases(t *testing.T) {
-	c := NewShellCompleter(newTestManager("agent1", "agent2"))
+	c := NewShellCompleter(newTestManager("agent1", "agent2"), nil)
 
 	tests := []struct {
 		name       string
@@ -404,7 +404,7 @@ func TestDoEdgeCases(t *testing.T) {
 
 // TestDoMixedContent tests completion with mixed command and agent content.
 func TestDoMixedContent(t *testing.T) {
-	c := NewShellCompleter(newTestManager("senior", "junior"))
+	c := NewShellCompleter(newTestManager("senior", "junior"), nil)
 
 	tests := []struct {
 		name     string
@@ -547,7 +547,7 @@ func TestDynamicAgentList(t *testing.T) {
 	registry.Register("mock", &mockBackend{name: "mock"})
 	manager := runtime.NewManager(registry)
 
-	c := NewShellCompleter(manager)
+	c := NewShellCompleter(manager, nil)
 
 	// Initially no agents
 	results, _ := c.Do([]rune("@"), 1)
@@ -586,7 +586,7 @@ func TestDynamicAgentList(t *testing.T) {
 
 // TestCompletionSuffix verifies completions include trailing space.
 func TestCompletionSuffix(t *testing.T) {
-	c := NewShellCompleter(newTestManager("agent"))
+	c := NewShellCompleter(newTestManager("agent"), nil)
 
 	// Test command completion includes space
 	results, _ := c.Do([]rune("/help"), 5)
@@ -611,7 +611,7 @@ func TestCompletionSuffix(t *testing.T) {
 func TestReadlineAutoCompleterInterface(t *testing.T) {
 	// This is a compile-time check that exists in completer.go,
 	// but we include a runtime check here for documentation purposes.
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	// Test that Do method exists and has correct signature
 	results, length := c.Do([]rune("/h"), 2)
@@ -625,7 +625,7 @@ func TestReadlineAutoCompleterInterface(t *testing.T) {
 
 // TestCaseSensitivity verifies completion is case-sensitive.
 func TestCaseSensitivity(t *testing.T) {
-	c := NewShellCompleter(newTestManager("Senior", "junior"))
+	c := NewShellCompleter(newTestManager("Senior", "junior"), nil)
 
 	// Lowercase prefix should match lowercase agent
 	results, _ := c.Do([]rune("@j"), 2)
@@ -658,7 +658,7 @@ func TestCaseSensitivity(t *testing.T) {
 func TestSortedCompletions(t *testing.T) {
 	// Note: The current implementation doesn't guarantee sorted order.
 	// This test documents the behavior and can be updated if sorting is added.
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	results1, _ := c.Do([]rune("/c"), 2)
 	results2, _ := c.Do([]rune("/c"), 2)

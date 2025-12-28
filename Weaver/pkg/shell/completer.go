@@ -171,3 +171,28 @@ func (c *ShellCompleter) completeAgent(prefix string) ([][]rune, int) {
 	// Return the length of the prefix (including "@") that we're completing
 	return matches, len(prefix)
 }
+
+// completeConcept returns completions for concept names starting with the given prefix.
+// Concept names are fetched dynamically from the concept store.
+func (c *ShellCompleter) completeConcept(prefix string) ([][]rune, int) {
+	// If no concept store is available, return no completions
+	if c.concepts == nil {
+		return nil, 0
+	}
+
+	// Get the current list of concepts dynamically
+	// List() returns map[string]int with concept names and sample counts
+	conceptMap := c.concepts.List()
+
+	var matches [][]rune
+	for name := range conceptMap {
+		if strings.HasPrefix(name, prefix) {
+			// Return the suffix that completes the concept name (add space after)
+			suffix := name[len(prefix):] + " "
+			matches = append(matches, []rune(suffix))
+		}
+	}
+
+	// Return the length of the prefix that we're completing
+	return matches, len(prefix)
+}

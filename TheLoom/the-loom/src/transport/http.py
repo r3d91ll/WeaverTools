@@ -532,6 +532,19 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
     )
+    # Persistence options
+    persist: bool = Field(
+        default=False,
+        description="Persist this chat completion as an experiment. Requires persistence to be enabled.",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Custom experiment ID for persistence. Auto-generated if not provided.",
+    )
+    experiment_notes: str | None = Field(
+        default=None,
+        description="Optional notes or description for the persisted experiment.",
+    )
 
 
 class StreamingChatCompletionRequest(BaseModel):
@@ -634,6 +647,11 @@ class ChatCompletionResponse(BaseModel):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Generation metadata"
+    )
+    # Persistence result
+    experiment_id: str | None = Field(
+        default=None,
+        description="Experiment ID if persistence was enabled and successful.",
     )
 
 
@@ -1835,6 +1853,103 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                         dtype=dtype_str,
                     )
 
+            # Handle optional persistence
+            persisted_experiment_id: str | None = None
+            if request.persist:
+                if persistence is None:
+                    logger.warning(
+                        "Persistence requested but not enabled. "
+                        "Set persistence.enabled=true in config."
+                    )
+                else:
+                    try:
+                        import numpy as np
+
+                        # Build config from request parameters
+                        exp_config = {
+                            "max_tokens": request.max_tokens,
+                            "temperature": request.temperature,
+                            "top_p": request.top_p,
+                            "return_hidden_states": request.return_hidden_states,
+                            "stream": request.stream,
+                        }
+
+                        # Create the experiment record
+                        experiment = persistence.create_experiment(
+                            model=request.model,
+                            config=exp_config,
+                            experiment_id=request.experiment_id,
+                            status="running",
+                            notes=request.experiment_notes,
+                        )
+                        persisted_experiment_id = experiment.id
+
+                        # Persist conversation messages (input messages + assistant response)
+                        messages_to_persist = []
+                        for msg in request.messages:
+                            messages_to_persist.append({
+                                "role": msg.role,
+                                "content": msg.content,
+                            })
+                        # Add assistant response
+                        messages_to_persist.append({
+                            "role": "assistant",
+                            "content": output.text,
+                        })
+                        persistence.persist_conversations(
+                            experiment_id=experiment.id,
+                            messages=messages_to_persist,
+                        )
+
+                        # Persist hidden states if available
+                        if output.hidden_states:
+                            # Convert tensors to numpy arrays for storage
+                            hidden_states_np: dict[int, np.ndarray] = {}
+                            for layer_idx, tensor in output.hidden_states.items():
+                                if hasattr(tensor, "cpu"):
+                                    arr = tensor.cpu().detach().float().numpy()
+                                else:
+                                    arr = np.asarray(tensor, dtype=np.float32)
+                                hidden_states_np[layer_idx] = arr
+
+                            persistence.persist_hidden_states(
+                                experiment_id=experiment.id,
+                                hidden_states=hidden_states_np,
+                                metadata={
+                                    "model": request.model,
+                                    "message_count": len(request.messages),
+                                    "token_count": completion_tokens,
+                                },
+                            )
+
+                        # Persist generation metrics
+                        persistence.persist_metrics(
+                            experiment_id=experiment.id,
+                            metrics={
+                                "latency_ms": gen_latency * 1000,
+                                "prompt_tokens": float(prompt_tokens),
+                                "completion_tokens": float(completion_tokens),
+                                "total_tokens": float(prompt_tokens + completion_tokens),
+                                "tokens_per_second": (
+                                    completion_tokens / gen_latency
+                                    if gen_latency > 0
+                                    else 0.0
+                                ),
+                            },
+                        )
+
+                        # Mark experiment as completed
+                        persistence.complete_experiment(experiment.id, status="completed")
+                        logger.info(f"Persisted chat completion as experiment: {experiment.id}")
+
+                    except Exception as persist_error:
+                        # Log error but don't fail the request
+                        logger.exception(
+                            f"Failed to persist chat completion: {persist_error}"
+                        )
+                        # Still include the experiment_id if it was created
+                        # so user knows to check for partial data
+
             return ChatCompletionResponse(
                 text=output.text,
                 usage=usage,
@@ -1846,6 +1961,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     if gen_latency > 0
                     else 0,
                 },
+                experiment_id=persisted_experiment_id,
             )
 
         except HTTPException:

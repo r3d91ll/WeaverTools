@@ -533,6 +533,137 @@ class LoomClient:
                     event_type = None
 
 
+    # ========================================================================
+    # Layer Analysis
+    # ========================================================================
+
+    def analyze_layers(
+        self,
+        model: str,
+        text: str,
+        layers: str | list[int] = "all",
+        pooling: str = "last_token",
+        include_d_eff: bool = True,
+        variance_threshold: float = 0.90,
+    ) -> dict[str, Any]:
+        """Extract hidden states from specific layers and optionally compute D_eff.
+
+        This is a convenience method for layer-by-layer analysis, enabling
+        researchers to track how semantic information evolves through
+        transformer layers. Wraps the generate endpoint with layer extraction
+        and adds D_eff computation for each layer.
+
+        Args:
+            model: Model ID (HuggingFace model ID or local path)
+            text: Input text to analyze
+            layers: Which layers to extract. Can be:
+                - "all": Extract from all layers
+                - list[int]: Specific layer indices (e.g., [0, 5, 11])
+                - Negative indices supported (e.g., [-1, -5] for last layers)
+            pooling: Pooling strategy for hidden states (last_token, mean, first_token)
+            include_d_eff: If True, compute D_eff for each layer (requires numpy)
+            variance_threshold: Variance threshold for D_eff calculation (default 0.90)
+
+        Returns:
+            Dict containing:
+                - layers: Dict mapping layer index to hidden state data
+                - d_eff: Dict mapping layer index to D_eff value (if include_d_eff=True)
+                - text: The input text analyzed
+                - model: Model ID used
+                - metadata: Additional response metadata
+
+        Example:
+            >>> client = LoomClient()
+            >>> result = client.analyze_layers(
+            ...     model="meta-llama/Llama-3.1-8B",
+            ...     text="Hello, world!",
+            ...     layers="all"
+            ... )
+            >>> for layer_idx, d_eff in result["d_eff"].items():
+            ...     print(f"Layer {layer_idx}: D_eff = {d_eff}")
+
+        Notes:
+            - Uses the /generate endpoint with return_hidden_states=True
+            - D_eff computation requires numpy; disabled if unavailable
+            - For batch analysis of multiple texts, use generate_batch()
+        """
+        # Build request payload
+        payload: dict[str, Any] = {
+            "model": model,
+            "prompt": text,
+            "max_tokens": 1,  # Minimal generation, we just want hidden states
+            "temperature": 0.0,  # Deterministic
+            "return_hidden_states": True,
+            "hidden_state_format": "list",
+            "return_full_sequence": False,
+        }
+
+        # Handle layer specification
+        if layers == "all":
+            # Use "all" string to request all layers
+            payload["hidden_state_layers"] = "all"
+        elif isinstance(layers, list):
+            payload["hidden_state_layers"] = layers
+        else:
+            raise ValueError(
+                f"layers must be 'all' or list[int], got {type(layers).__name__}"
+            )
+
+        # Make request
+        response = self.client.post("/generate", json=payload)
+        response.raise_for_status()
+        result = response.json()
+
+        # Extract layer data from response
+        hidden_states_data = result.get("hidden_states", {})
+        layers_data = hidden_states_data.get("layers", {})
+
+        # Build response structure
+        response_dict: dict[str, Any] = {
+            "layers": layers_data,
+            "text": text,
+            "model": model,
+            "metadata": result.get("metadata", {}),
+        }
+
+        # Compute D_eff for each layer if requested
+        if include_d_eff and layers_data:
+            try:
+                import numpy as np
+                from .analysis.conveyance_metrics import calculate_d_eff
+
+                d_eff_values: dict[str, int] = {}
+                for layer_idx, layer_info in layers_data.items():
+                    # Extract the vector from layer info
+                    if isinstance(layer_info, dict) and "vector" in layer_info:
+                        vector = layer_info["vector"]
+                    elif isinstance(layer_info, list):
+                        vector = layer_info
+                    else:
+                        continue
+
+                    # Convert to numpy array
+                    arr = np.array(vector)
+                    if arr.ndim == 1:
+                        arr = arr.reshape(1, -1)
+
+                    # Compute D_eff
+                    d_eff = calculate_d_eff(arr, variance_threshold)
+                    d_eff_values[layer_idx] = d_eff
+
+                response_dict["d_eff"] = d_eff_values
+            except ImportError:
+                # numpy or analysis module not available
+                response_dict["d_eff"] = None
+                response_dict["metadata"]["d_eff_error"] = "numpy or analysis module not available"
+            except Exception as e:
+                # D_eff computation failed
+                response_dict["d_eff"] = None
+                response_dict["metadata"]["d_eff_error"] = str(e)
+
+        return response_dict
+
+
 # Convenience function for quick access
 def connect(base_url: str = "http://localhost:8080", timeout: float = 300.0) -> LoomClient:
     """Create a client connection to The Loom server.

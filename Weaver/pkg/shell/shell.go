@@ -249,10 +249,10 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 		ShowElapsed: true,
 	})
 	spin.Start()
+	defer spin.Stop() // Ensure spinner stops even on error or panic
 
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
-	spin.Stop()
 	if err != nil {
 		return createChatError(agent.Name(), agent.BackendName(), err)
 	}

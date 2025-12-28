@@ -223,7 +223,9 @@ func (r *SessionRegistry) Active() []*Session {
 // the registry. After unregistration, the same name can be used to register
 // a new session.
 //
-// Unregister returns an error if no session with the given name is registered.
+// Unregister returns a SessionNotFoundError if no session with the given name
+// is registered. The error includes available session names and suggestions
+// for similar names to help identify typos.
 //
 // This method is safe for concurrent use.
 func (r *SessionRegistry) Unregister(name string) error {
@@ -231,7 +233,12 @@ func (r *SessionRegistry) Unregister(name string) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.sessions[name]; !exists {
-		return fmt.Errorf("session %q not registered", name)
+		available := r.listSessionNamesLocked()
+		return &SessionNotFoundError{
+			Name:              name,
+			AvailableSessions: available,
+			Suggestions:       suggestSimilarSessions(name, available),
+		}
 	}
 	delete(r.sessions, name)
 	return nil

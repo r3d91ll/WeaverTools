@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
+	"github.com/r3d91ll/weaver/pkg/concepts"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 )
 
@@ -32,13 +33,16 @@ var commands = []string{
 // ShellCompleter provides tab completion for commands and agent names.
 // It implements the readline.AutoCompleter interface.
 type ShellCompleter struct {
-	agents *runtime.Manager
+	agents   *runtime.Manager
+	concepts *concepts.Store
 }
 
-// NewShellCompleter creates a new completer with access to the agent manager.
-func NewShellCompleter(agents *runtime.Manager) *ShellCompleter {
+// NewShellCompleter creates a new completer with access to the agent manager
+// and concept store for dynamic tab completion.
+func NewShellCompleter(agents *runtime.Manager, conceptStore *concepts.Store) *ShellCompleter {
 	return &ShellCompleter{
-		agents: agents,
+		agents:   agents,
+		concepts: conceptStore,
 	}
 }
 

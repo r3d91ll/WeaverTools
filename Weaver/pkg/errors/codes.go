@@ -240,6 +240,20 @@ const (
 
 	// ErrAnalysisInvalidResponse indicates the analysis server returned invalid data.
 	ErrAnalysisInvalidResponse = "ANALYSIS_INVALID_RESPONSE"
+
+	// ErrConceptsSampleInvalid indicates a sample failed validation.
+	// General validation failure for samples added to the store.
+	ErrConceptsSampleInvalid = "CONCEPTS_SAMPLE_INVALID"
+
+	// ErrConceptsDimensionMismatch indicates a sample's hidden state dimension
+	// doesn't match the existing samples in the concept.
+	ErrConceptsDimensionMismatch = "CONCEPTS_DIMENSION_MISMATCH"
+
+	// ErrConceptsEmptySampleID indicates the sample ID is empty.
+	ErrConceptsEmptySampleID = "CONCEPTS_EMPTY_SAMPLE_ID"
+
+	// ErrConceptsNilHiddenState indicates the sample has a nil hidden state.
+	ErrConceptsNilHiddenState = "CONCEPTS_NIL_HIDDEN_STATE"
 )
 
 // -----------------------------------------------------------------------------

@@ -375,4 +375,19 @@ If you suspect a token has been exposed:
 
 ### Pre-commit Hook (Optional)
 
-A pre-commit hook is available to scan for potential secrets before commits. See `.git/hooks/` for installation instructions. This adds an extra layer of protection against accidental credential exposure.
+A pre-commit hook is available to scan for potential secrets before commits. This adds an extra layer of protection against accidental credential exposure.
+
+**Installation:**
+```bash
+./hooks/install.sh           # Install the hook
+./hooks/install.sh --remove  # Remove the hook
+```
+
+The hook scans staged files for:
+- GitHub tokens (OAuth: `gho_*`, PAT: `ghp_*`, Fine-grained: `github_pat_*`)
+- Anthropic/OpenAI API keys
+- AWS access keys
+- Private key files
+- Generic secret patterns
+
+To bypass the hook in exceptional cases: `git commit --no-verify` (NOT recommended)

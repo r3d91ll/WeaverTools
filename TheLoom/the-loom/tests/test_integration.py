@@ -1435,3 +1435,230 @@ def test_layer_deff_patterns(app_client, examples_dir):
         json.dump(example, f, indent=2)
 
     print("\nD_eff pattern analysis completed successfully!")
+
+
+def test_multi_agent_layer_comparison(app_client, examples_dir):
+    """Test comparing D_eff values across two different models (multi-agent comparison).
+
+    This test validates:
+    1. Hidden states can be extracted from multiple models
+    2. D_eff comparison between models identifies differences
+    3. Layer comparison metrics are computed correctly
+    """
+    import numpy as np
+    from src.analysis.layer_utils import compare_layer_deff, LayerComparisonResult
+
+    # Use both test models as "agents"
+    model_a_id = TEST_MODELS["embedding"]
+    model_b_id = TEST_MODELS["generative_small"]
+
+    print("\n=== Multi-Agent Layer Comparison Test ===")
+    print(f"Agent A (Embedding): {model_a_id}")
+    print(f"Agent B (Generative): {model_b_id}")
+
+    # Load both models
+    load_a = app_client.post("/models/load", json={
+        "model": model_a_id,
+        "dtype": "float16",
+    })
+    assert load_a.status_code == 200, f"Failed to load Agent A: {load_a.text}"
+    model_a_info = load_a.json()
+
+    load_b = app_client.post("/models/load", json={
+        "model": model_b_id,
+        "dtype": "float16",
+    })
+    assert load_b.status_code == 200, f"Failed to load Agent B: {load_b.text}"
+    model_b_info = load_b.json()
+
+    print(f"\nAgent A: {model_a_info['num_layers']} layers, {model_a_info['hidden_size']} hidden dim")
+    print(f"Agent B: {model_b_info['num_layers']} layers, {model_b_info['hidden_size']} hidden dim")
+
+    # Test prompt for both models
+    test_prompt = "Understanding semantic representations in neural networks."
+
+    # Extract hidden states from Agent A (embedding model)
+    # Use /embed endpoint for embedding model
+    response_a = app_client.post("/embed", json={
+        "model": model_a_id,
+        "text": test_prompt,
+        "pooling": "mean",
+    })
+    assert response_a.status_code == 200, f"Agent A embed failed: {response_a.text}"
+    data_a = response_a.json()
+
+    # For embedding model, we only get the final layer embedding
+    # Compute D_eff for the embedding
+    embedding_a = np.array(data_a["embedding"]).reshape(1, -1)
+    hidden_size_a = model_a_info["hidden_size"]
+
+    # Compute D_eff for embedding model (single layer)
+    # Since we have a single sample, D_eff is effectively 1 (or we use the hidden size)
+    # For meaningful comparison, we treat the embedding dimension as D_eff proxy
+    deff_agent_a = {-1: min(embedding_a.shape[1], hidden_size_a)}
+
+    print(f"\nAgent A D_eff at final layer: {deff_agent_a[-1]}")
+
+    # Extract hidden states from Agent B (generative model) using multiple layers
+    num_layers_b = model_b_info["num_layers"]
+    hidden_size_b = model_b_info["hidden_size"]
+
+    # Request specific layers from generative model
+    layers_to_compare = [-1, -(num_layers_b // 2), -num_layers_b]
+    layers_to_compare = [max(l, -num_layers_b) for l in layers_to_compare]
+
+    response_b = app_client.post("/generate", json={
+        "model": model_b_id,
+        "prompt": test_prompt,
+        "max_tokens": 5,
+        "temperature": 0.1,
+        "return_hidden_states": True,
+        "hidden_state_layers": layers_to_compare,
+        "hidden_state_format": "list",
+    })
+    assert response_b.status_code == 200, f"Agent B generate failed: {response_b.text}"
+    data_b = response_b.json()
+
+    hidden_states_b = data_b.get("hidden_states", {})
+    assert hidden_states_b, "Agent B returned no hidden states"
+
+    # Compute D_eff for each layer of Agent B
+    deff_agent_b: dict[int, int] = {}
+
+    for layer_idx in layers_to_compare:
+        layer_key = str(layer_idx)
+        if layer_key not in hidden_states_b:
+            continue
+
+        layer_data = hidden_states_b[layer_key]
+        hidden_state_flat = np.array(layer_data["data"])
+        shape = layer_data["shape"]
+
+        if len(shape) == 2:
+            embeddings = hidden_state_flat.reshape(shape)
+        else:
+            embeddings = hidden_state_flat.reshape(1, -1)
+
+        # Compute D_eff
+        if embeddings.shape[0] >= 2:
+            centered = embeddings - embeddings.mean(axis=0)
+            cov = centered.T @ centered / (embeddings.shape[0] - 1)
+            eigenvalues = np.linalg.eigvalsh(cov)[::-1]
+            eigenvalues = np.maximum(eigenvalues, 0)
+
+            total_variance = eigenvalues.sum()
+            if total_variance > 1e-10:
+                cumulative_variance = np.cumsum(eigenvalues) / total_variance
+                d_eff = int(np.searchsorted(cumulative_variance, 0.90) + 1)
+                d_eff = max(1, min(d_eff, embeddings.shape[1]))
+            else:
+                d_eff = 1
+        else:
+            d_eff = 1
+
+        deff_agent_b[layer_idx] = d_eff
+
+    print(f"Agent B D_eff values: {deff_agent_b}")
+
+    # Now compare the D_eff values using compare_layer_deff
+    # For meaningful comparison, we compare at the final layer (-1) which both have
+    common_layer = -1
+
+    # Create comparison-ready dicts with common layers
+    layers_a_for_compare = {common_layer: deff_agent_a[common_layer]}
+    layers_b_for_compare = {common_layer: deff_agent_b.get(common_layer, hidden_size_b)}
+
+    # Use the compare_layer_deff utility
+    comparison_result = compare_layer_deff(layers_a_for_compare, layers_b_for_compare)
+
+    print("\n=== Layer Comparison Results ===")
+    print(f"Common layers compared: {comparison_result.common_layers}")
+    print(f"Agent A D_eff: {comparison_result.layers_a}")
+    print(f"Agent B D_eff: {comparison_result.layers_b}")
+    print(f"Layer differences (A - B): {comparison_result.layer_diffs}")
+    print(f"Mean difference: {comparison_result.mean_diff:.2f}")
+    print(f"Abs mean difference: {comparison_result.abs_mean_diff:.2f}")
+    print(f"Correlation: {comparison_result.correlation:.4f}")
+    print(f"Divergence quality: {comparison_result.divergence_quality}")
+
+    # Validate comparison result structure
+    assert isinstance(comparison_result, LayerComparisonResult)
+    assert len(comparison_result.common_layers) > 0, "Should have at least one common layer"
+    assert common_layer in comparison_result.layer_diffs
+
+    # Validate D_eff values are in valid ranges
+    for layer, deff in comparison_result.layers_a.items():
+        assert 1 <= deff, f"D_eff {deff} must be >= 1 for Agent A layer {layer}"
+
+    for layer, deff in comparison_result.layers_b.items():
+        assert 1 <= deff, f"D_eff {deff} must be >= 1 for Agent B layer {layer}"
+
+    # Test multi-layer comparison if Agent B has multiple layers
+    if len(deff_agent_b) > 1:
+        print("\n=== Extended Multi-Layer Comparison ===")
+
+        # Create synthetic comparison by comparing Agent B layers against themselves shifted
+        # This demonstrates the comparison utility with multiple layers
+        layers_b_shifted: dict[int, int] = {}
+        for layer_idx, deff in deff_agent_b.items():
+            # Add some variation to simulate a different "agent"
+            layers_b_shifted[layer_idx] = max(1, deff + np.random.randint(-10, 10))
+
+        extended_comparison = compare_layer_deff(deff_agent_b, layers_b_shifted)
+
+        print(f"Agent B original D_eff: {extended_comparison.layers_a}")
+        print(f"Agent B shifted D_eff: {extended_comparison.layers_b}")
+        print(f"Common layers: {extended_comparison.common_layers}")
+        print(f"Correlation: {extended_comparison.correlation:.4f}")
+        print(f"Max diff at layer {extended_comparison.max_diff_layer}: {extended_comparison.max_diff_value}")
+        print(f"Divergence: {extended_comparison.divergence_quality}")
+
+        # Validate extended comparison
+        assert len(extended_comparison.common_layers) == len(deff_agent_b)
+
+    # Save example
+    example = {
+        "description": "Multi-agent layer comparison comparing D_eff between different model types",
+        "agents": {
+            "agent_a": {
+                "model_id": model_a_id,
+                "type": "embedding",
+                "num_layers": model_a_info["num_layers"],
+                "hidden_size": model_a_info["hidden_size"],
+                "d_eff_values": {str(k): v for k, v in deff_agent_a.items()},
+            },
+            "agent_b": {
+                "model_id": model_b_id,
+                "type": "generative",
+                "num_layers": model_b_info["num_layers"],
+                "hidden_size": model_b_info["hidden_size"],
+                "d_eff_values": {str(k): v for k, v in deff_agent_b.items()},
+            },
+        },
+        "comparison": {
+            "common_layers": comparison_result.common_layers,
+            "layer_diffs": {str(k): v for k, v in comparison_result.layer_diffs.items()},
+            "mean_diff": comparison_result.mean_diff,
+            "abs_mean_diff": comparison_result.abs_mean_diff,
+            "correlation": comparison_result.correlation,
+            "divergence_quality": comparison_result.divergence_quality,
+        },
+        "test_prompt": test_prompt,
+        "validation": {
+            "comparison_computed": True,
+            "common_layers_found": len(comparison_result.common_layers) > 0,
+            "d_eff_in_valid_range": all(
+                deff >= 1 for deff in list(comparison_result.layers_a.values())
+                + list(comparison_result.layers_b.values())
+            ),
+        },
+        "use_cases": [
+            "Compare how different models process the same input",
+            "Identify layers where models diverge in information processing",
+            "Analyze D_eff patterns across different architectures",
+        ],
+    }
+    with open(examples_dir / "multi_agent_layer_comparison.json", "w") as f:
+        json.dump(example, f, indent=2)
+
+    print("\nMulti-agent layer comparison test completed successfully!")

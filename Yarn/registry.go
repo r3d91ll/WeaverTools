@@ -2,8 +2,12 @@
 package yarn
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -239,4 +243,111 @@ func (r *SessionRegistry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.sessions)
+}
+
+// registryManifest stores the mapping between registry names and filenames.
+// This is saved as manifest.json to preserve the original names when loading.
+type registryManifest struct {
+	// Version is the manifest format version for future compatibility.
+	Version int `json:"version"`
+	// Sessions maps registry names to their sanitized filenames (without .json extension).
+	Sessions map[string]string `json:"sessions"`
+}
+
+// manifestFilename is the name of the manifest file in the save directory.
+const manifestFilename = "manifest.json"
+
+// Save persists all sessions to a directory as JSON files.
+// Each session is saved as {sanitized-name}.json, with a manifest.json
+// that maps registry names to filenames.
+//
+// Save follows the copy-under-lock pattern: session data is copied while
+// holding the read lock, then the lock is released before performing I/O.
+// This minimizes lock contention during potentially slow file operations.
+//
+// The directory is created if it doesn't exist (using os.MkdirAll).
+// Returns an error if the directory cannot be created or if any session
+// fails to save.
+//
+// This method is safe for concurrent use.
+func (r *SessionRegistry) Save(dir string) error {
+	// Copy data under lock, then release before I/O
+	r.mu.RLock()
+	toSave := make(map[string][]byte)
+	manifest := registryManifest{
+		Version:  1,
+		Sessions: make(map[string]string),
+	}
+
+	for name, session := range r.sessions {
+		if session == nil {
+			continue
+		}
+
+		// Serialize the session while holding the lock
+		data, err := json.MarshalIndent(session, "", "  ")
+		if err != nil {
+			r.mu.RUnlock()
+			return fmt.Errorf("failed to marshal session %q: %w", name, err)
+		}
+
+		// Create sanitized filename and store mapping
+		filename := sanitizeFilename(name)
+		toSave[filename] = data
+		manifest.Sessions[name] = filename
+	}
+	r.mu.RUnlock()
+
+	// Perform I/O without holding the lock
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %q: %w", dir, err)
+	}
+
+	// Save the manifest first
+	manifestData, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal manifest: %w", err)
+	}
+	manifestPath := filepath.Join(dir, manifestFilename)
+	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
+		return fmt.Errorf("failed to write manifest to %q: %w", manifestPath, err)
+	}
+
+	// Save each session
+	for filename, data := range toSave {
+		path := filepath.Join(dir, filename+".json")
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			return fmt.Errorf("failed to write session to %q: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
+// unsafeFilenameChars matches characters that are unsafe for filenames.
+// This includes: / \ : * ? " < > | and control characters.
+var unsafeFilenameChars = regexp.MustCompile(`[/\\:*?"<>|\x00-\x1f]`)
+
+// sanitizeFilename converts a session name to a safe filename.
+// Unsafe characters are replaced with underscores, and the result is
+// truncated to a reasonable length. The original name is preserved in
+// the manifest for accurate restoration during Load.
+func sanitizeFilename(name string) string {
+	// Replace unsafe characters with underscores
+	safe := unsafeFilenameChars.ReplaceAllString(name, "_")
+
+	// Trim leading/trailing whitespace and dots (problematic on some filesystems)
+	safe = strings.Trim(safe, " .")
+
+	// Handle empty result
+	if safe == "" {
+		safe = "_unnamed_"
+	}
+
+	// Truncate to reasonable length (200 chars, leaving room for .json extension)
+	if len(safe) > 200 {
+		safe = safe[:200]
+	}
+
+	return safe
 }

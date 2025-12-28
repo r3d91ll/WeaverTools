@@ -17,6 +17,8 @@ from src.patching.experiments import (
     PatchingResult,
     PathOutput,
     PathRecorder,
+    PathRecording,
+    RecordingStore,
     compute_causal_effect,
 )
 from src.patching.hooks import (
@@ -67,6 +69,9 @@ __all__: list[str] = [
     "PathRecorder",
     "PatchingExperiment",
     "MultiLayerPatchingStudy",
+    # Recording system
+    "PathRecording",
+    "RecordingStore",
     # Experiment utilities
     "compute_causal_effect",
 ]

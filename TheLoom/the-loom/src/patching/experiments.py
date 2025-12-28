@@ -447,6 +447,508 @@ class PathRecorder:
         }
 
 
+@dataclass
+class PathRecording:
+    """Complete recording of all execution paths for a patching experiment.
+
+    This class represents a persistent recording of clean, corrupted, and patched
+    outputs that can be saved to disk and loaded for later analysis.
+    """
+
+    recording_id: str  # Unique recording identifier
+    experiment_name: str  # Name of the experiment
+    clean_output: PathOutput | None = None  # Clean path output
+    corrupted_output: PathOutput | None = None  # Corrupted path output
+    patched_outputs: list[PathOutput] = field(default_factory=list)  # All patched outputs
+    created_at: float = field(default_factory=time.time)  # Recording creation time
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_recorder(
+        cls,
+        recorder: PathRecorder,
+        experiment_name: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> "PathRecording":
+        """
+        Create a PathRecording from a PathRecorder.
+
+        Parameters:
+            recorder (PathRecorder): The recorder to create recording from.
+            experiment_name (str): Name for the recording.
+            metadata (dict[str, Any] | None): Additional metadata.
+
+        Returns:
+            PathRecording: New recording instance.
+        """
+        return cls(
+            recording_id=recorder.experiment_id,
+            experiment_name=experiment_name,
+            clean_output=recorder.clean_path,
+            corrupted_output=recorder.corrupted_path,
+            patched_outputs=list(recorder.patched_paths),
+            metadata=metadata or {},
+        )
+
+    @property
+    def has_all_paths(self) -> bool:
+        """Check if all three path types are recorded."""
+        return (
+            self.clean_output is not None
+            and self.corrupted_output is not None
+            and len(self.patched_outputs) > 0
+        )
+
+    @property
+    def num_patched_paths(self) -> int:
+        """Get the number of patched path outputs."""
+        return len(self.patched_outputs)
+
+    def get_path_by_type(self, path_type: ExecutionPath) -> PathOutput | None:
+        """
+        Get path output by type.
+
+        Parameters:
+            path_type (ExecutionPath): The path type to retrieve.
+
+        Returns:
+            PathOutput | None: The path output, or None if not recorded.
+        """
+        if path_type == ExecutionPath.CLEAN:
+            return self.clean_output
+        elif path_type == ExecutionPath.CORRUPTED:
+            return self.corrupted_output
+        elif path_type == ExecutionPath.PATCHED:
+            return self.patched_outputs[0] if self.patched_outputs else None
+        return None
+
+    def get_patched_by_layer(self, layer: int) -> list[PathOutput]:
+        """
+        Get all patched outputs for a specific layer.
+
+        Parameters:
+            layer (int): The layer to filter by.
+
+        Returns:
+            list[PathOutput]: Patched outputs for the specified layer.
+        """
+        results = []
+        for output in self.patched_outputs:
+            patch_info = output.metadata.get("patch_info", {})
+            if patch_info.get("layer") == layer:
+                results.append(output)
+        return results
+
+    def get_patched_by_component(self, component: str) -> list[PathOutput]:
+        """
+        Get all patched outputs for a specific component.
+
+        Parameters:
+            component (str): The component to filter by.
+
+        Returns:
+            list[PathOutput]: Patched outputs for the specified component.
+        """
+        results = []
+        for output in self.patched_outputs:
+            patch_info = output.metadata.get("patch_info", {})
+            if patch_info.get("component") == component:
+                results.append(output)
+        return results
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Convert to dictionary for serialization.
+
+        Returns:
+            dict[str, Any]: Dictionary representation.
+        """
+        return {
+            "recording_id": self.recording_id,
+            "experiment_name": self.experiment_name,
+            "clean_output": self.clean_output.to_dict() if self.clean_output else None,
+            "corrupted_output": self.corrupted_output.to_dict() if self.corrupted_output else None,
+            "patched_outputs": [p.to_dict() for p in self.patched_outputs],
+            "created_at": self.created_at,
+            "has_all_paths": self.has_all_paths,
+            "num_patched_paths": self.num_patched_paths,
+            "metadata": self.metadata,
+        }
+
+
+class RecordingStore:
+    """Persistent store for path recordings.
+
+    Manages saving, loading, and querying of path recordings for
+    systematic patching studies. Supports both in-memory and disk-based storage.
+    """
+
+    def __init__(self, storage_dir: str | Path | None = None) -> None:
+        """
+        Initialize the recording store.
+
+        Parameters:
+            storage_dir (str | Path | None): Directory for disk storage.
+                If None, only in-memory storage is used.
+        """
+        self._storage_dir = Path(storage_dir) if storage_dir else None
+        self._recordings: dict[str, PathRecording] = {}
+
+        # Create storage directory if specified
+        if self._storage_dir:
+            self._storage_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def storage_dir(self) -> Path | None:
+        """Get the storage directory."""
+        return self._storage_dir
+
+    @property
+    def num_recordings(self) -> int:
+        """Get the number of recordings in the store."""
+        return len(self._recordings)
+
+    def record_path_output(
+        self,
+        recording_id: str,
+        path_type: ExecutionPath,
+        output: torch.Tensor | None,
+        cache: ActivationCache | None = None,
+        input_text: str | None = None,
+        input_tokens: torch.Tensor | None = None,
+        generation_time_ms: float = 0.0,
+        metadata: dict[str, Any] | None = None,
+        experiment_name: str | None = None,
+    ) -> PathOutput:
+        """
+        Record a path output to the store.
+
+        Parameters:
+            recording_id (str): ID for the recording.
+            path_type (ExecutionPath): Type of path being recorded.
+            output (torch.Tensor | None): Model output.
+            cache (ActivationCache | None): Activation cache.
+            input_text (str | None): Input text.
+            input_tokens (torch.Tensor | None): Input tokens.
+            generation_time_ms (float): Generation time.
+            metadata (dict[str, Any] | None): Additional metadata.
+            experiment_name (str | None): Name of the experiment.
+
+        Returns:
+            PathOutput: The recorded path output.
+        """
+        # Get or create recording
+        if recording_id not in self._recordings:
+            self._recordings[recording_id] = PathRecording(
+                recording_id=recording_id,
+                experiment_name=experiment_name or recording_id,
+            )
+
+        recording = self._recordings[recording_id]
+
+        # Create path output
+        path_output = PathOutput(
+            path_type=path_type,
+            output=output,
+            cache=cache,
+            input_text=input_text,
+            input_tokens=input_tokens,
+            generation_time_ms=generation_time_ms,
+            metadata=metadata or {},
+        )
+
+        # Store in recording
+        if path_type == ExecutionPath.CLEAN:
+            recording.clean_output = path_output
+        elif path_type == ExecutionPath.CORRUPTED:
+            recording.corrupted_output = path_output
+        elif path_type == ExecutionPath.PATCHED:
+            recording.patched_outputs.append(path_output)
+
+        return path_output
+
+    def record_clean_path(
+        self,
+        recording_id: str,
+        output: torch.Tensor | None,
+        cache: ActivationCache | None = None,
+        input_text: str | None = None,
+        **kwargs: Any,
+    ) -> PathOutput:
+        """
+        Record a clean path output.
+
+        Parameters:
+            recording_id (str): ID for the recording.
+            output (torch.Tensor | None): Model output.
+            cache (ActivationCache | None): Activation cache.
+            input_text (str | None): Input text.
+            **kwargs: Additional arguments.
+
+        Returns:
+            PathOutput: The recorded path output.
+        """
+        return self.record_path_output(
+            recording_id=recording_id,
+            path_type=ExecutionPath.CLEAN,
+            output=output,
+            cache=cache,
+            input_text=input_text,
+            **kwargs,
+        )
+
+    def record_corrupted_path(
+        self,
+        recording_id: str,
+        output: torch.Tensor | None,
+        cache: ActivationCache | None = None,
+        input_text: str | None = None,
+        **kwargs: Any,
+    ) -> PathOutput:
+        """
+        Record a corrupted path output.
+
+        Parameters:
+            recording_id (str): ID for the recording.
+            output (torch.Tensor | None): Model output.
+            cache (ActivationCache | None): Activation cache.
+            input_text (str | None): Input text.
+            **kwargs: Additional arguments.
+
+        Returns:
+            PathOutput: The recorded path output.
+        """
+        return self.record_path_output(
+            recording_id=recording_id,
+            path_type=ExecutionPath.CORRUPTED,
+            output=output,
+            cache=cache,
+            input_text=input_text,
+            **kwargs,
+        )
+
+    def record_patched_path(
+        self,
+        recording_id: str,
+        output: torch.Tensor | None,
+        layer: int,
+        component: str,
+        cache: ActivationCache | None = None,
+        **kwargs: Any,
+    ) -> PathOutput:
+        """
+        Record a patched path output.
+
+        Parameters:
+            recording_id (str): ID for the recording.
+            output (torch.Tensor | None): Model output.
+            layer (int): Layer that was patched.
+            component (str): Component that was patched.
+            cache (ActivationCache | None): Activation cache.
+            **kwargs: Additional arguments.
+
+        Returns:
+            PathOutput: The recorded path output.
+        """
+        metadata = kwargs.pop("metadata", {})
+        metadata["patch_info"] = {"layer": layer, "component": component}
+
+        return self.record_path_output(
+            recording_id=recording_id,
+            path_type=ExecutionPath.PATCHED,
+            output=output,
+            cache=cache,
+            metadata=metadata,
+            **kwargs,
+        )
+
+    def get_recording(self, recording_id: str) -> PathRecording | None:
+        """
+        Get a recording by ID.
+
+        Parameters:
+            recording_id (str): The recording ID.
+
+        Returns:
+            PathRecording | None: The recording, or None if not found.
+        """
+        return self._recordings.get(recording_id)
+
+    def add_recording(self, recording: PathRecording) -> None:
+        """
+        Add a recording to the store.
+
+        Parameters:
+            recording (PathRecording): The recording to add.
+        """
+        self._recordings[recording.recording_id] = recording
+
+    def remove_recording(self, recording_id: str) -> bool:
+        """
+        Remove a recording from the store.
+
+        Parameters:
+            recording_id (str): The recording ID to remove.
+
+        Returns:
+            bool: True if removed, False if not found.
+        """
+        if recording_id in self._recordings:
+            del self._recordings[recording_id]
+            return True
+        return False
+
+    def list_recordings(self) -> list[str]:
+        """
+        List all recording IDs.
+
+        Returns:
+            list[str]: List of recording IDs.
+        """
+        return list(self._recordings.keys())
+
+    def get_complete_recordings(self) -> list[PathRecording]:
+        """
+        Get all recordings that have all three path types.
+
+        Returns:
+            list[PathRecording]: Complete recordings.
+        """
+        return [r for r in self._recordings.values() if r.has_all_paths]
+
+    def save_recording(self, recording_id: str) -> bool:
+        """
+        Save a recording to disk.
+
+        Parameters:
+            recording_id (str): The recording ID to save.
+
+        Returns:
+            bool: True if saved successfully, False otherwise.
+        """
+        if not self._storage_dir:
+            return False
+
+        recording = self._recordings.get(recording_id)
+        if not recording:
+            return False
+
+        # Save metadata as JSON
+        import json
+        meta_path = self._storage_dir / f"{recording_id}_meta.json"
+        with open(meta_path, "w") as f:
+            json.dump(recording.to_dict(), f, indent=2)
+
+        # Save tensors separately if present
+        tensors_path = self._storage_dir / f"{recording_id}_tensors.pt"
+        tensors: dict[str, torch.Tensor] = {}
+
+        if recording.clean_output and recording.clean_output.output is not None:
+            tensors["clean_output"] = recording.clean_output.output
+        if recording.corrupted_output and recording.corrupted_output.output is not None:
+            tensors["corrupted_output"] = recording.corrupted_output.output
+        for i, patched in enumerate(recording.patched_outputs):
+            if patched.output is not None:
+                tensors[f"patched_output_{i}"] = patched.output
+
+        if tensors:
+            torch.save(tensors, tensors_path)
+
+        return True
+
+    def load_recording(self, recording_id: str) -> PathRecording | None:
+        """
+        Load a recording from disk.
+
+        Parameters:
+            recording_id (str): The recording ID to load.
+
+        Returns:
+            PathRecording | None: The loaded recording, or None if not found.
+        """
+        if not self._storage_dir:
+            return None
+
+        import json
+        meta_path = self._storage_dir / f"{recording_id}_meta.json"
+        if not meta_path.exists():
+            return None
+
+        with open(meta_path, "r") as f:
+            data = json.load(f)
+
+        # Create recording from metadata
+        recording = PathRecording(
+            recording_id=data["recording_id"],
+            experiment_name=data["experiment_name"],
+            created_at=data["created_at"],
+            metadata=data.get("metadata", {}),
+        )
+
+        # Load tensors if available
+        tensors_path = self._storage_dir / f"{recording_id}_tensors.pt"
+        tensors: dict[str, torch.Tensor] = {}
+        if tensors_path.exists():
+            tensors = torch.load(tensors_path, weights_only=True)
+
+        # Reconstruct path outputs (without full cache, just output tensors)
+        if data.get("clean_output"):
+            recording.clean_output = PathOutput(
+                path_type=ExecutionPath.CLEAN,
+                output=tensors.get("clean_output"),
+                cache=None,
+                input_text=data["clean_output"].get("input_text"),
+                generation_time_ms=data["clean_output"].get("generation_time_ms", 0.0),
+                metadata=data["clean_output"].get("metadata", {}),
+            )
+
+        if data.get("corrupted_output"):
+            recording.corrupted_output = PathOutput(
+                path_type=ExecutionPath.CORRUPTED,
+                output=tensors.get("corrupted_output"),
+                cache=None,
+                input_text=data["corrupted_output"].get("input_text"),
+                generation_time_ms=data["corrupted_output"].get("generation_time_ms", 0.0),
+                metadata=data["corrupted_output"].get("metadata", {}),
+            )
+
+        for i, patched_data in enumerate(data.get("patched_outputs", [])):
+            recording.patched_outputs.append(
+                PathOutput(
+                    path_type=ExecutionPath.PATCHED,
+                    output=tensors.get(f"patched_output_{i}"),
+                    cache=None,
+                    generation_time_ms=patched_data.get("generation_time_ms", 0.0),
+                    metadata=patched_data.get("metadata", {}),
+                )
+            )
+
+        # Add to in-memory store
+        self._recordings[recording_id] = recording
+
+        return recording
+
+    def clear(self) -> None:
+        """Clear all recordings from the in-memory store."""
+        self._recordings.clear()
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Convert store state to dictionary.
+
+        Returns:
+            dict[str, Any]: Dictionary representation.
+        """
+        return {
+            "storage_dir": str(self._storage_dir) if self._storage_dir else None,
+            "num_recordings": self.num_recordings,
+            "recordings": {
+                rid: recording.to_dict()
+                for rid, recording in self._recordings.items()
+            },
+        }
+
+
 class PatchingExperiment:
     """Orchestrator for systematic activation patching experiments.
 

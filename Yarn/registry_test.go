@@ -60,6 +60,15 @@ func TestRegister(t *testing.T) {
 		if err == nil {
 			t.Error("expected error for duplicate name, got nil")
 		}
+
+		// Verify error type is SessionAlreadyRegisteredError
+		sarErr, ok := err.(*SessionAlreadyRegisteredError)
+		if !ok {
+			t.Fatalf("expected *SessionAlreadyRegisteredError, got %T", err)
+		}
+		if sarErr.Name != "dup" {
+			t.Errorf("expected Name 'dup', got %q", sarErr.Name)
+		}
 	})
 
 	t.Run("different names allowed", func(t *testing.T) {
@@ -520,6 +529,15 @@ func TestUnregister(t *testing.T) {
 		if err == nil {
 			t.Error("expected error for non-existent session, got nil")
 		}
+
+		// Verify error type is SessionNotFoundError
+		snfErr, ok := err.(*SessionNotFoundError)
+		if !ok {
+			t.Fatalf("expected *SessionNotFoundError, got %T", err)
+		}
+		if snfErr.Name != "nonexistent" {
+			t.Errorf("expected Name 'nonexistent', got %q", snfErr.Name)
+		}
 	})
 
 	t.Run("unregister reduces count", func(t *testing.T) {
@@ -645,6 +663,15 @@ func TestCreate(t *testing.T) {
 		}
 		if session != nil {
 			t.Error("expected nil session on error")
+		}
+
+		// Verify error type is SessionAlreadyRegisteredError
+		sarErr, ok := err.(*SessionAlreadyRegisteredError)
+		if !ok {
+			t.Fatalf("expected *SessionAlreadyRegisteredError, got %T", err)
+		}
+		if sarErr.Name != "dup" {
+			t.Errorf("expected Name 'dup', got %q", sarErr.Name)
 		}
 	})
 
@@ -944,7 +971,7 @@ func TestConcurrentRegister(t *testing.T) {
 
 		var wg sync.WaitGroup
 		successCount := make(chan struct{}, numGoroutines)
-		errorCount := make(chan struct{}, numGoroutines)
+		errorCount := make(chan error, numGoroutines)
 
 		for i := 0; i < numGoroutines; i++ {
 			wg.Add(1)
@@ -952,7 +979,7 @@ func TestConcurrentRegister(t *testing.T) {
 				defer wg.Done()
 				session := NewSession(fmt.Sprintf("session-%d", idx), "description")
 				if err := registry.Register("same-name", session); err != nil {
-					errorCount <- struct{}{}
+					errorCount <- err
 				} else {
 					successCount <- struct{}{}
 				}
@@ -969,8 +996,12 @@ func TestConcurrentRegister(t *testing.T) {
 			successes++
 		}
 		errors := 0
-		for range errorCount {
+		for err := range errorCount {
 			errors++
+			// Verify error type is SessionAlreadyRegisteredError
+			if _, ok := err.(*SessionAlreadyRegisteredError); !ok {
+				t.Errorf("expected *SessionAlreadyRegisteredError, got %T", err)
+			}
 		}
 
 		// Exactly one should succeed

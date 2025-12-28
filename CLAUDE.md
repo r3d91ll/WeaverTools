@@ -325,3 +325,54 @@ cd Weaver
 - torch, transformers, sentence-transformers
 - FastAPI, uvicorn
 - Optional: bitsandbytes (quantization), prometheus-client (metrics)
+
+## Security & Credential Handling
+
+### Important: Never Commit Credentials
+
+**API tokens, passwords, and secrets must NEVER be committed to version control.** This includes:
+- GitHub tokens (PATs: `ghp_*`, OAuth: `gho_*`, Fine-grained: `github_pat_*`)
+- API keys (Anthropic: `sk-ant-*`, OpenAI: `sk-*`)
+- Database passwords
+- Private keys
+
+If a credential is accidentally committed, consider it **compromised** and revoke it immediately.
+
+### Using Environment Files
+
+This repository uses `.env` files for credential storage. These files are gitignored and should never be committed.
+
+**Setup:**
+```bash
+# Navigate to the auto-claude directory
+cd .auto-claude
+
+# Copy the template
+cp .env.example .env
+
+# Edit .env with your actual credentials
+nano .env  # or your preferred editor
+```
+
+**The `.env.example` template** is safely committed and shows required variables without real values. Always use it as reference when setting up credentials.
+
+### Credential Best Practices
+
+1. **Use environment variables** - Store credentials in `.env` files or system environment variables
+2. **Never hardcode secrets** - Don't put real tokens in source code, even temporarily
+3. **Use minimal scopes** - When creating tokens, grant only the permissions needed
+4. **Rotate regularly** - Periodically regenerate tokens and update your `.env` files
+5. **Different tokens per environment** - Use separate tokens for development/staging/production
+
+### Token Revocation
+
+If you suspect a token has been exposed:
+
+1. **GitHub tokens**: Go to https://github.com/settings/tokens and delete the compromised token
+2. **Generate a new token** with the same scopes
+3. **Update your `.env` file** with the new token
+4. **Audit usage** - Check GitHub's security log for unauthorized access
+
+### Pre-commit Hook (Optional)
+
+A pre-commit hook is available to scan for potential secrets before commits. See `.git/hooks/` for installation instructions. This adds an extra layer of protection against accidental credential exposure.

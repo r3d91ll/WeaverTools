@@ -308,25 +308,15 @@ def main() -> None:
         print("Part 2: Full Layer Analysis (all layers)")
         print("=" * 50)
 
-        # Request all layers by not specifying hidden_state_layers
-        full_result = client.generate(
+        # analyze_layer_hidden_states will call generate() internally
+        full_results = analyze_layer_hidden_states(
+            client=client,
             model=MODEL_ID,
             prompt=PROMPT,
-            max_tokens=20,
-            return_hidden_states=True,
-            # When hidden_state_layers is not specified, server returns all
+            layers="all",
         )
 
-        all_hidden_states = full_result.get("hidden_states", {})
-
-        if all_hidden_states:
-            full_results = analyze_layer_hidden_states(
-                client=client,
-                model=MODEL_ID,
-                prompt=PROMPT,
-                layers=[int(k) for k in all_hidden_states.keys()],
-            )
-
+        if full_results:
             print_layer_analysis(full_results)
 
             # Plot D_eff across all layers

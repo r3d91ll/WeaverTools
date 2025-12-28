@@ -31,6 +31,39 @@ type Concept struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// ConceptStats holds detailed statistics for a single concept.
+type ConceptStats struct {
+	// Name is the concept name.
+	Name string `json:"name"`
+
+	// SampleCount is the number of samples for this concept.
+	SampleCount int `json:"sample_count"`
+
+	// Dimension is the hidden state dimension (0 if no samples with hidden states).
+	Dimension int `json:"dimension"`
+
+	// MismatchedIDs contains IDs of samples with dimensions different from the expected.
+	// Empty if all dimensions are consistent.
+	MismatchedIDs []string `json:"mismatched_ids,omitempty"`
+
+	// CreatedAt is when the concept was first created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the concept was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Models lists unique model identifiers used to extract samples.
+	Models []string `json:"models,omitempty"`
+
+	// OldestSampleAt is the timestamp of the oldest sample extraction.
+	// Zero time if no samples.
+	OldestSampleAt time.Time `json:"oldest_sample_at,omitempty"`
+
+	// NewestSampleAt is the timestamp of the newest sample extraction.
+	// Zero time if no samples.
+	NewestSampleAt time.Time `json:"newest_sample_at,omitempty"`
+}
+
 // Dimension returns the hidden state dimension for this concept.
 // Returns 0 if no samples or no hidden states.
 func (c *Concept) Dimension() int {

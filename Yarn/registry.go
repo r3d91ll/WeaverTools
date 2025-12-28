@@ -279,6 +279,9 @@ func (r *SessionRegistry) Save(dir string) error {
 		Sessions: make(map[string]string),
 	}
 
+	// Track used filenames to handle collisions
+	usedFilenames := make(map[string]struct{})
+
 	for name, session := range r.sessions {
 		if session == nil {
 			continue
@@ -291,8 +294,9 @@ func (r *SessionRegistry) Save(dir string) error {
 			return fmt.Errorf("failed to marshal session %q: %w", name, err)
 		}
 
-		// Create sanitized filename and store mapping
-		filename := sanitizeFilename(name)
+		// Create sanitized filename with collision handling
+		baseFilename := sanitizeFilename(name)
+		filename := makeUniqueFilename(baseFilename, usedFilenames)
 		toSave[filename] = data
 		manifest.Sessions[name] = filename
 	}
@@ -416,16 +420,26 @@ func (r *SessionRegistry) Load(dir string) error {
 }
 
 // unsafeFilenameChars matches characters that are unsafe for filenames.
-// This includes: / \ : * ? " < > | and control characters.
-var unsafeFilenameChars = regexp.MustCompile(`[/\\:*?"<>|\x00-\x1f]`)
+// This includes: / \ : * ? " < > | % and control characters.
+// The percent sign is included since we use percent-encoding.
+var unsafeFilenameChars = regexp.MustCompile(`[/\\:*?"<>|%\x00-\x1f]`)
 
 // sanitizeFilename converts a session name to a safe filename.
-// Unsafe characters are replaced with underscores, and the result is
-// truncated to a reasonable length. The original name is preserved in
-// the manifest for accurate restoration during Load.
+// Unsafe characters are percent-encoded (e.g., "/" becomes "%2F") to preserve
+// uniqueness and avoid collisions between different names. The original name
+// is also preserved in the manifest for accurate restoration during Load.
+//
+// This function handles:
+//   - Percent-encoding of unsafe characters (/, \, :, *, ?, ", <, >, |, %)
+//   - Removing leading/trailing whitespace and dots
+//   - Empty names (returns "_unnamed_")
+//   - Long names (truncated to 190 characters)
 func sanitizeFilename(name string) string {
-	// Replace unsafe characters with underscores
-	safe := unsafeFilenameChars.ReplaceAllString(name, "_")
+	// Percent-encode unsafe characters to avoid collisions
+	// e.g., "a/b" -> "a%2Fb", "a:b" -> "a%3Ab"
+	safe := unsafeFilenameChars.ReplaceAllStringFunc(name, func(s string) string {
+		return fmt.Sprintf("%%%02X", s[0])
+	})
 
 	// Trim leading/trailing whitespace and dots (problematic on some filesystems)
 	safe = strings.Trim(safe, " .")
@@ -435,10 +449,26 @@ func sanitizeFilename(name string) string {
 		safe = "_unnamed_"
 	}
 
-	// Truncate to reasonable length (200 chars, leaving room for .json extension)
-	if len(safe) > 200 {
-		safe = safe[:200]
+	// Truncate to reasonable length (190 chars, leaving room for .json extension and suffix)
+	if len(safe) > 190 {
+		safe = safe[:190]
 	}
 
 	return safe
+}
+
+// makeUniqueFilename ensures the filename is unique within the given set.
+// If the base filename already exists, it appends a numeric suffix (e.g., "_1", "_2").
+// Returns the unique filename (without extension) and adds it to the used set.
+func makeUniqueFilename(base string, used map[string]struct{}) string {
+	filename := base
+	counter := 1
+	for {
+		if _, exists := used[filename]; !exists {
+			used[filename] = struct{}{}
+			return filename
+		}
+		filename = fmt.Sprintf("%s_%d", base, counter)
+		counter++
+	}
 }

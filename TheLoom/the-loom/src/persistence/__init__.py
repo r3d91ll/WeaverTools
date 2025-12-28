@@ -23,6 +23,7 @@ from .database import (
     MetricRecord,
     init_db,
 )
+from .export import ExperimentExporter, ExportError
 from .query import ExperimentQuery, ExperimentSummary
 from .storage import HiddenStateStorage
 
@@ -684,6 +685,9 @@ __all__ = [
     # Query
     "ExperimentQuery",
     "ExperimentSummary",
+    # Export
+    "ExperimentExporter",
+    "ExportError",
     # Manager
     "ExperimentPersistence",
 ]

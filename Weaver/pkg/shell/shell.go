@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/r3d91ll/weaver/pkg/analysis"
 	"github.com/r3d91ll/weaver/pkg/concepts"
 	werrors "github.com/r3d91ll/weaver/pkg/errors"
+	"github.com/r3d91ll/weaver/pkg/export"
 	"github.com/r3d91ll/weaver/pkg/help"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/yarn"
@@ -186,6 +188,25 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 	case "/clear_concepts":
 		count := s.conceptStore.ClearAll()
 		fmt.Printf("Cleared %d concepts.\n", count)
+
+	// Academic export commands
+	case "/export_latex":
+		return s.handleExportLaTeX(ctx, parts[1:])
+
+	case "/export_csv":
+		return s.handleExportCSV(ctx, parts[1:])
+
+	case "/export_figures":
+		return s.handleExportFigures(ctx, parts[1:])
+
+	case "/export_bibtex":
+		return s.handleExportBibTeX(ctx, parts[1:])
+
+	case "/export_repro":
+		return s.handleExportRepro(ctx, parts[1:])
+
+	case "/export_all":
+		return s.handleExportAll(ctx, parts[1:])
 
 	default:
 		fmt.Printf("Unknown command: %s\n", cmd)
@@ -1172,6 +1193,583 @@ func createMetricsAnalysisError(conceptName string, vectorCount int, cause error
 			WithSuggestion("Verify your vectors have the expected dimension").
 			WithSuggestion("Try again with /metrics " + conceptName)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Export Command Handlers
+// -----------------------------------------------------------------------------
+
+// toolVersion returns the current tool version for exports.
+const toolVersion = "0.1.0"
+
+// handleExportLaTeX handles /export_latex command.
+// Exports measurements as a LaTeX table.
+func (s *Shell) handleExportLaTeX(_ context.Context, args []string) error {
+	measurements := s.session.Measurements
+	if len(measurements) == 0 {
+		return createExportNoDataError("/export_latex", "latex")
+	}
+
+	// Create export directory
+	exportDir := s.getExportDir("latex")
+	if err := os.MkdirAll(exportDir, 0755); err != nil {
+		return createExportDirError("/export_latex", "latex", exportDir, err)
+	}
+
+	// Convert measurements to export format
+	rows := s.measurementsToRows()
+
+	// Generate measurement table
+	config := export.DefaultMeasurementTableConfig()
+	config.Caption = fmt.Sprintf("Conveyance Measurements - Session %s", s.session.Name)
+	config.Label = "tab:measurements"
+	tableContent := export.GenerateMeasurementTable(rows, config)
+
+	// Generate summary table
+	stats := export.ComputeSummaryStats(rows)
+	summaryConfig := export.DefaultSummaryTableConfig()
+	summaryConfig.Caption = "Summary Statistics"
+	summaryConfig.Label = "tab:summary"
+	summaryContent := export.GenerateSummaryTable(stats, summaryConfig)
+
+	// Write measurement table
+	measurementPath := filepath.Join(exportDir, "measurements.tex")
+	if err := os.WriteFile(measurementPath, []byte(tableContent), 0644); err != nil {
+		return createExportError("/export_latex", "latex", measurementPath, err)
+	}
+
+	// Write summary table
+	summaryPath := filepath.Join(exportDir, "summary.tex")
+	if err := os.WriteFile(summaryPath, []byte(summaryContent), 0644); err != nil {
+		return createExportError("/export_latex", "latex", summaryPath, err)
+	}
+
+	fmt.Printf("\033[32m✓ Exported LaTeX tables\033[0m\n")
+	fmt.Printf("  Measurements: %s\n", measurementPath)
+	fmt.Printf("  Summary: %s\n", summaryPath)
+	fmt.Printf("  Records: %d\n", len(rows))
+	fmt.Println()
+
+	return nil
+}
+
+// handleExportCSV handles /export_csv command.
+// Exports measurements as CSV with accompanying metadata JSON.
+func (s *Shell) handleExportCSV(_ context.Context, args []string) error {
+	measurements := s.session.Measurements
+	if len(measurements) == 0 {
+		return createExportNoDataError("/export_csv", "csv")
+	}
+
+	// Create export directory
+	exportDir := s.getExportDir("csv")
+	if err := os.MkdirAll(exportDir, 0755); err != nil {
+		return createExportDirError("/export_csv", "csv", exportDir, err)
+	}
+
+	// Convert measurements to CSV format
+	csvMeasurements := s.measurementsToCSV()
+
+	// Write CSV file
+	csvPath := filepath.Join(exportDir, "measurements.csv")
+	csvFile, err := os.Create(csvPath)
+	if err != nil {
+		return createExportError("/export_csv", "csv", csvPath, err)
+	}
+	defer csvFile.Close()
+
+	config := export.DefaultCSVConfig()
+	if err := export.ExportMeasurementsToCSV(csvFile, csvMeasurements, config); err != nil {
+		return createExportError("/export_csv", "csv", csvPath, err)
+	}
+
+	// Write metadata JSON
+	metadataPath := filepath.Join(exportDir, "metadata.json")
+	metadataFile, err := os.Create(metadataPath)
+	if err != nil {
+		return createExportError("/export_csv", "metadata", metadataPath, err)
+	}
+	defer metadataFile.Close()
+
+	if err := export.ExportMetadataToJSON(metadataFile, config); err != nil {
+		return createExportError("/export_csv", "metadata", metadataPath, err)
+	}
+
+	fmt.Printf("\033[32m✓ Exported CSV data\033[0m\n")
+	fmt.Printf("  Data: %s\n", csvPath)
+	fmt.Printf("  Metadata: %s\n", metadataPath)
+	fmt.Printf("  Records: %d\n", len(csvMeasurements))
+	fmt.Println()
+
+	return nil
+}
+
+// handleExportFigures handles /export_figures command.
+// Exports measurement plots as SVG and PDF figures.
+func (s *Shell) handleExportFigures(_ context.Context, args []string) error {
+	measurements := s.session.Measurements
+	if len(measurements) == 0 {
+		return createExportNoDataError("/export_figures", "figures")
+	}
+
+	// Create export directories
+	svgDir := s.getExportDir("svg")
+	pdfDir := s.getExportDir("pdf")
+	if err := os.MkdirAll(svgDir, 0755); err != nil {
+		return createExportDirError("/export_figures", "svg", svgDir, err)
+	}
+	if err := os.MkdirAll(pdfDir, 0755); err != nil {
+		return createExportDirError("/export_figures", "pdf", pdfDir, err)
+	}
+
+	// Convert measurements to rows
+	rows := s.measurementsToRows()
+
+	metrics := []export.PlotMetric{
+		export.MetricDEff,
+		export.MetricBeta,
+		export.MetricAlignment,
+		export.MetricCPair,
+	}
+
+	// Export each metric as both SVG and PDF
+	for _, metric := range metrics {
+		metricName := string(metric)
+
+		// SVG export
+		svgConfig := export.DefaultSVGConfig()
+		svgConfig.Title = fmt.Sprintf("%s Over Time - %s", export.GetMetricInfo(metric).Name, s.session.Name)
+		svgConfig.ToolVersion = toolVersion
+		svg := export.GenerateMeasurementPlot(rows, metric, svgConfig)
+
+		svgPath := filepath.Join(svgDir, fmt.Sprintf("%s.svg", metricName))
+		if err := os.WriteFile(svgPath, []byte(svg), 0644); err != nil {
+			return createExportError("/export_figures", "svg", svgPath, err)
+		}
+
+		// PDF export
+		pdfConfig := export.DefaultPDFConfig()
+		pdfConfig.Title = fmt.Sprintf("%s Over Time - %s", export.GetMetricInfo(metric).Name, s.session.Name)
+		pdfConfig.ToolVersion = toolVersion
+		pdfConfig.Author = "WeaverTools"
+		pdf := export.GenerateMeasurementPDFPlot(rows, metric, pdfConfig)
+
+		pdfPath := filepath.Join(pdfDir, fmt.Sprintf("%s.pdf", metricName))
+		if err := os.WriteFile(pdfPath, pdf, 0644); err != nil {
+			return createExportError("/export_figures", "pdf", pdfPath, err)
+		}
+	}
+
+	// Generate multi-metric comparison plot
+	svgConfig := export.DefaultSVGConfig()
+	svgConfig.Title = fmt.Sprintf("All Metrics Over Time - %s", s.session.Name)
+	svgConfig.ToolVersion = toolVersion
+	multiSVG := export.GenerateMultiMetricPlot(rows, metrics, svgConfig)
+
+	multiSVGPath := filepath.Join(svgDir, "all_metrics.svg")
+	if err := os.WriteFile(multiSVGPath, []byte(multiSVG), 0644); err != nil {
+		return createExportError("/export_figures", "svg", multiSVGPath, err)
+	}
+
+	pdfConfig := export.DefaultPDFConfig()
+	pdfConfig.Title = fmt.Sprintf("All Metrics Over Time - %s", s.session.Name)
+	pdfConfig.ToolVersion = toolVersion
+	pdfConfig.Author = "WeaverTools"
+	multiPDF := export.GenerateMultiMetricPDFPlot(rows, metrics, pdfConfig)
+
+	multiPDFPath := filepath.Join(pdfDir, "all_metrics.pdf")
+	if err := os.WriteFile(multiPDFPath, multiPDF, 0644); err != nil {
+		return createExportError("/export_figures", "pdf", multiPDFPath, err)
+	}
+
+	fmt.Printf("\033[32m✓ Exported figures\033[0m\n")
+	fmt.Printf("  SVG: %s\n", svgDir)
+	fmt.Printf("  PDF: %s\n", pdfDir)
+	fmt.Printf("  Plots: %d metrics + multi-metric comparison\n", len(metrics))
+	fmt.Println()
+
+	return nil
+}
+
+// handleExportBibTeX handles /export_bibtex command.
+// Exports a BibTeX citation for the analysis.
+func (s *Shell) handleExportBibTeX(_ context.Context, args []string) error {
+	// Create export directory
+	exportDir := s.getExportDir("bibtex")
+	if err := os.MkdirAll(exportDir, 0755); err != nil {
+		return createExportDirError("/export_bibtex", "bibtex", exportDir, err)
+	}
+
+	// Compute experiment hash
+	stats := s.session.Stats()
+	hash := export.ComputeExperimentHash(
+		toolVersion,
+		string(s.session.Config.MeasurementMode),
+		stats.MeasurementCount,
+		stats.ConversationCount,
+		s.session.StartedAt,
+		s.session.EndedAt,
+		nil,
+	)
+
+	// Generate citation
+	entry := export.GenerateWeaverCitation(toolVersion, hash)
+
+	// Write BibTeX file
+	bibPath := filepath.Join(exportDir, "weaver.bib")
+	entries := []*export.BibTeXEntry{entry}
+	bibContent := export.GenerateBibTeXFile(entries, export.DefaultBibTeXConfig())
+
+	if err := os.WriteFile(bibPath, []byte(bibContent), 0644); err != nil {
+		return createExportError("/export_bibtex", "bibtex", bibPath, err)
+	}
+
+	fmt.Printf("\033[32m✓ Exported BibTeX citation\033[0m\n")
+	fmt.Printf("  File: %s\n", bibPath)
+	fmt.Printf("  Key: %s\n", entry.Key)
+	fmt.Printf("  Hash: %s\n", hash.ShortHash())
+	fmt.Println()
+
+	// Show the citation
+	fmt.Println("Citation entry:")
+	fmt.Println(entry.String())
+
+	return nil
+}
+
+// handleExportRepro handles /export_repro command.
+// Exports a reproducibility report.
+func (s *Shell) handleExportRepro(_ context.Context, args []string) error {
+	// Create export directory
+	exportDir := s.getExportDir("reproducibility")
+	if err := os.MkdirAll(exportDir, 0755); err != nil {
+		return createExportDirError("/export_repro", "reproducibility", exportDir, err)
+	}
+
+	stats := s.session.Stats()
+
+	// Build reproducibility report
+	builder := export.NewReportBuilder().
+		WithToolVersion(toolVersion).
+		WithSessionID(s.session.ID).
+		WithSessionName(s.session.Name).
+		WithSessionDescription(s.session.Description).
+		WithMeasurementMode(string(s.session.Config.MeasurementMode)).
+		WithMeasurementCount(stats.MeasurementCount).
+		WithConversationCount(stats.ConversationCount).
+		WithTimeRange(s.session.StartedAt, s.session.EndedAt)
+
+	// Add session metadata as parameters
+	if s.session.Metadata != nil {
+		for k, v := range s.session.Metadata {
+			if str, ok := v.(string); ok {
+				builder.WithParameter(k, str)
+			}
+		}
+	}
+
+	report := builder.Build()
+
+	// Export in all three formats
+	formats := []struct {
+		format   export.ReportFormat
+		filename string
+	}{
+		{export.FormatMarkdown, "report.md"},
+		{export.FormatLaTeX, "report.tex"},
+		{export.FormatJSON, "report.json"},
+	}
+
+	for _, f := range formats {
+		config := export.DefaultReproducibilityConfig()
+		config.Format = f.format
+
+		content := report.Format(config)
+		path := filepath.Join(exportDir, f.filename)
+
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return createExportError("/export_repro", string(f.format), path, err)
+		}
+	}
+
+	fmt.Printf("\033[32m✓ Exported reproducibility report\033[0m\n")
+	fmt.Printf("  Directory: %s\n", exportDir)
+	fmt.Printf("  Formats: Markdown, LaTeX, JSON\n")
+	fmt.Printf("  Hash: %s\n", report.ExperimentHash.ShortHash())
+	fmt.Println()
+
+	return nil
+}
+
+// handleExportAll handles /export_all command.
+// Exports all formats at once.
+func (s *Shell) handleExportAll(ctx context.Context, args []string) error {
+	fmt.Println("\033[33mExporting all formats...\033[0m")
+	fmt.Println()
+
+	// Track errors and failed formats
+	var errors []error
+	var failedFormats []string
+
+	// Export LaTeX
+	if err := s.handleExportLaTeX(ctx, args); err != nil {
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "LaTeX")
+		werrors.Display(err)
+	}
+
+	// Export CSV
+	if err := s.handleExportCSV(ctx, args); err != nil {
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "CSV")
+		werrors.Display(err)
+	}
+
+	// Export Figures
+	if err := s.handleExportFigures(ctx, args); err != nil {
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "Figures")
+		werrors.Display(err)
+	}
+
+	// Export BibTeX
+	if err := s.handleExportBibTeX(ctx, args); err != nil {
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "BibTeX")
+		werrors.Display(err)
+	}
+
+	// Export Reproducibility Report
+	if err := s.handleExportRepro(ctx, args); err != nil {
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "Reproducibility")
+		werrors.Display(err)
+	}
+
+	if len(errors) > 0 {
+		fmt.Printf("\033[33mCompleted with %d error(s)\033[0m\n", len(errors))
+		return createExportMultipleError(failedFormats, errors[0])
+	}
+
+	fmt.Printf("\033[32m✓ All exports complete\033[0m\n")
+	fmt.Printf("  Export directory: %s\n", s.getExportBaseDir())
+	fmt.Println()
+
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// Export Helper Functions
+// -----------------------------------------------------------------------------
+
+// getExportBaseDir returns the base export directory for the session.
+func (s *Shell) getExportBaseDir() string {
+	exportPath := s.session.Config.ExportPath
+	if exportPath == "" {
+		exportPath = "./experiments"
+	}
+	return filepath.Join(exportPath, s.session.ID)
+}
+
+// getExportDir returns the export directory for a specific format.
+func (s *Shell) getExportDir(format string) string {
+	return filepath.Join(s.getExportBaseDir(), format)
+}
+
+// measurementsToRows converts session measurements to export.MeasurementRow format.
+func (s *Shell) measurementsToRows() []export.MeasurementRow {
+	measurements := s.session.Measurements
+	rows := make([]export.MeasurementRow, len(measurements))
+
+	for i, m := range measurements {
+		rows[i] = export.MeasurementRow{
+			Turn:       m.TurnNumber,
+			Sender:     m.SenderName,
+			Receiver:   m.ReceiverName,
+			DEff:       m.DEff,
+			Beta:       m.Beta,
+			Alignment:  m.Alignment,
+			CPair:      m.CPair,
+			BetaStatus: string(m.BetaStatus),
+		}
+	}
+
+	return rows
+}
+
+// measurementsToCSV converts session measurements to export.CSVMeasurement format.
+func (s *Shell) measurementsToCSV() []*export.CSVMeasurement {
+	measurements := s.session.Measurements
+	csvMeasurements := make([]*export.CSVMeasurement, len(measurements))
+
+	for i, m := range measurements {
+		csvMeasurements[i] = &export.CSVMeasurement{
+			ID:             m.ID,
+			Timestamp:      m.Timestamp,
+			SessionID:      m.SessionID,
+			ConversationID: m.ConversationID,
+			TurnNumber:     m.TurnNumber,
+			SenderID:       m.SenderID,
+			SenderName:     m.SenderName,
+			SenderRole:     m.SenderRole,
+			ReceiverID:     m.ReceiverID,
+			ReceiverName:   m.ReceiverName,
+			ReceiverRole:   m.ReceiverRole,
+			DEff:           m.DEff,
+			Beta:           m.Beta,
+			Alignment:      m.Alignment,
+			CPair:          m.CPair,
+			BetaStatus:     string(m.BetaStatus),
+			IsUnilateral:   m.IsUnilateral,
+			MessageContent: m.MessageContent,
+			TokenCount:     m.TokenCount,
+		}
+	}
+
+	return csvMeasurements
+}
+
+// createExportError creates a structured error for export failures.
+// It analyzes the underlying error cause to provide specific guidance.
+func createExportError(command, format, path string, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	switch {
+	case strings.Contains(errStr, "permission denied"):
+		return werrors.IOWrap(cause, werrors.ErrExportPermissionDenied, "export failed: permission denied").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check write permissions for the export directory").
+			WithSuggestion("Try exporting to a different location").
+			WithSuggestion("Run 'ls -la' on the directory to check permissions")
+
+	case strings.Contains(errStr, "no space left") || strings.Contains(errStr, "disk quota"):
+		return werrors.IOWrap(cause, werrors.ErrExportDiskFull, "export failed: disk space full").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Free up disk space").
+			WithSuggestion("Try exporting to a different disk or location").
+			WithSuggestion("Check disk usage with 'df -h'")
+
+	case strings.Contains(errStr, "read-only"):
+		return werrors.IOWrap(cause, werrors.ErrExportReadOnly, "export failed: read-only filesystem").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("The target location is on a read-only filesystem").
+			WithSuggestion("Try exporting to a different location").
+			WithSuggestion("Remount the filesystem with write permissions if applicable")
+
+	case strings.Contains(errStr, "file name too long") || strings.Contains(errStr, "name too long"):
+		return werrors.IOWrap(cause, werrors.ErrExportPathTooLong, "export failed: path too long").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithContext("path_length", fmt.Sprintf("%d", len(path))).
+			WithSuggestion("Use a shorter export path").
+			WithSuggestion("Configure a different export directory in session settings")
+
+	case strings.Contains(errStr, "invalid argument") || strings.Contains(errStr, "invalid path"):
+		return werrors.IOWrap(cause, werrors.ErrExportInvalidPath, "export failed: invalid path").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check the export path for invalid characters").
+			WithSuggestion("Ensure the path is properly formatted")
+
+	case strings.Contains(errStr, "no such file or directory"):
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "export failed: directory does not exist").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check if the parent directory exists").
+			WithSuggestion("The export directory could not be created")
+
+	case strings.Contains(errStr, "is a directory"):
+		return werrors.IOWrap(cause, werrors.ErrExportWriteFailed, "export failed: path is a directory").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("The specified path is a directory, not a file").
+			WithSuggestion("Check the export path configuration")
+
+	case strings.Contains(errStr, "too many open files"):
+		return werrors.IOWrap(cause, werrors.ErrExportWriteFailed, "export failed: too many open files").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Too many files are currently open").
+			WithSuggestion("Close some files or increase the system file descriptor limit")
+
+	default:
+		return werrors.IOWrap(cause, werrors.ErrExportWriteFailed, "export failed").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check if the export directory exists and is writable").
+			WithSuggestion("Review the error details for more information").
+			WithSuggestion("Try running the export command again")
+	}
+}
+
+// createExportNoDataError creates a structured error when no data is available to export.
+func createExportNoDataError(command, format string) *werrors.WeaverError {
+	return werrors.IO(werrors.ErrExportNoData, "no data available to export").
+		WithContext("command", command).
+		WithContext("format", format).
+		WithSuggestion("Run some analyses first to generate data").
+		WithSuggestion("Use /extract and /analyze commands to create measurements").
+		WithSuggestion("Use /session to check current session status")
+}
+
+// createExportDirError creates a structured error for directory creation failures.
+func createExportDirError(command, format, path string, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	switch {
+	case strings.Contains(errStr, "permission denied"):
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "failed to create export directory: permission denied").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check write permissions for the parent directory").
+			WithSuggestion("Try exporting to a different location")
+
+	case strings.Contains(errStr, "no space left"):
+		return werrors.IOWrap(cause, werrors.ErrExportDiskFull, "failed to create export directory: disk full").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Free up disk space before exporting")
+
+	case strings.Contains(errStr, "file exists"):
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "failed to create export directory: path exists as file").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("A file exists at the directory path").
+			WithSuggestion("Remove the file or use a different export location")
+
+	default:
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "failed to create export directory").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check if the parent directory exists").
+			WithSuggestion("Verify write permissions for the directory")
+	}
+}
+
+// createExportMultipleError creates a structured error for /export_all failures.
+func createExportMultipleError(failedFormats []string, firstError error) *werrors.WeaverError {
+	return werrors.IOWrap(firstError, werrors.ErrExportFailed, "some exports failed").
+		WithContext("command", "/export_all").
+		WithContext("failed_formats", strings.Join(failedFormats, ", ")).
+		WithSuggestion("Check individual export error messages above").
+		WithSuggestion("Fix the issues and run /export_all again").
+		WithSuggestion("Or run individual export commands for specific formats")
 }
 
 // Close closes the shell.

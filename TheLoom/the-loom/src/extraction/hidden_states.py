@@ -981,3 +981,180 @@ def extract_with_checkpointing(
             "requires_grad_enabled": requires_grad,
         },
     )
+
+
+@dataclass
+class InferenceResult:
+    """Container for inference-optimized hidden state extraction results.
+
+    This dataclass holds the results of running a model in inference mode
+    with explicit gradient disabling for maximum memory efficiency during
+    pure inference workloads.
+    """
+
+    hidden_states: dict[int, torch.Tensor]  # Layer index -> hidden state tensor
+    logits: torch.Tensor | None  # Model output logits
+    inference_mode_used: bool  # Whether torch.inference_mode was used
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_hidden_states_dict(self) -> dict[int, torch.Tensor]:
+        """Return the hidden states dictionary.
+
+        Returns:
+            dict[int, torch.Tensor]: Mapping from layer index to hidden state tensor.
+        """
+        return self.hidden_states
+
+    def to_hidden_state_results(
+        self,
+        normalize: bool = False,
+    ) -> dict[int, HiddenStateResult]:
+        """Convert hidden state tensors to HiddenStateResult objects.
+
+        Parameters:
+            normalize (bool): If True, L2-normalize the resulting vectors.
+
+        Returns:
+            dict[int, HiddenStateResult]: Mapping from layer index to
+                HiddenStateResult containing the hidden state vector.
+        """
+        return extract_hidden_states(self.hidden_states, normalize=normalize)
+
+
+def extract_inference_optimized(
+    model: HookedTransformer,
+    tokens: torch.Tensor,
+    layers: list[int] | None = None,
+    precision: str | None = None,
+    use_inference_mode: bool = True,
+    clear_cache: bool = False,
+) -> InferenceResult:
+    """
+    Extract hidden states with explicit gradient disabling for memory-efficient inference.
+
+    This function provides maximum memory efficiency for pure inference workloads
+    by using torch.inference_mode() (or torch.no_grad() as fallback). Unlike
+    gradient checkpointing which is designed for training with backward passes,
+    this function is optimized for scenarios where no gradients are needed.
+
+    Key optimizations:
+    - Uses torch.inference_mode() for more efficient inference than no_grad()
+    - Explicitly disables gradient computation and storage
+    - Selective caching to only store requested layer activations
+    - Optional CUDA cache clearing to reduce memory fragmentation
+
+    Parameters:
+        model (HookedTransformer): TransformerLens model to run.
+        tokens (torch.Tensor): Input token IDs of shape [batch, seq_len] or [seq_len].
+        layers (list[int] | None): Specific layer indices to extract hidden states
+            from. If None, extracts from all layers.
+        precision (str | None): Target precision for extracted tensors. Supported:
+            'fp16', 'fp32', 'bf16'. If None, uses model's native precision.
+        use_inference_mode (bool): If True (default), uses torch.inference_mode()
+            which is more efficient than torch.no_grad(). Set to False for
+            compatibility with older PyTorch versions or specific use cases.
+        clear_cache (bool): If True, clears CUDA cache before and after extraction
+            to reduce memory fragmentation. Default is False to avoid overhead.
+
+    Returns:
+        InferenceResult: Container with hidden states, logits, and metadata
+            about the inference configuration used.
+
+    Raises:
+        ImportError: If TransformerLens is not installed.
+
+    Example:
+        >>> from transformer_lens import HookedTransformer
+        >>> model = HookedTransformer.from_pretrained("gpt2")
+        >>> tokens = model.to_tokens("Example text for inference")
+        >>>
+        >>> # Extract hidden states in inference mode
+        >>> result = extract_inference_optimized(
+        ...     model, tokens,
+        ...     layers=[0, 5, 11],
+        ...     precision='fp16',  # Use half precision for memory savings
+        ... )
+        >>>
+        >>> # Access results
+        >>> layer_5_hidden = result.hidden_states[5]
+        >>> print(f"Inference mode used: {result.inference_mode_used}")
+
+    Note:
+        - torch.inference_mode() is more efficient than torch.no_grad() because
+          it also disables version tracking for autograd.
+        - This function should be used for all pure inference workloads.
+        - For training with backward passes, use extract_with_checkpointing() instead.
+        - Combines well with precision='fp16' for additional memory savings.
+    """
+    try:
+        from transformer_lens import HookedTransformer as TL_HookedTransformer
+    except ImportError as e:
+        raise ImportError(
+            "TransformerLens is required for inference-optimized extraction. "
+            "Install with: pip install transformer-lens"
+        ) from e
+
+    # Clear GPU cache before extraction if requested
+    if clear_cache and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Ensure tokens has batch dimension
+    if tokens.dim() == 1:
+        tokens = tokens.unsqueeze(0)
+
+    # Determine target layers
+    n_layers = model.cfg.n_layers
+    if layers is None:
+        target_layers = list(range(n_layers))
+    else:
+        target_layers = layers
+
+    # Build hook filter for selective caching
+    names_filter = build_hook_filter(layers=target_layers)
+
+    # Choose the appropriate gradient disabling context
+    # torch.inference_mode() is more efficient than torch.no_grad()
+    # as it also disables autograd's version tracking
+    if use_inference_mode:
+        context_manager = torch.inference_mode()
+        inference_mode_used = True
+    else:
+        context_manager = torch.no_grad()
+        inference_mode_used = False
+
+    # Run model with explicit gradient disabling for memory efficiency
+    with context_manager:
+        logits, cache = model.run_with_cache(
+            tokens,
+            names_filter=names_filter,
+        )
+
+        # Extract hidden states from cache (still within context for efficiency)
+        hidden_states: dict[int, torch.Tensor] = {}
+        for layer_idx in target_layers:
+            hook_name = f"blocks.{layer_idx}.hook_resid_post"
+            if hook_name in cache:
+                tensor = cache[hook_name]
+
+                # Apply precision conversion if requested
+                if precision is not None and precision in PRECISION_DTYPE_MAP:
+                    tensor = tensor.to(dtype=PRECISION_DTYPE_MAP[precision])
+
+                hidden_states[layer_idx] = tensor
+
+    # Clear GPU cache after extraction if requested
+    if clear_cache and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return InferenceResult(
+        hidden_states=hidden_states,
+        logits=logits,
+        inference_mode_used=inference_mode_used,
+        metadata={
+            "layers_extracted": target_layers,
+            "precision": precision,
+            "use_inference_mode": use_inference_mode,
+            "clear_cache": clear_cache,
+            "n_tokens": tokens.shape[-1] if tokens.dim() > 0 else 0,
+        },
+    )

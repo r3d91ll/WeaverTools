@@ -1366,13 +1366,13 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     async def unload_model(model_id: str) -> dict[str, Any]:
         """
         Unload a previously loaded model and free its resources.
-        
+
         Parameters:
             model_id (str): Identifier of the model to unload. Instances of "--" in the string are normalized to "/".
-        
+
         Returns:
             result (dict[str, Any]): Dictionary containing "status" set to "unloaded" and the normalized "model_id".
-        
+
         Raises:
             HTTPException: 404 if the specified model is not currently loaded.
         """
@@ -1384,6 +1384,77 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         # Update loaded models gauge
         set_models_loaded(len(model_manager.list_loaded()))
         return {"status": "unloaded", "model_id": model_id}
+
+    # ========================================================================
+    # GPU Configuration Endpoints (Dynamic GPU Pool Management)
+    # ========================================================================
+
+    @app.post("/gpu/configure", response_model=GPUConfigureResponse)
+    async def configure_gpu(request: GPUConfigureRequest) -> GPUConfigureResponse:
+        """
+        Dynamically update GPU configuration at runtime.
+
+        Allows reconfiguring which GPU devices are available for model loading
+        and which device is the default, without requiring a server restart.
+
+        At least one of allowed_devices or default_device must be provided.
+        Changes take effect immediately for subsequent model loads.
+
+        Example request:
+            {
+                "allowed_devices": [0, 1],
+                "default_device": 0
+            }
+
+        Args:
+            request: GPU configuration changes to apply.
+
+        Returns:
+            GPUConfigureResponse: Updated GPU configuration with status message.
+
+        Raises:
+            HTTPException: 400 if validation fails (invalid device indices,
+                empty allowed_devices list, or default_device not in allowed_devices).
+            HTTPException: 500 for unexpected errors.
+        """
+        # Validate that at least one field is provided
+        if request.allowed_devices is None and request.default_device is None:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one of 'allowed_devices' or 'default_device' must be provided",
+            )
+
+        changes: list[str] = []
+
+        try:
+            # Apply allowed_devices update if provided
+            if request.allowed_devices is not None:
+                gpu_manager.set_allowed_devices(request.allowed_devices)
+                changes.append(f"allowed_devices updated to {request.allowed_devices}")
+
+            # Apply default_device update if provided
+            if request.default_device is not None:
+                gpu_manager.set_default_device(request.default_device)
+                changes.append(f"default_device updated to {request.default_device}")
+
+            # Build response message
+            message = "; ".join(changes) if changes else "No changes applied"
+
+            return GPUConfigureResponse(
+                allowed_devices=gpu_manager.allowed_devices,
+                default_device=gpu_manager.default_device,
+                available_devices=gpu_manager.available_devices,
+                message=message,
+            )
+
+        except ValueError as e:
+            # Validation errors from GPUManager methods
+            logger.warning(f"GPU configuration validation failed: {e}")
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            # Unexpected errors
+            logger.exception(f"GPU configuration failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     @app.post("/generate", response_model=GenerateResponse)
     async def generate(request: GenerateRequest) -> GenerateResponse:

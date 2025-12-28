@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 # SQL statements for schema creation
@@ -373,7 +374,10 @@ class DatabaseManager:
         Returns:
             List of experiment records matching the filters.
         """
-        query = "SELECT id, created_at, model, config_json, status, notes FROM experiments WHERE 1=1"
+        query = (
+            "SELECT id, created_at, model, config_json, status, notes "
+            "FROM experiments WHERE 1=1"
+        )
         params: list[Any] = []
 
         if model is not None:

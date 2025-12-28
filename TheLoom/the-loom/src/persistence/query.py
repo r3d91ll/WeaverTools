@@ -203,7 +203,7 @@ class ExperimentQuery:
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
-                (f"$.{config_key}", str(config_value), limit),
+                (f"$.{config_key}", config_value, limit),
             )
             return [ExperimentRecord.from_row(row) for row in cursor.fetchall()]
         finally:

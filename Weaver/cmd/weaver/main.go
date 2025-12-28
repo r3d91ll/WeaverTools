@@ -31,7 +31,7 @@ import (
 	"github.com/r3d91ll/yarn"
 )
 
-const version = "2.0.0-alpha"
+const version = "1.0.0"
 
 func main() {
 	// Parse flags

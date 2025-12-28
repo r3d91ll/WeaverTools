@@ -1,5 +1,13 @@
 """Activation patching utilities for causal intervention analysis."""
 
+from src.patching.cache import (
+    ActivationCache,
+    CachedActivation,
+    CacheManager,
+    CacheMetadata,
+    compute_cache_size_estimate,
+    get_cache_device_recommendation,
+)
 from src.patching.hooks import (
     HookComponent,
     HookManager,
@@ -16,7 +24,6 @@ from src.patching.hooks import (
 )
 
 # Submodule imports will be added as they are implemented:
-# - cache: Activation cache management
 # - experiments: Experiment orchestration for patching studies
 
 __all__: list[str] = [
@@ -35,4 +42,12 @@ __all__: list[str] = [
     "validate_hook_shapes",
     "build_hook_list",
     "get_hook_names_for_layer",
+    # Cache types
+    "CacheMetadata",
+    "CachedActivation",
+    "ActivationCache",
+    "CacheManager",
+    # Cache utilities
+    "compute_cache_size_estimate",
+    "get_cache_device_recommendation",
 ]

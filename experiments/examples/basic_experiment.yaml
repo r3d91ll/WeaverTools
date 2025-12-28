@@ -1,0 +1,118 @@
+# Basic Experiment Configuration Example
+# This file demonstrates the YAML schema for the Experiment Automation Framework.
+#
+# Use this as a template for your own experiments. All sections except
+# 'experiment.name' are optional with sensible defaults.
+
+# Experiment definition (required section)
+experiment:
+  name: "basic-multi-agent-evaluation"
+  description: "A basic example demonstrating multi-agent collaboration on a simple task"
+  version: "1.0"
+
+  # Reproducibility settings
+  seed: 42
+  save_checkpoints: true
+
+  # Global parameters (accessible to all agents and scenarios)
+  parameters:
+    max_iterations: 50
+    temperature: 0.7
+    timeout_seconds: 300
+
+  # Experiment-level settings
+  max_iterations: 100
+  timeout_seconds: 3600
+
+  # Tags for organization and filtering
+  tags:
+    - example
+    - multi-agent
+    - basic
+
+# Agent definitions
+agents:
+  # A Claude-based reviewer agent
+  - id: "reviewer"
+    type: "claude"
+    role: "code_reviewer"
+    model: "claude-3-opus"
+    parameters:
+      temperature: 0.3  # Lower temperature for more consistent reviews
+      max_tokens: 2048
+
+  # A local model as the implementer
+  - id: "implementer"
+    type: "local"
+    role: "code_generator"
+    model: "mistral-7b"
+    endpoint: "http://localhost:11434"
+    parameters:
+      temperature: 0.7
+      max_tokens: 4096
+
+# Scenario definitions (multi-step workflows)
+scenarios:
+  # Main code review workflow
+  - name: "code-review-flow"
+    description: "Generate code and have it reviewed"
+    max_retries: 3
+    continue_on_failure: false
+    steps:
+      # Step 1: Generate initial code
+      - agent: "implementer"
+        action: "generate"
+        prompt_template: "prompts/generate_code.txt"
+        parameters:
+          task: "Create a Python function"
+        timeout_seconds: 120
+
+      # Step 2: Review the generated code
+      - agent: "reviewer"
+        action: "review"
+        input_from: "implementer.output"
+        parameters:
+          review_criteria:
+            - correctness
+            - style
+            - documentation
+        timeout_seconds: 60
+
+  # Simple single-agent scenario
+  - name: "simple-generation"
+    description: "Simple code generation without review"
+    steps:
+      - agent: "implementer"
+        action: "generate"
+        parameters:
+          task: "Create a hello world function"
+
+# Metrics collection configuration
+metrics:
+  # Metric collectors to use
+  collectors:
+    # Latency tracking per step
+    - type: "latency"
+      granularity: "step"
+      per_agent: true
+
+    # Token usage tracking
+    - type: "tokens"
+      per_agent: true
+
+  # Where to store metrics
+  storage:
+    type: "file"
+    path: "./results"
+
+  # How often to flush metrics to storage
+  flush_interval_seconds: 30
+
+# Output configuration
+outputs:
+  format: "json"
+  include_raw_responses: false
+  aggregations:
+    - "mean"
+    - "std"
+    - "percentile_95"

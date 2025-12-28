@@ -67,8 +67,10 @@ logs/
 models/
 checkpoints/
 
-# Experiments output
-experiments/
+# Experiments output (but not source code)
+experiments/results/
+experiments/outputs/
+experiments/data/
 *.jsonl
 *.npy
 *.npz

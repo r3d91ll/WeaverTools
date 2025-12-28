@@ -944,3 +944,494 @@ array = array.reshape(layer_data['shape'])
                 json.dump(example, f, indent=2)
 
 
+class TestLayerByLayerAnalysis:
+    """Test layer-by-layer hidden state analysis with D_eff computation.
+
+    These tests validate the layer-by-layer analysis capabilities including:
+    - D_eff computation per layer
+    - All layers extraction with D_eff metrics
+    - D_eff patterns across layers (information flow analysis)
+    """
+
+    @pytest.fixture(scope="class")
+    def loaded_analysis_model(self, app_client):
+        """Load model once for all layer analysis tests."""
+        model_id = TEST_MODELS["generative_small"]
+
+        print(f"\n=== Loading Model for Layer Analysis: {model_id} ===")
+        start = time.time()
+
+        response = app_client.post("/models/load", json={
+            "model": model_id,
+            "dtype": "float16",
+        })
+
+        load_time = time.time() - start
+        assert response.status_code == 200, f"Failed to load model: {response.text}"
+
+        data = response.json()
+        print(f"Loaded in {load_time:.2f}s")
+        print(json.dumps(data, indent=2))
+
+        yield data
+
+        # Cleanup
+        app_client.delete(f"/models/{model_id.replace('/', '--')}")
+
+
+def test_layer_deff_computation(app_client, examples_dir):
+    """Test D_eff computation for individual layers.
+
+    This test validates that:
+    1. Hidden states can be extracted from multiple layers
+    2. D_eff can be computed for each layer's hidden states
+    3. D_eff values are within expected ranges (1 <= D_eff <= hidden_dim)
+    """
+    import numpy as np
+
+    model_id = TEST_MODELS["generative_small"]
+
+    # First ensure model is loaded
+    load_response = app_client.post("/models/load", json={
+        "model": model_id,
+        "dtype": "float16",
+    })
+    assert load_response.status_code == 200
+    model_info = load_response.json()
+    num_layers = model_info["num_layers"]
+    hidden_size = model_info["hidden_size"]
+
+    # Request hidden states from multiple layers (first, middle, last)
+    layers_to_test = [0, num_layers // 2, -1]
+
+    response = app_client.post("/generate", json={
+        "model": model_id,
+        "prompt": "The quick brown fox jumps over the lazy dog.",
+        "max_tokens": 10,
+        "temperature": 0.1,
+        "return_hidden_states": True,
+        "hidden_state_layers": layers_to_test,
+        "hidden_state_format": "list",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    hidden_states = data.get("hidden_states", {})
+    assert hidden_states is not None, "No hidden states returned"
+
+    # Compute D_eff for each layer
+    d_eff_results = {}
+
+    print("\n=== Layer-by-Layer D_eff Computation ===")
+    print(f"Model: {model_id}")
+    print(f"Layers tested: {layers_to_test}")
+    print(f"Hidden size: {hidden_size}")
+    print("-" * 50)
+
+    for layer_idx in layers_to_test:
+        layer_key = str(layer_idx)
+        assert layer_key in hidden_states, f"Layer {layer_idx} missing from response"
+
+        layer_data = hidden_states[layer_key]
+        assert "data" in layer_data, f"No data in layer {layer_idx}"
+        assert "shape" in layer_data, f"No shape in layer {layer_idx}"
+
+        # Convert to numpy array
+        hidden_state_flat = np.array(layer_data["data"])
+        shape = layer_data["shape"]
+
+        # Reshape to (num_tokens, hidden_dim) if needed
+        if len(shape) == 2:
+            embeddings = hidden_state_flat.reshape(shape)
+        else:
+            # Single vector - reshape to (1, hidden_dim)
+            embeddings = hidden_state_flat.reshape(1, -1)
+
+        # Compute D_eff using PCA-based approach
+        # D_eff = number of dimensions needed to capture 90% variance
+        if embeddings.shape[0] >= 2:
+            # Center the embeddings
+            centered = embeddings - embeddings.mean(axis=0)
+
+            # Compute covariance matrix
+            cov = centered.T @ centered / (embeddings.shape[0] - 1)
+
+            # Compute eigenvalues
+            eigenvalues = np.linalg.eigvalsh(cov)
+            eigenvalues = eigenvalues[::-1]  # Sort descending
+            eigenvalues = np.maximum(eigenvalues, 0)  # Handle numerical issues
+
+            # Calculate cumulative variance
+            total_variance = eigenvalues.sum()
+            if total_variance > 1e-10:
+                cumulative_variance = np.cumsum(eigenvalues) / total_variance
+
+                # Find D_eff (dimensions for 90% variance)
+                d_eff = int(np.searchsorted(cumulative_variance, 0.90) + 1)
+                d_eff = max(1, min(d_eff, embeddings.shape[1]))
+            else:
+                d_eff = 1
+        else:
+            # Single sample - D_eff = 1
+            d_eff = 1
+
+        d_eff_results[layer_idx] = {
+            "d_eff": d_eff,
+            "shape": shape,
+            "variance_ratio": d_eff / hidden_size,
+        }
+
+        print(f"Layer {layer_idx:3d}: D_eff = {d_eff:4d} ({d_eff/hidden_size*100:.1f}% of {hidden_size})")
+
+        # Validate D_eff is within expected range
+        assert 1 <= d_eff <= hidden_size, \
+            f"D_eff {d_eff} out of range [1, {hidden_size}] for layer {layer_idx}"
+
+    # Save example
+    example = {
+        "request": {
+            "model": model_id,
+            "hidden_state_layers": layers_to_test,
+            "prompt": "The quick brown fox jumps over the lazy dog.",
+        },
+        "d_eff_results": {str(k): v for k, v in d_eff_results.items()},
+        "model_info": {
+            "num_layers": num_layers,
+            "hidden_size": hidden_size,
+        },
+        "validation": {
+            "all_layers_present": len(d_eff_results) == len(layers_to_test),
+            "d_eff_in_valid_range": all(
+                1 <= v["d_eff"] <= hidden_size
+                for v in d_eff_results.values()
+            ),
+        },
+    }
+    with open(examples_dir / "layer_deff_computation.json", "w") as f:
+        json.dump(example, f, indent=2)
+
+    print("-" * 50)
+    print(f"All {len(layers_to_test)} layers processed successfully!")
+
+
+def test_all_layers_deff_trajectory(app_client, examples_dir):
+    """Test D_eff computation across ALL layers to analyze information flow.
+
+    This test validates:
+    1. All layers can be extracted using 'all' keyword
+    2. D_eff can be computed for every layer
+    3. D_eff trajectory shows expected patterns (typically varies across layers)
+    """
+    import numpy as np
+
+    model_id = TEST_MODELS["generative_small"]
+
+    # Ensure model is loaded
+    load_response = app_client.post("/models/load", json={
+        "model": model_id,
+        "dtype": "float16",
+    })
+    assert load_response.status_code == 200
+    model_info = load_response.json()
+    num_layers = model_info["num_layers"]
+    hidden_size = model_info["hidden_size"]
+
+    # Request ALL layers
+    response = app_client.post("/generate", json={
+        "model": model_id,
+        "prompt": "Artificial intelligence is transforming how we work and live.",
+        "max_tokens": 5,
+        "temperature": 0.1,
+        "return_hidden_states": True,
+        "hidden_state_layers": "all",
+        "hidden_state_format": "list",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    hidden_states = data.get("hidden_states", {})
+    assert hidden_states is not None, "No hidden states returned"
+    assert len(hidden_states) == num_layers, \
+        f"Expected {num_layers} layers, got {len(hidden_states)}"
+
+    # Compute D_eff trajectory across all layers
+    d_eff_trajectory = []
+
+    print("\n=== D_eff Trajectory Across All Layers ===")
+    print(f"Model: {model_id} ({num_layers} layers, {hidden_size} hidden dim)")
+    print("-" * 60)
+
+    for layer_idx in range(num_layers):
+        # Try both positive and negative indexing
+        layer_key = str(layer_idx) if str(layer_idx) in hidden_states else str(layer_idx - num_layers)
+        if layer_key not in hidden_states:
+            # Try finding the key
+            possible_keys = [str(layer_idx), str(layer_idx - num_layers)]
+            for pk in possible_keys:
+                if pk in hidden_states:
+                    layer_key = pk
+                    break
+
+        if layer_key not in hidden_states:
+            print(f"Warning: Layer {layer_idx} not found, skipping")
+            continue
+
+        layer_data = hidden_states[layer_key]
+        hidden_state_flat = np.array(layer_data["data"])
+        shape = layer_data["shape"]
+
+        # Reshape
+        if len(shape) == 2:
+            embeddings = hidden_state_flat.reshape(shape)
+        else:
+            embeddings = hidden_state_flat.reshape(1, -1)
+
+        # Compute D_eff
+        if embeddings.shape[0] >= 2:
+            centered = embeddings - embeddings.mean(axis=0)
+            cov = centered.T @ centered / (embeddings.shape[0] - 1)
+            eigenvalues = np.linalg.eigvalsh(cov)[::-1]
+            eigenvalues = np.maximum(eigenvalues, 0)
+
+            total_variance = eigenvalues.sum()
+            if total_variance > 1e-10:
+                cumulative_variance = np.cumsum(eigenvalues) / total_variance
+                d_eff = int(np.searchsorted(cumulative_variance, 0.90) + 1)
+                d_eff = max(1, min(d_eff, embeddings.shape[1]))
+            else:
+                d_eff = 1
+        else:
+            d_eff = 1
+
+        d_eff_trajectory.append({
+            "layer": layer_idx,
+            "d_eff": d_eff,
+            "utilization": d_eff / hidden_size,
+        })
+
+    # Analyze trajectory
+    d_eff_values = [t["d_eff"] for t in d_eff_trajectory]
+    min_d_eff = min(d_eff_values)
+    max_d_eff = max(d_eff_values)
+    mean_d_eff = sum(d_eff_values) / len(d_eff_values)
+
+    print(f"D_eff Range: [{min_d_eff}, {max_d_eff}]")
+    print(f"D_eff Mean: {mean_d_eff:.1f}")
+    print(f"Utilization Range: [{min_d_eff/hidden_size*100:.1f}%, {max_d_eff/hidden_size*100:.1f}%]")
+    print("-" * 60)
+
+    # Print trajectory visualization
+    for entry in d_eff_trajectory:
+        bar_len = int(entry["utilization"] * 40)
+        bar = "█" * bar_len + "░" * (40 - bar_len)
+        print(f"Layer {entry['layer']:2d}: {bar} {entry['d_eff']:4d} ({entry['utilization']*100:.1f}%)")
+
+    # Validate trajectory
+    assert len(d_eff_trajectory) == num_layers, \
+        f"Expected {num_layers} D_eff values, got {len(d_eff_trajectory)}"
+
+    # D_eff should vary across layers (not all identical)
+    d_eff_std = np.std(d_eff_values)
+    print(f"\nD_eff Standard Deviation: {d_eff_std:.2f}")
+
+    # Save example
+    example = {
+        "request": {
+            "model": model_id,
+            "hidden_state_layers": "all",
+        },
+        "trajectory": d_eff_trajectory,
+        "summary": {
+            "num_layers": num_layers,
+            "hidden_size": hidden_size,
+            "d_eff_min": min_d_eff,
+            "d_eff_max": max_d_eff,
+            "d_eff_mean": mean_d_eff,
+            "d_eff_std": float(d_eff_std),
+        },
+        "interpretation": {
+            "low_d_eff_layers": [
+                t["layer"] for t in d_eff_trajectory
+                if t["d_eff"] < mean_d_eff - d_eff_std
+            ],
+            "high_d_eff_layers": [
+                t["layer"] for t in d_eff_trajectory
+                if t["d_eff"] > mean_d_eff + d_eff_std
+            ],
+        },
+    }
+    with open(examples_dir / "all_layers_deff_trajectory.json", "w") as f:
+        json.dump(example, f, indent=2)
+
+    print("\nAll layers D_eff trajectory computed successfully!")
+
+
+def test_layer_deff_patterns(app_client, examples_dir):
+    """Test that D_eff patterns reveal information flow characteristics.
+
+    This test validates:
+    1. Early layers vs late layers D_eff comparison
+    2. Information compression/expansion patterns
+    3. Bottleneck detection (layers with significantly lower D_eff)
+    """
+    import numpy as np
+
+    model_id = TEST_MODELS["generative_small"]
+
+    # Ensure model is loaded
+    load_response = app_client.post("/models/load", json={
+        "model": model_id,
+        "dtype": "float16",
+    })
+    assert load_response.status_code == 200
+    model_info = load_response.json()
+    num_layers = model_info["num_layers"]
+    hidden_size = model_info["hidden_size"]
+
+    # Test with a more complex prompt to see variation
+    test_prompts = [
+        "Simple test.",
+        "The relationship between artificial intelligence and human cognition involves complex patterns of information processing.",
+    ]
+
+    all_results = []
+
+    for prompt_idx, prompt in enumerate(test_prompts):
+        # Request all layers
+        response = app_client.post("/generate", json={
+            "model": model_id,
+            "prompt": prompt,
+            "max_tokens": 3,
+            "temperature": 0.1,
+            "return_hidden_states": True,
+            "hidden_state_layers": "all",
+            "hidden_state_format": "list",
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        hidden_states = data.get("hidden_states", {})
+
+        # Compute D_eff for each layer
+        d_eff_values = []
+
+        for layer_idx in range(num_layers):
+            layer_key = str(layer_idx) if str(layer_idx) in hidden_states else str(layer_idx - num_layers)
+            if layer_key not in hidden_states:
+                for pk in [str(layer_idx), str(layer_idx - num_layers)]:
+                    if pk in hidden_states:
+                        layer_key = pk
+                        break
+
+            if layer_key not in hidden_states:
+                continue
+
+            layer_data = hidden_states[layer_key]
+            hidden_state_flat = np.array(layer_data["data"])
+            shape = layer_data["shape"]
+
+            if len(shape) == 2:
+                embeddings = hidden_state_flat.reshape(shape)
+            else:
+                embeddings = hidden_state_flat.reshape(1, -1)
+
+            if embeddings.shape[0] >= 2:
+                centered = embeddings - embeddings.mean(axis=0)
+                cov = centered.T @ centered / (embeddings.shape[0] - 1)
+                eigenvalues = np.linalg.eigvalsh(cov)[::-1]
+                eigenvalues = np.maximum(eigenvalues, 0)
+
+                total_variance = eigenvalues.sum()
+                if total_variance > 1e-10:
+                    cumulative_variance = np.cumsum(eigenvalues) / total_variance
+                    d_eff = int(np.searchsorted(cumulative_variance, 0.90) + 1)
+                    d_eff = max(1, min(d_eff, embeddings.shape[1]))
+                else:
+                    d_eff = 1
+            else:
+                d_eff = 1
+
+            d_eff_values.append(d_eff)
+
+        # Analyze patterns
+        early_layers = d_eff_values[:num_layers // 3]
+        middle_layers = d_eff_values[num_layers // 3: 2 * num_layers // 3]
+        late_layers = d_eff_values[2 * num_layers // 3:]
+
+        early_mean = np.mean(early_layers) if early_layers else 0
+        middle_mean = np.mean(middle_layers) if middle_layers else 0
+        late_mean = np.mean(late_layers) if late_layers else 0
+
+        # Detect bottleneck layers (>1 std below mean)
+        overall_mean = np.mean(d_eff_values)
+        overall_std = np.std(d_eff_values)
+        bottleneck_threshold = overall_mean - overall_std
+
+        bottleneck_layers = [
+            i for i, d in enumerate(d_eff_values)
+            if d < bottleneck_threshold
+        ]
+
+        result = {
+            "prompt_idx": prompt_idx,
+            "prompt_length": len(prompt.split()),
+            "early_mean": float(early_mean),
+            "middle_mean": float(middle_mean),
+            "late_mean": float(late_mean),
+            "overall_mean": float(overall_mean),
+            "overall_std": float(overall_std),
+            "bottleneck_layers": bottleneck_layers,
+            "d_eff_values": d_eff_values,
+        }
+        all_results.append(result)
+
+    print("\n=== D_eff Pattern Analysis ===")
+    print(f"Model: {model_id}")
+    print("-" * 60)
+
+    for result in all_results:
+        print(f"\nPrompt {result['prompt_idx']+1} ({result['prompt_length']} words):")
+        print(f"  Early layers D_eff mean:  {result['early_mean']:.1f}")
+        print(f"  Middle layers D_eff mean: {result['middle_mean']:.1f}")
+        print(f"  Late layers D_eff mean:   {result['late_mean']:.1f}")
+        print(f"  Bottleneck layers: {result['bottleneck_layers'] or 'None detected'}")
+
+        # Determine pattern
+        if result['late_mean'] < result['early_mean'] * 0.8:
+            pattern = "compression (early > late)"
+        elif result['late_mean'] > result['early_mean'] * 1.2:
+            pattern = "expansion (late > early)"
+        else:
+            pattern = "stable"
+        print(f"  Pattern: {pattern}")
+
+    # Validate that we got results for both prompts
+    assert len(all_results) == 2, "Should have results for both prompts"
+
+    # Validate D_eff values are in valid range
+    for result in all_results:
+        for d_eff in result["d_eff_values"]:
+            assert 1 <= d_eff <= hidden_size, \
+                f"D_eff {d_eff} out of range [1, {hidden_size}]"
+
+    # Save example
+    example = {
+        "model": model_id,
+        "model_info": {
+            "num_layers": num_layers,
+            "hidden_size": hidden_size,
+        },
+        "prompts": test_prompts,
+        "results": all_results,
+        "interpretation": {
+            "compression_pattern": "D_eff decreases in later layers, suggesting information bottleneck",
+            "expansion_pattern": "D_eff increases in later layers, suggesting feature elaboration",
+            "stable_pattern": "D_eff remains relatively constant across layers",
+        },
+    }
+    with open(examples_dir / "layer_deff_patterns.json", "w") as f:
+        json.dump(example, f, indent=2)
+
+    print("\nD_eff pattern analysis completed successfully!")

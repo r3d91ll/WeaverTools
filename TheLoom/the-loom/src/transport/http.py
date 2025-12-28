@@ -2953,9 +2953,13 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                         )
                         hook_name = hook_point.to_hook_name(loaded.num_layers)
 
-                        # For now, we run with clean activations patched in
-                        # The actual patching would require HookedTransformer integration
-                        # For this endpoint, we simulate by re-running with the cache
+                        # TODO: Implement actual activation patching with HookedTransformer
+                        # Currently this is a PLACEHOLDER that re-runs generation without
+                        # patching. To properly implement:
+                        # 1. Load model as HookedTransformer
+                        # 2. Use clean_activation with create_patching_hook()
+                        # 3. Call model.run_with_hooks() with the patching hook
+                        # See src/patching/experiments.py for reference implementation
                         patched_output = registry.generate(
                             loaded_model=loaded,
                             prompt=request.corrupted_input,

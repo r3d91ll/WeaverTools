@@ -1291,13 +1291,13 @@ class TestEndToEndMultiAgentPatching:
         assert recorder.corrupted_path is not None, "Should have corrupted path"
         assert len(recorder.patched_paths) > 0, "Should have patched paths"
 
+        # Import ExecutionPath for the path checks below
+        from src.patching.experiments import ExecutionPath
+
         print(f"Experiment ID: {recorder.experiment_id}")
         print(f"Paths recorded: clean={recorder.has_path(ExecutionPath.CLEAN)}, "
               f"corrupted={recorder.has_path(ExecutionPath.CORRUPTED)}, "
               f"patched={len(recorder.patched_paths)}")
-
-        # Import ExecutionPath for the check above
-        from src.patching.experiments import ExecutionPath
 
         # =====================================================================
         # Save example output

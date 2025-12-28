@@ -38,8 +38,9 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from collections.abc import Callable
+
 from scipy import stats
-from typing import Callable
 
 # ============================================================================
 # Constants

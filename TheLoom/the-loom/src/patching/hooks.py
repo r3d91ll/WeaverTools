@@ -6,9 +6,10 @@ that can be injected into transformer models for causal intervention analysis.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 import torch
 
@@ -316,9 +317,9 @@ def create_mean_ablation_hook(
             # Broadcast mean to full shape
             return mean_activation.expand_as(activation)
 
-        # Only replace specific position
+        # Only replace specific position - expand mean to match activation shape first
         result = activation.clone()
-        result[:, position, :] = mean_activation.squeeze(dim)[:, position, :]
+        result[:, position, :] = mean_activation.expand_as(activation)[:, position, :]
         return result
 
     return mean_ablation_hook

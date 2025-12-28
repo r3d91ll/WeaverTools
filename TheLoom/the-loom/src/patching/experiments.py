@@ -7,12 +7,14 @@ result recording, and systematic study management.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 import torch
 
@@ -25,6 +27,8 @@ from src.patching.hooks import (
     build_hook_list,
     create_patching_hook,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionPath(Enum):
@@ -1133,6 +1137,10 @@ class PatchingExperiment:
         else:
             # Fallback: just run normally (no patching actually applied)
             # This should be handled by the caller providing a compatible model
+            logger.warning(
+                "Model does not support run_with_hooks - patching will NOT be applied. "
+                "Use TransformerLens HookedTransformer for actual activation patching."
+            )
             patched_output = model(input_tokens)
 
         execution_time_ms = (time.time() - start_time) * 1000

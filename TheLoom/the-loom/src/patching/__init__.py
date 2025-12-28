@@ -8,6 +8,17 @@ from src.patching.cache import (
     compute_cache_size_estimate,
     get_cache_device_recommendation,
 )
+from src.patching.experiments import (
+    ExecutionPath,
+    ExperimentConfig,
+    ExperimentRecord,
+    MultiLayerPatchingStudy,
+    PatchingExperiment,
+    PatchingResult,
+    PathOutput,
+    PathRecorder,
+    compute_causal_effect,
+)
 from src.patching.hooks import (
     HookComponent,
     HookManager,
@@ -22,9 +33,6 @@ from src.patching.hooks import (
     get_hook_names_for_layer,
     validate_hook_shapes,
 )
-
-# Submodule imports will be added as they are implemented:
-# - experiments: Experiment orchestration for patching studies
 
 __all__: list[str] = [
     # Hook types
@@ -50,4 +58,15 @@ __all__: list[str] = [
     # Cache utilities
     "compute_cache_size_estimate",
     "get_cache_device_recommendation",
+    # Experiment types
+    "ExecutionPath",
+    "ExperimentConfig",
+    "PathOutput",
+    "PatchingResult",
+    "ExperimentRecord",
+    "PathRecorder",
+    "PatchingExperiment",
+    "MultiLayerPatchingStudy",
+    # Experiment utilities
+    "compute_causal_effect",
 ]

@@ -1,0 +1,220 @@
+# GitHub Actions workflow for automated releases
+# Triggers on version tag push, validates semver, generates changelog, creates GitHub release
+#
+# Usage:
+#   1. Create annotated tag: git tag -a v1.0.0 -m "Release v1.0.0"
+#   2. Push tag: git push origin v1.0.0
+#   3. Workflow runs automatically and creates GitHub release
+#
+# Required secrets:
+#   - GITHUB_TOKEN (automatically provided by GitHub Actions)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on any tag starting with 'v'
+
+# Prevent concurrent releases for the same tag
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # Required for creating releases
+
+jobs:
+  # Job 1: Validate tag format before proceeding
+  validate-tag:
+    name: Validate Tag Format
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      is_prerelease: ${{ steps.validate.outputs.is_prerelease }}
+    steps:
+      - name: Extract tag name
+        id: extract
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "Extracted tag: ${TAG_NAME}"
+
+      - name: Validate semver format
+        id: validate
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          # Semver regex pattern (with optional pre-release and build metadata)
+          # Matches: v1.0.0, v1.2.3, v1.0.0-alpha, v1.0.0-beta.1, v1.0.0-rc.1+build.123
+          SEMVER_PATTERN="^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$"
+
+          if [[ ! "${TAG}" =~ ${SEMVER_PATTERN} ]]; then
+            echo "❌ Error: Tag '${TAG}' does not follow semantic versioning format"
+            echo "Expected format: vMAJOR.MINOR.PATCH (e.g., v1.0.0, v2.1.3)"
+            echo "Optional pre-release: v1.0.0-alpha, v1.0.0-beta.1, v1.0.0-rc.1"
+            exit 1
+          fi
+
+          echo "✅ Tag '${TAG}' is valid semver format"
+
+          # Extract version without 'v' prefix
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+          # Check if this is a pre-release version
+          if [[ "${TAG}" =~ -[a-zA-Z] ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "📦 Detected pre-release version"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "📦 Detected stable release version"
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for tag verification
+
+      - name: Verify tag is annotated
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+
+          # Check if tag is annotated (object type = 'tag') vs lightweight (object type = 'commit')
+          TAG_TYPE=$(git for-each-ref "refs/tags/${TAG}" --format='%(objecttype)')
+
+          if [[ "${TAG_TYPE}" != "tag" ]]; then
+            echo "❌ Error: Tag '${TAG}' is a lightweight tag, not an annotated tag"
+            echo "Please use: git tag -a ${TAG} -m 'Release message'"
+            echo "Annotated tags are required for proper release tracking"
+            exit 1
+          fi
+
+          echo "✅ Tag '${TAG}' is an annotated tag"
+
+          # Display tag information
+          echo ""
+          echo "📝 Tag information:"
+          git tag -l -n5 "${TAG}"
+
+  # Job 2: Generate changelog and create GitHub release
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: validate-tag
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog generation
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install git-chglog
+        run: |
+          go install github.com/git-chglog/git-chglog/cmd/git-chglog@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Generate changelog for this release
+        id: changelog
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+
+          # Generate changelog for just this version
+          # Use the configured .chglog template
+          if [ -f ".chglog/config.yml" ]; then
+            git-chglog --config .chglog/config.yml "${TAG_NAME}" > RELEASE_NOTES.md
+          else
+            # Fallback if no config exists
+            git-chglog "${TAG_NAME}" > RELEASE_NOTES.md
+          fi
+
+          # Check if changelog was generated
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "⚠️ No changelog generated, creating default release notes"
+            cat > RELEASE_NOTES.md << 'EOF'
+          ## What's Changed
+
+          This release includes updates to WeaverTools components.
+
+          ### Components
+          - **Yarn**: Message and data processing library
+          - **Wool**: Memory and state management library
+          - **Weaver**: CLI orchestrator and API server
+
+          See the [full changelog](CHANGELOG.md) for details.
+          EOF
+          fi
+
+          echo "📄 Generated release notes:"
+          cat RELEASE_NOTES.md
+
+          # Store multiline output
+          echo 'release_notes<<EOF' >> $GITHUB_OUTPUT
+          cat RELEASE_NOTES.md >> $GITHUB_OUTPUT
+          echo 'EOF' >> $GITHUB_OUTPUT
+
+      - name: Build Go modules
+        run: |
+          echo "🔨 Building Go modules to verify release..."
+
+          # Build Yarn
+          echo "Building Yarn..."
+          cd Yarn && go build ./... && cd ..
+
+          # Build Wool
+          echo "Building Wool..."
+          cd Wool && go build ./... && cd ..
+
+          # Build Weaver
+          echo "Building Weaver..."
+          cd Weaver && go build ./... && cd ..
+
+          echo "✅ All modules built successfully"
+
+      - name: Run tests
+        run: |
+          echo "🧪 Running tests..."
+
+          # Test Yarn
+          echo "Testing Yarn..."
+          cd Yarn && go test ./... -v && cd ..
+
+          # Test Wool
+          echo "Testing Wool..."
+          cd Wool && go test ./... -v && cd ..
+
+          # Test Weaver
+          echo "Testing Weaver..."
+          cd Weaver && go test ./... -v && cd ..
+
+          echo "✅ All tests passed"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "WeaverTools ${{ github.ref_name }}"
+          body: ${{ steps.changelog.outputs.release_notes }}
+          draft: false
+          prerelease: ${{ needs.validate-tag.outputs.is_prerelease == 'true' }}
+          generate_release_notes: false  # Use our custom changelog
+          make_latest: ${{ needs.validate-tag.outputs.is_prerelease != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
+        run: |
+          echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Pre-release:** ${{ needs.validate-tag.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Release Notes" >> $GITHUB_STEP_SUMMARY
+          cat RELEASE_NOTES.md >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "View the release at: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY

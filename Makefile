@@ -24,6 +24,9 @@ GOCLEAN := $(GOCMD) clean
 # Linter
 GOLANGCI_LINT := golangci-lint
 
+# Changelog Generator
+GIT_CHGLOG := git-chglog
+
 # ==============================================================================
 # Common Flags
 # ==============================================================================
@@ -236,6 +239,38 @@ deps-tidy: ## Tidy dependencies for all modules
 .PHONY: check
 check: fmt-check vet lint test ## Run all quality checks (format, vet, lint, test)
 	@echo "All quality checks passed!"
+
+# ==============================================================================
+# Changelog Targets
+# ==============================================================================
+
+# Check if git-chglog is installed
+.PHONY: check-chglog
+check-chglog:
+	@which $(GIT_CHGLOG) > /dev/null 2>&1 || { \
+		echo "Error: git-chglog is not installed."; \
+		echo "Install it with: go install github.com/git-chglog/git-chglog/cmd/git-chglog@latest"; \
+		echo "Or see: https://github.com/git-chglog/git-chglog"; \
+		exit 1; \
+	}
+
+.PHONY: install-chglog
+install-chglog: ## Install git-chglog changelog generator
+	@echo "Installing git-chglog..."
+	@$(GOCMD) install github.com/git-chglog/git-chglog/cmd/git-chglog@latest
+	@echo "git-chglog installed successfully."
+
+.PHONY: changelog
+changelog: check-chglog ## Generate changelog from git history
+	@echo "Generating changelog..."
+	@$(GIT_CHGLOG) -o CHANGELOG.md
+	@echo "Changelog generated: CHANGELOG.md"
+
+.PHONY: changelog-preview
+changelog-preview: check-chglog ## Preview changelog without writing to file
+	@echo "Changelog preview:"
+	@echo "---"
+	@$(GIT_CHGLOG)
 
 .PHONY: help
 help: ## Show this help message

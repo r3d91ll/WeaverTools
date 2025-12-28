@@ -229,11 +229,27 @@ linters-settings:
   #   - ST*: Style checks
   #   - QF*: Quick fixes
   #
+  # Key checks for API versioning and stability:
+  #   - SA1019: Detects usage of deprecated functions, variables, constants,
+  #             and struct fields. This is critical for our deprecation system
+  #             to warn users when they use deprecated APIs.
+  #
   # We enable all checks. Individual checks can be disabled in exclude-rules
   # if they prove to be false positives for specific patterns.
+  #
+  # DEPRECATION DETECTION (SA1019):
+  # When a function, type, or field is marked with a "Deprecated:" comment,
+  # staticcheck will flag any usage of that identifier. Example:
+  #
+  #   // Deprecated: Use NewFunction instead. Will be removed in v2.0.0.
+  #   func OldFunction() {}
+  #
+  # Any code calling OldFunction() will trigger SA1019.
   # ---------------------------------------------------------------------------
   staticcheck:
-    checks: ["all"]
+    checks:
+      - "all"      # Enable all staticcheck checks
+      - "SA1019"   # Explicitly ensure deprecated API detection is enabled
 
   # ---------------------------------------------------------------------------
   # GOSEC - Security Scanner

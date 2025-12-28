@@ -19,6 +19,9 @@ from src.transport.http import (
     ChatCompletionRequest,
     StreamingChatCompletionRequest,
     ChatMessage,
+    GPUConfigureRequest,
+    GPUConfigureResponse,
+    GPUStatusResponse,
 )
 
 
@@ -1331,3 +1334,307 @@ class TestStreamingChatCompletionRequest:
             stream=True,
         )
         assert streaming.stream is True
+
+
+class TestGPUEndpoints:
+    """Tests for GPU configuration and status endpoints."""
+
+    def test_gpu_status_endpoint(self, mock_config):
+        """Test GET /gpu/status returns comprehensive GPU information."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            # Setup mock GPU manager
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.to_dict.return_value = {
+                "has_gpu": True,
+                "allowed_devices": [0],
+                "default_device": "cuda:0",
+                "memory_fraction": 0.9,
+                "available_devices": [0, 1],
+            }
+            mock_gpu_instance.available_devices = [0, 1]
+            mock_gpu_instance.has_gpu = True
+            mock_gpu_instance.get_gpu_info.return_value = [
+                MagicMock(
+                    index=0,
+                    name="Mock GPU 0",
+                    total_memory_gb=8.0,
+                    free_memory_gb=6.0,
+                    used_memory_gb=2.0,
+                    utilization_percent=25.0,
+                    compute_capability=(8, 6),
+                ),
+            ]
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.get("/gpu/status")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["has_gpu"] is True
+            assert "available_devices" in data
+            assert "allowed_devices" in data
+            assert "default_device" in data
+            assert "memory_fraction" in data
+            assert "gpu_memory" in data
+            assert "loaded_models" in data
+
+    def test_gpu_status_no_gpu(self, mock_config):
+        """Test GET /gpu/status works correctly when no GPU is available."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.to_dict.return_value = {
+                "has_gpu": False,
+                "allowed_devices": [],
+                "default_device": "cpu",
+                "memory_fraction": 0.9,
+                "available_devices": [],
+            }
+            mock_gpu_instance.available_devices = []
+            mock_gpu_instance.has_gpu = False
+            mock_gpu_instance.get_gpu_info.return_value = []
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.get("/gpu/status")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["has_gpu"] is False
+            assert data["default_device"] == "cpu"
+            assert data["allowed_devices"] == []
+            assert data["gpu_memory"] == []
+
+    def test_gpu_configure_allowed_devices(self, mock_config):
+        """Test POST /gpu/configure updates allowed_devices successfully."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.available_devices = [0, 1]
+            mock_gpu_instance.allowed_devices = [0, 1]
+            mock_gpu_instance.default_device = "cuda:0"
+            mock_gpu_instance.set_allowed_devices = MagicMock()
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={"allowed_devices": [0, 1]},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "allowed_devices" in data
+            assert "default_device" in data
+            assert "available_devices" in data
+            assert "message" in data
+            mock_gpu_instance.set_allowed_devices.assert_called_once_with([0, 1])
+
+    def test_gpu_configure_default_device(self, mock_config):
+        """Test POST /gpu/configure updates default_device successfully."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.available_devices = [0, 1]
+            mock_gpu_instance.allowed_devices = [0, 1]
+            mock_gpu_instance.default_device = "cuda:1"
+            mock_gpu_instance.set_default_device = MagicMock()
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={"default_device": 1},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "default_device" in data
+            assert "message" in data
+            mock_gpu_instance.set_default_device.assert_called_once_with(1)
+
+    def test_gpu_configure_both_fields(self, mock_config):
+        """Test POST /gpu/configure with both allowed_devices and default_device."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.available_devices = [0, 1, 2]
+            mock_gpu_instance.allowed_devices = [0, 1]
+            mock_gpu_instance.default_device = "cuda:0"
+            mock_gpu_instance.set_allowed_devices = MagicMock()
+            mock_gpu_instance.set_default_device = MagicMock()
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={"allowed_devices": [0, 1], "default_device": 1},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "message" in data
+            # Both methods should be called
+            mock_gpu_instance.set_allowed_devices.assert_called_once_with([0, 1])
+            mock_gpu_instance.set_default_device.assert_called_once_with(1)
+
+    def test_gpu_configure_invalid_device(self, mock_config):
+        """Test POST /gpu/configure with invalid device returns 400."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.available_devices = [0, 1]
+            # Simulate ValueError when setting invalid device
+            mock_gpu_instance.set_allowed_devices.side_effect = ValueError(
+                "Device 99 not in available devices [0, 1]"
+            )
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={"allowed_devices": [99]},
+            )
+
+            assert response.status_code == 400
+            data = response.json()
+            assert "detail" in data
+            assert "99" in data["detail"]
+
+    def test_gpu_configure_empty_allowed_devices(self, mock_config):
+        """Test POST /gpu/configure with empty allowed_devices returns 400."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.available_devices = [0, 1]
+            # Simulate ValueError when setting empty list
+            mock_gpu_instance.set_allowed_devices.side_effect = ValueError(
+                "Cannot set empty allowed_devices when GPUs are available"
+            )
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={"allowed_devices": []},
+            )
+
+            assert response.status_code == 400
+            data = response.json()
+            assert "detail" in data
+
+    def test_gpu_configure_missing_fields(self, mock_config):
+        """Test POST /gpu/configure with no fields returns 400."""
+        with patch("src.transport.http.GPUManager"):
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={},
+            )
+
+            assert response.status_code == 400
+            data = response.json()
+            assert "detail" in data
+            assert "allowed_devices" in data["detail"] or "default_device" in data["detail"]
+
+    def test_gpu_configure_default_device_not_allowed(self, mock_config):
+        """Test POST /gpu/configure with default_device not in allowed_devices returns 400."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            mock_gpu_instance = mock_gpu.return_value
+            mock_gpu_instance.available_devices = [0, 1]
+            mock_gpu_instance.allowed_devices = [0]
+            # Simulate ValueError when setting device not in allowed_devices
+            mock_gpu_instance.set_default_device.side_effect = ValueError(
+                "Device 1 not in allowed_devices [0]"
+            )
+
+            app = create_http_app(mock_config)
+            client = TestClient(app)
+
+            response = client.post(
+                "/gpu/configure",
+                json={"default_device": 1},
+            )
+
+            assert response.status_code == 400
+            data = response.json()
+            assert "detail" in data
+            assert "1" in data["detail"]
+
+    def test_gpu_status_with_loaded_models(self, mock_config, mock_loaded_model):
+        """Test GET /gpu/status includes loaded models information."""
+        with patch("src.transport.http.GPUManager") as mock_gpu:
+            with patch("src.transport.http.LoaderRegistry") as mock_registry:
+                mock_gpu_instance = mock_gpu.return_value
+                mock_gpu_instance.to_dict.return_value = {
+                    "has_gpu": True,
+                    "allowed_devices": [0],
+                    "default_device": "cuda:0",
+                    "memory_fraction": 0.9,
+                    "available_devices": [0],
+                }
+                mock_gpu_instance.available_devices = [0]
+                mock_gpu_instance.has_gpu = True
+                mock_gpu_instance.get_gpu_info.return_value = [
+                    MagicMock(
+                        index=0,
+                        name="Mock GPU",
+                        total_memory_gb=8.0,
+                        free_memory_gb=4.0,
+                        used_memory_gb=4.0,
+                        utilization_percent=50.0,
+                        compute_capability=(8, 6),
+                    ),
+                ]
+
+                app = create_http_app(mock_config)
+                client = TestClient(app)
+
+                # First load a model
+                mock_registry.return_value.load.return_value = mock_loaded_model
+
+                client.post(
+                    "/models/load",
+                    json={"model": "test-model", "device": "cpu"},
+                )
+
+                # Then check status
+                response = client.get("/gpu/status")
+
+                assert response.status_code == 200
+                data = response.json()
+                assert "loaded_models" in data
+                # Verify loaded_models is a list
+                assert isinstance(data["loaded_models"], list)
+
+
+class TestGPUConfigureRequestValidation:
+    """Tests for GPUConfigureRequest Pydantic model validation."""
+
+    def test_configure_request_with_allowed_devices(self):
+        """Test GPUConfigureRequest with allowed_devices only."""
+        request = GPUConfigureRequest(allowed_devices=[0, 1])
+        assert request.allowed_devices == [0, 1]
+        assert request.default_device is None
+
+    def test_configure_request_with_default_device(self):
+        """Test GPUConfigureRequest with default_device only."""
+        request = GPUConfigureRequest(default_device=0)
+        assert request.default_device == 0
+        assert request.allowed_devices is None
+
+    def test_configure_request_with_both_fields(self):
+        """Test GPUConfigureRequest with both fields."""
+        request = GPUConfigureRequest(allowed_devices=[0, 1], default_device=1)
+        assert request.allowed_devices == [0, 1]
+        assert request.default_device == 1
+
+    def test_configure_request_defaults(self):
+        """Test GPUConfigureRequest defaults to None for both fields."""
+        request = GPUConfigureRequest()
+        assert request.allowed_devices is None
+        assert request.default_device is None

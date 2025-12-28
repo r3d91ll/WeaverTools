@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,16 +41,22 @@ class GPUManager:
     ):
         """
         Create a GPUManager configured with which CUDA devices may be used and the maximum fraction of GPU memory to consume.
-        
+
         Parameters:
             allowed_devices (list[int] | None): Specific CUDA device indices to allow. If None, all detected CUDA devices are allowed.
             memory_fraction (float): Fraction (0.0-1.0) of each GPU's memory that the manager should consider available for workloads.
-        
+
         Behavior:
             - If CUDA is not available, logs a warning and sets both `available_devices` and `allowed_devices` to empty lists.
             - When CUDA is available, detects all CUDA devices, populates `available_devices`, and sets `allowed_devices` to the intersection of the provided list and detected devices (or all detected devices if `allowed_devices` is None).
         """
         self.memory_fraction = memory_fraction
+
+        # Thread-safety lock for configuration changes
+        self._config_lock = threading.Lock()
+
+        # Internal state for explicit default device override (None = use first allowed device)
+        self._explicit_default_device: int | None = None
 
         # Check CUDA availability
         if not torch.cuda.is_available():
@@ -84,13 +91,98 @@ class GPUManager:
     def default_device(self) -> str:
         """
         Selects the default device used for computations.
-        
+
         Returns:
-            str: `"cuda:<index>"` for the first allowed GPU, `"cpu"` if no GPUs are available.
+            str: `"cuda:<index>"` for the explicitly set default device, the first
+                allowed GPU if no explicit default is set, or `"cpu"` if no GPUs are available.
         """
         if self.has_gpu:
+            # Use explicit default if set and still valid, otherwise first allowed
+            if (
+                self._explicit_default_device is not None
+                and self._explicit_default_device in self.allowed_devices
+            ):
+                return f"cuda:{self._explicit_default_device}"
             return f"cuda:{self.allowed_devices[0]}"
         return "cpu"
+
+    def set_default_device(self, device_idx: int) -> None:
+        """
+        Set the default GPU device for computations.
+
+        Thread-safe method to explicitly set which GPU device should be used
+        as the default. The device must be in `allowed_devices`.
+
+        Parameters:
+            device_idx (int): CUDA device index to set as default. Must be
+                present in `self.allowed_devices`.
+
+        Raises:
+            ValueError: If `device_idx` is not in `allowed_devices`.
+
+        Example:
+            >>> gm = GPUManager(allowed_devices=[0, 1, 2])
+            >>> gm.set_default_device(1)  # Use GPU 1 as default
+            >>> gm.default_device
+            'cuda:1'
+        """
+        with self._config_lock:
+            # Validate device is in allowed_devices
+            if device_idx not in self.allowed_devices:
+                raise ValueError(
+                    f"Device {device_idx} not in allowed_devices: {self.allowed_devices}"
+                )
+
+            old_default = self._explicit_default_device
+            self._explicit_default_device = device_idx
+
+            logger.info(
+                f"Updated default_device: {old_default} -> {self._explicit_default_device}"
+            )
+
+    def set_allowed_devices(self, devices: list[int]) -> None:
+        """
+        Update the list of allowed GPU devices at runtime.
+
+        Thread-safe method to dynamically reconfigure which GPU devices are available
+        for use by the manager. All devices must exist in `available_devices`.
+
+        Parameters:
+            devices (list[int]): List of CUDA device indices to allow. Each index must
+                be present in `self.available_devices`.
+
+        Raises:
+            ValueError: If `devices` is empty when GPUs are available, or if any
+                device index is not in `available_devices`.
+
+        Example:
+            >>> gm = GPUManager()
+            >>> gm.set_allowed_devices([0, 1])  # Allow only GPUs 0 and 1
+            >>> gm.set_allowed_devices([0])     # Restrict to GPU 0 only
+        """
+        with self._config_lock:
+            # Validate that devices is not empty when GPUs are available
+            if len(self.available_devices) > 0 and len(devices) == 0:
+                raise ValueError(
+                    "Cannot set empty allowed_devices when GPUs are available. "
+                    f"Available devices: {self.available_devices}"
+                )
+
+            # Validate all requested devices exist in available_devices
+            invalid_devices = [d for d in devices if d not in self.available_devices]
+            if invalid_devices:
+                raise ValueError(
+                    f"Invalid device indices: {invalid_devices}. "
+                    f"Available devices: {self.available_devices}"
+                )
+
+            # Update allowed devices
+            old_devices = self.allowed_devices.copy()
+            self.allowed_devices = devices.copy()
+
+            logger.info(
+                f"Updated allowed_devices: {old_devices} -> {self.allowed_devices}"
+            )
 
     def get_device(self, device: str | int | None = None) -> torch.device:
         """
@@ -269,7 +361,10 @@ class GPUManager:
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the GPUManager state and per-GPU information into a dictionary for API responses.
-        
+
+        Thread-safe method that acquires the config lock to ensure consistent reads
+        of runtime-configurable values during concurrent configuration changes.
+
         Returns:
             result (dict[str, Any]): Dictionary containing:
                 - has_gpu (bool): Whether any GPU is allowed/available.
@@ -284,14 +379,22 @@ class GPUManager:
                     - used_memory_gb (float): Used memory in gigabytes (rounded to 2 decimals).
                     - compute_capability (str): Compute capability formatted as "major.minor".
         """
-        gpu_list = self.get_gpu_info() if self.has_gpu else []
+        # Acquire lock for consistent read of runtime-configurable values
+        with self._config_lock:
+            # Capture current configuration under lock
+            current_allowed_devices = self.allowed_devices.copy()
+            current_default_device = self.default_device
+            current_has_gpu = self.has_gpu
+
+        # GPU info collection happens outside lock (read-only hardware queries)
+        gpu_list = self.get_gpu_info() if current_has_gpu else []
         if isinstance(gpu_list, GPUInfo):
             gpu_list = [gpu_list]
 
         return {
-            "has_gpu": self.has_gpu,
-            "default_device": self.default_device,
-            "allowed_devices": self.allowed_devices,
+            "has_gpu": current_has_gpu,
+            "default_device": current_default_device,
+            "allowed_devices": current_allowed_devices,
             "memory_fraction": self.memory_fraction,
             "gpus": [
                 {

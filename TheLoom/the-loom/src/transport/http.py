@@ -623,6 +623,98 @@ class ModelLoadRequest(BaseModel):
     )
 
 
+# ============================================================================
+# GPU Configuration Models (for Dynamic GPU Pool Management)
+# ============================================================================
+
+
+class GPUConfigureRequest(BaseModel):
+    """Request model for dynamic GPU configuration.
+
+    Allows runtime updates to the GPU device pool without server restart.
+    At least one of allowed_devices or default_device must be provided.
+    """
+
+    allowed_devices: list[int] | None = Field(
+        default=None,
+        description="List of CUDA device indices to allow (e.g., [0, 1]). "
+        "Must be valid device indices from available hardware.",
+    )
+    default_device: int | None = Field(
+        default=None,
+        description="Default CUDA device index for model loading. "
+        "Must be present in allowed_devices.",
+    )
+
+
+class GPUMemoryInfo(BaseModel):
+    """Memory information for a single GPU."""
+
+    device_index: int = Field(description="CUDA device index")
+    device_name: str = Field(description="GPU device name")
+    total_memory_mb: float = Field(description="Total GPU memory in MB")
+    used_memory_mb: float = Field(description="Currently used GPU memory in MB")
+    free_memory_mb: float = Field(description="Available GPU memory in MB")
+    memory_utilization: float = Field(
+        description="Memory utilization as a fraction (0.0 to 1.0)"
+    )
+
+
+class LoadedModelInfo(BaseModel):
+    """Information about a loaded model and its device assignment."""
+
+    model_id: str = Field(description="Model identifier")
+    device: str = Field(description="Device the model is loaded on (e.g., 'cuda:0')")
+    dtype: str = Field(description="Data type of the model")
+    idle_seconds: float = Field(description="Seconds since last access")
+
+
+class GPUConfigureResponse(BaseModel):
+    """Response model for GPU configuration updates.
+
+    Returns the updated GPU configuration after applying changes.
+    """
+
+    allowed_devices: list[int] = Field(
+        description="Currently allowed CUDA device indices"
+    )
+    default_device: str = Field(
+        description="Default device for model loading (e.g., 'cuda:0' or 'cpu')"
+    )
+    available_devices: list[int] = Field(
+        description="All available CUDA devices on the system"
+    )
+    message: str = Field(description="Status message describing the changes applied")
+
+
+class GPUStatusResponse(BaseModel):
+    """Response model for GPU status information.
+
+    Provides comprehensive GPU configuration and runtime status including
+    memory usage, loaded models, and device availability.
+    """
+
+    has_gpu: bool = Field(description="Whether CUDA GPUs are available")
+    available_devices: list[int] = Field(
+        description="All CUDA device indices available on the system"
+    )
+    allowed_devices: list[int] = Field(
+        description="Currently configured allowed device indices"
+    )
+    default_device: str = Field(
+        description="Default device for model loading (e.g., 'cuda:0' or 'cpu')"
+    )
+    memory_fraction: float = Field(
+        description="Configured maximum GPU memory fraction (0.0 to 1.0)"
+    )
+    gpu_memory: list[GPUMemoryInfo] = Field(
+        description="Memory information for each allowed GPU"
+    )
+    loaded_models: list[LoadedModelInfo] = Field(
+        description="Currently loaded models and their device assignments"
+    )
+
+
 class ModelLoadResponse(BaseModel):
     """Response model for model loading."""
 
@@ -1274,13 +1366,13 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     async def unload_model(model_id: str) -> dict[str, Any]:
         """
         Unload a previously loaded model and free its resources.
-        
+
         Parameters:
             model_id (str): Identifier of the model to unload. Instances of "--" in the string are normalized to "/".
-        
+
         Returns:
             result (dict[str, Any]): Dictionary containing "status" set to "unloaded" and the normalized "model_id".
-        
+
         Raises:
             HTTPException: 404 if the specified model is not currently loaded.
         """
@@ -1292,6 +1384,178 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         # Update loaded models gauge
         set_models_loaded(len(model_manager.list_loaded()))
         return {"status": "unloaded", "model_id": model_id}
+
+    # ========================================================================
+    # GPU Configuration Endpoints (Dynamic GPU Pool Management)
+    # ========================================================================
+
+    @app.post("/gpu/configure", response_model=GPUConfigureResponse)
+    async def configure_gpu(request: GPUConfigureRequest) -> GPUConfigureResponse:
+        """
+        Dynamically update GPU configuration at runtime.
+
+        Allows reconfiguring which GPU devices are available for model loading
+        and which device is the default, without requiring a server restart.
+
+        At least one of allowed_devices or default_device must be provided.
+        Changes take effect immediately for subsequent model loads.
+
+        Example request:
+            {
+                "allowed_devices": [0, 1],
+                "default_device": 0
+            }
+
+        Args:
+            request: GPU configuration changes to apply.
+
+        Returns:
+            GPUConfigureResponse: Updated GPU configuration with status message.
+
+        Raises:
+            HTTPException: 400 if validation fails (invalid device indices,
+                empty allowed_devices list, or default_device not in allowed_devices).
+            HTTPException: 500 for unexpected errors.
+        """
+        # Validate that at least one field is provided
+        if request.allowed_devices is None and request.default_device is None:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one of 'allowed_devices' or 'default_device' must be provided",
+            )
+
+        changes: list[str] = []
+
+        try:
+            # Apply allowed_devices update if provided
+            if request.allowed_devices is not None:
+                gpu_manager.set_allowed_devices(request.allowed_devices)
+                changes.append(f"allowed_devices updated to {request.allowed_devices}")
+
+            # Apply default_device update if provided
+            if request.default_device is not None:
+                gpu_manager.set_default_device(request.default_device)
+                changes.append(f"default_device updated to {request.default_device}")
+
+            # Build response message
+            message = "; ".join(changes) if changes else "No changes applied"
+
+            return GPUConfigureResponse(
+                allowed_devices=gpu_manager.allowed_devices,
+                default_device=gpu_manager.default_device,
+                available_devices=gpu_manager.available_devices,
+                message=message,
+            )
+
+        except ValueError as e:
+            # Validation errors from GPUManager methods
+            logger.warning(f"GPU configuration validation failed: {e}")
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            # Unexpected errors
+            logger.exception(f"GPU configuration failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/gpu/status", response_model=GPUStatusResponse)
+    async def gpu_status() -> GPUStatusResponse:
+        """
+        Return comprehensive GPU configuration and runtime status.
+
+        Provides detailed information about GPU availability, configuration,
+        memory usage, and currently loaded models. Useful for monitoring
+        and debugging multi-GPU setups.
+
+        Returns:
+            GPUStatusResponse: Contains:
+                - has_gpu: Whether CUDA GPUs are available
+                - available_devices: All physical GPU indices on the system
+                - allowed_devices: Currently configured allowed GPU indices
+                - default_device: Default device for model loading
+                - memory_fraction: Configured max GPU memory fraction
+                - gpu_memory: Per-GPU memory statistics (total, used, free)
+                - loaded_models: Currently loaded models and their device assignments
+
+        Example response:
+            {
+                "has_gpu": true,
+                "available_devices": [0, 1],
+                "allowed_devices": [0],
+                "default_device": "cuda:0",
+                "memory_fraction": 0.9,
+                "gpu_memory": [
+                    {
+                        "device_index": 0,
+                        "device_name": "NVIDIA RTX 4090",
+                        "total_memory_mb": 24576.0,
+                        "used_memory_mb": 8192.0,
+                        "free_memory_mb": 16384.0,
+                        "memory_utilization": 0.33
+                    }
+                ],
+                "loaded_models": [
+                    {
+                        "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                        "device": "cuda:0",
+                        "dtype": "float16",
+                        "idle_seconds": 45.2
+                    }
+                ]
+            }
+        """
+        try:
+            # Get GPU configuration from manager
+            gpu_dict = gpu_manager.to_dict()
+
+            # Build GPU memory info list
+            gpu_memory_list: list[GPUMemoryInfo] = []
+            if gpu_dict["has_gpu"]:
+                gpu_info_list = gpu_manager.get_gpu_info()
+                if not isinstance(gpu_info_list, list):
+                    gpu_info_list = [gpu_info_list]
+
+                for gpu_info in gpu_info_list:
+                    total_mb = gpu_info.total_memory_gb * 1024
+                    free_mb = gpu_info.free_memory_gb * 1024
+                    used_mb = gpu_info.used_memory_gb * 1024
+                    utilization = used_mb / total_mb if total_mb > 0 else 0.0
+
+                    gpu_memory_list.append(
+                        GPUMemoryInfo(
+                            device_index=gpu_info.index,
+                            device_name=gpu_info.name,
+                            total_memory_mb=round(total_mb, 2),
+                            used_memory_mb=round(used_mb, 2),
+                            free_memory_mb=round(free_mb, 2),
+                            memory_utilization=round(utilization, 4),
+                        )
+                    )
+
+            # Get loaded models info from model manager
+            loaded_models_list: list[LoadedModelInfo] = []
+            loaded_info = model_manager.get_loaded_info()
+            for model_info in loaded_info:
+                loaded_models_list.append(
+                    LoadedModelInfo(
+                        model_id=model_info["model_id"],
+                        device=model_info["device"],
+                        dtype=model_info["dtype"],
+                        idle_seconds=model_info["idle_seconds"],
+                    )
+                )
+
+            return GPUStatusResponse(
+                has_gpu=gpu_dict["has_gpu"],
+                available_devices=gpu_manager.available_devices,
+                allowed_devices=gpu_dict["allowed_devices"],
+                default_device=gpu_dict["default_device"],
+                memory_fraction=gpu_dict["memory_fraction"],
+                gpu_memory=gpu_memory_list,
+                loaded_models=loaded_models_list,
+            )
+
+        except Exception as e:
+            logger.exception(f"GPU status retrieval failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     @app.post("/generate", response_model=GenerateResponse)
     async def generate(request: GenerateRequest) -> GenerateResponse:

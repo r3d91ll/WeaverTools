@@ -19,6 +19,7 @@ import (
 	"github.com/r3d91ll/weaver/pkg/export"
 	"github.com/r3d91ll/weaver/pkg/help"
 	"github.com/r3d91ll/weaver/pkg/runtime"
+	"github.com/r3d91ll/weaver/pkg/spinner"
 	"github.com/r3d91ll/yarn"
 )
 
@@ -240,11 +241,18 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 	userMsg := yarn.NewAgentMessage(yarn.RoleUser, message, "user", "user")
 	s.conv.Add(userMsg)
 
-	// Show thinking indicator
-	fmt.Printf("\033[33m[%s]\033[0m thinking...\n", agent.Name())
+	// Show thinking spinner with elapsed time
+	thinkingMsg := fmt.Sprintf("\033[33m[%s]\033[0m thinking...", agent.Name())
+	spin := spinner.NewWithConfig(spinner.Config{
+		CharSet:     spinner.Braille,
+		Message:     thinkingMsg,
+		ShowElapsed: true,
+	})
+	spin.Start()
 
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
+	spin.Stop()
 	if err != nil {
 		return createChatError(agent.Name(), agent.BackendName(), err)
 	}

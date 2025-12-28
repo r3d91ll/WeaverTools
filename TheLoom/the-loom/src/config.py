@@ -131,15 +131,15 @@ class PersistenceConfig(BaseModel):
         default="~/.local/share/loom/exports",
         description="Directory for exported experiment data (CSV, JSON, Parquet)",
     )
-    compression: str = Field(
+    compression: str | None = Field(
         default="gzip",
-        description="Compression algorithm for hidden states: gzip, lzf, or none",
+        description="Compression algorithm for hidden states: 'gzip', 'lzf', or None (no compression)",
     )
     compression_level: int = Field(
         default=4,
-        ge=1,
+        ge=0,
         le=9,
-        description="Compression level (1-9, higher = better compression but slower)",
+        description="Compression level (0-9, higher = better compression but slower; 0 = no compression for gzip)",
     )
     auto_persist: bool = Field(
         default=True,

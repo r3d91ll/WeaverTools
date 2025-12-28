@@ -82,17 +82,15 @@ class ExperimentQuery:
             List of experiment records matching the filters.
         """
         # Use the base list_experiments for date/model filtering
+        # Apply status filter at SQL level for correct pagination
         experiments = self._db.list_experiments(
             limit=limit,
             offset=offset,
             model=model,
+            status=status,
             date_from=date_from,
             date_to=date_to,
         )
-
-        # Apply additional status filter if specified
-        if status is not None:
-            experiments = [exp for exp in experiments if exp.status == status]
 
         return experiments
 

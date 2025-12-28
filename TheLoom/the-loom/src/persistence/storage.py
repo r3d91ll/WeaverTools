@@ -29,7 +29,7 @@ class HiddenStateStorage:
     def __init__(
         self,
         storage_dir: str | Path,
-        compression: str = DEFAULT_COMPRESSION,
+        compression: str | None = DEFAULT_COMPRESSION,
         compression_level: int = DEFAULT_COMPRESSION_LEVEL,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
     ) -> None:
@@ -38,12 +38,16 @@ class HiddenStateStorage:
 
         Parameters:
             storage_dir: Directory where HDF5 files will be stored.
-            compression: Compression algorithm to use (default: gzip).
+            compression: Compression algorithm to use ('gzip', 'lzf', or None).
             compression_level: Compression level 0-9 (default: 4).
             chunk_size: Chunk size for HDF5 datasets (default: 1024).
         """
         self._storage_dir = Path(storage_dir).expanduser()
-        self._compression = compression
+        # Normalize compression: convert string "none" to Python None for h5py compatibility
+        if compression is None or (isinstance(compression, str) and compression.lower() == "none"):
+            self._compression: str | None = None
+        else:
+            self._compression = compression
         self._compression_level = compression_level
         self._chunk_size = chunk_size
 
@@ -120,14 +124,16 @@ class HiddenStateStorage:
 
         with h5py.File(file_path, "w") as f:
             # Create dataset with compression and shuffle filter
+            # Only pass compression_opts when using a compression algorithm
+            compression_opts = self._compression_level if self._compression else None
             dset = f.create_dataset(
                 "hidden_state",
                 data=array,
                 dtype=array.dtype,
                 compression=self._compression,
-                compression_opts=self._compression_level,
+                compression_opts=compression_opts,
                 chunks=chunks,
-                shuffle=True,  # Improves compression for floating point data
+                shuffle=True if self._compression else False,  # Shuffle only helps with compression
             )
 
             # Store array metadata as attributes

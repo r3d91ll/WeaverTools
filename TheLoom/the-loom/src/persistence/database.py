@@ -166,7 +166,7 @@ class MetricRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
     id: int | None = None
 
-    def to_row(self) -> tuple[str, str, float, str | None, str, str]:
+    def to_row(self) -> tuple[str, str, float, str | None, str, str | None]:
         """Convert to a tuple suitable for database insertion."""
         return (
             self.experiment_id,
@@ -355,6 +355,7 @@ class DatabaseManager:
         limit: int = 100,
         offset: int = 0,
         model: str | None = None,
+        status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> list[ExperimentRecord]:
@@ -365,6 +366,7 @@ class DatabaseManager:
             limit: Maximum number of experiments to return.
             offset: Number of experiments to skip (for pagination).
             model: Filter by model name.
+            status: Filter by experiment status.
             date_from: Filter experiments created after this datetime.
             date_to: Filter experiments created before this datetime.
 
@@ -377,6 +379,10 @@ class DatabaseManager:
         if model is not None:
             query += " AND model = ?"
             params.append(model)
+
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status)
 
         if date_from is not None:
             query += " AND created_at >= ?"

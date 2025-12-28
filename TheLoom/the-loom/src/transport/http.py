@@ -740,8 +740,8 @@ class ConversationsListResponse(BaseModel):
     total: int = Field(description="Total count of messages")
 
 
-class HiddenStateResponse(BaseModel):
-    """Response model for hidden state record."""
+class HiddenStateRecordResponse(BaseModel):
+    """Response model for hidden state record from persistence."""
 
     id: int | None = Field(default=None, description="Hidden state record ID")
     experiment_id: str = Field(description="Parent experiment identifier")
@@ -756,7 +756,7 @@ class HiddenStatesListResponse(BaseModel):
     """Response model for listing hidden states."""
 
     experiment_id: str = Field(description="Parent experiment identifier")
-    hidden_states: list[HiddenStateResponse] = Field(description="List of hidden state records")
+    hidden_states: list[HiddenStateRecordResponse] = Field(description="List of hidden state records")
     layers: list[int] = Field(description="Available layer indices")
     total: int = Field(description="Total count of hidden state records")
 
@@ -778,7 +778,7 @@ class ExperimentDetailResponse(BaseModel):
 
     experiment: ExperimentResponse = Field(description="Experiment metadata")
     conversations: list[ConversationResponse] = Field(description="Conversation messages")
-    hidden_states: list[HiddenStateResponse] = Field(description="Hidden state records")
+    hidden_states: list[HiddenStateRecordResponse] = Field(description="Hidden state records")
     metrics: list[MetricResponse] = Field(description="Metric records")
     summary: ExperimentSummaryResponse = Field(description="Summary statistics")
 
@@ -2474,9 +2474,9 @@ def create_http_app(config: Config | None = None) -> FastAPI:
             content=record.content,
         )
 
-    def _hidden_state_record_to_response(record: HiddenStateRecord) -> HiddenStateResponse:
-        """Convert a HiddenStateRecord to HiddenStateResponse."""
-        return HiddenStateResponse(
+    def _hidden_state_record_to_response(record: HiddenStateRecord) -> HiddenStateRecordResponse:
+        """Convert a HiddenStateRecord to HiddenStateRecordResponse."""
+        return HiddenStateRecordResponse(
             id=record.id,
             experiment_id=record.experiment_id,
             layer=record.layer,

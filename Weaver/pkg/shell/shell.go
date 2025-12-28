@@ -1208,14 +1208,13 @@ const toolVersion = "0.1.0"
 func (s *Shell) handleExportLaTeX(_ context.Context, args []string) error {
 	measurements := s.session.Measurements
 	if len(measurements) == 0 {
-		fmt.Println("No measurements to export. Run some analyses first.")
-		return nil
+		return createExportNoDataError("/export_latex", "latex")
 	}
 
 	// Create export directory
 	exportDir := s.getExportDir("latex")
 	if err := os.MkdirAll(exportDir, 0755); err != nil {
-		return createExportError("/export_latex", "latex", exportDir, err)
+		return createExportDirError("/export_latex", "latex", exportDir, err)
 	}
 
 	// Convert measurements to export format
@@ -1260,14 +1259,13 @@ func (s *Shell) handleExportLaTeX(_ context.Context, args []string) error {
 func (s *Shell) handleExportCSV(_ context.Context, args []string) error {
 	measurements := s.session.Measurements
 	if len(measurements) == 0 {
-		fmt.Println("No measurements to export. Run some analyses first.")
-		return nil
+		return createExportNoDataError("/export_csv", "csv")
 	}
 
 	// Create export directory
 	exportDir := s.getExportDir("csv")
 	if err := os.MkdirAll(exportDir, 0755); err != nil {
-		return createExportError("/export_csv", "csv", exportDir, err)
+		return createExportDirError("/export_csv", "csv", exportDir, err)
 	}
 
 	// Convert measurements to CSV format
@@ -1312,18 +1310,17 @@ func (s *Shell) handleExportCSV(_ context.Context, args []string) error {
 func (s *Shell) handleExportFigures(_ context.Context, args []string) error {
 	measurements := s.session.Measurements
 	if len(measurements) == 0 {
-		fmt.Println("No measurements to export. Run some analyses first.")
-		return nil
+		return createExportNoDataError("/export_figures", "figures")
 	}
 
 	// Create export directories
 	svgDir := s.getExportDir("svg")
 	pdfDir := s.getExportDir("pdf")
 	if err := os.MkdirAll(svgDir, 0755); err != nil {
-		return createExportError("/export_figures", "svg", svgDir, err)
+		return createExportDirError("/export_figures", "svg", svgDir, err)
 	}
 	if err := os.MkdirAll(pdfDir, 0755); err != nil {
-		return createExportError("/export_figures", "pdf", pdfDir, err)
+		return createExportDirError("/export_figures", "pdf", pdfDir, err)
 	}
 
 	// Convert measurements to rows
@@ -1401,7 +1398,7 @@ func (s *Shell) handleExportBibTeX(_ context.Context, args []string) error {
 	// Create export directory
 	exportDir := s.getExportDir("bibtex")
 	if err := os.MkdirAll(exportDir, 0755); err != nil {
-		return createExportError("/export_bibtex", "bibtex", exportDir, err)
+		return createExportDirError("/export_bibtex", "bibtex", exportDir, err)
 	}
 
 	// Compute experiment hash
@@ -1447,7 +1444,7 @@ func (s *Shell) handleExportRepro(_ context.Context, args []string) error {
 	// Create export directory
 	exportDir := s.getExportDir("reproducibility")
 	if err := os.MkdirAll(exportDir, 0755); err != nil {
-		return createExportError("/export_repro", "reproducibility", exportDir, err)
+		return createExportDirError("/export_repro", "reproducibility", exportDir, err)
 	}
 
 	stats := s.session.Stats()
@@ -1511,40 +1508,48 @@ func (s *Shell) handleExportAll(ctx context.Context, args []string) error {
 	fmt.Println("\033[33mExporting all formats...\033[0m")
 	fmt.Println()
 
-	// Track any errors
+	// Track errors and failed formats
 	var errors []error
+	var failedFormats []string
 
 	// Export LaTeX
 	if err := s.handleExportLaTeX(ctx, args); err != nil {
-		errors = append(errors, fmt.Errorf("LaTeX: %w", err))
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "LaTeX")
+		werrors.Display(err)
 	}
 
 	// Export CSV
 	if err := s.handleExportCSV(ctx, args); err != nil {
-		errors = append(errors, fmt.Errorf("CSV: %w", err))
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "CSV")
+		werrors.Display(err)
 	}
 
 	// Export Figures
 	if err := s.handleExportFigures(ctx, args); err != nil {
-		errors = append(errors, fmt.Errorf("Figures: %w", err))
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "Figures")
+		werrors.Display(err)
 	}
 
 	// Export BibTeX
 	if err := s.handleExportBibTeX(ctx, args); err != nil {
-		errors = append(errors, fmt.Errorf("BibTeX: %w", err))
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "BibTeX")
+		werrors.Display(err)
 	}
 
 	// Export Reproducibility Report
 	if err := s.handleExportRepro(ctx, args); err != nil {
-		errors = append(errors, fmt.Errorf("Reproducibility: %w", err))
+		errors = append(errors, err)
+		failedFormats = append(failedFormats, "Reproducibility")
+		werrors.Display(err)
 	}
 
 	if len(errors) > 0 {
 		fmt.Printf("\033[33mCompleted with %d error(s)\033[0m\n", len(errors))
-		for _, err := range errors {
-			fmt.Printf("  - %v\n", err)
-		}
-		return errors[0] // Return first error
+		return createExportMultipleError(failedFormats, errors[0])
 	}
 
 	fmt.Printf("\033[32m✓ All exports complete\033[0m\n")
@@ -1626,42 +1631,146 @@ func (s *Shell) measurementsToCSV() []*export.CSVMeasurement {
 }
 
 // createExportError creates a structured error for export failures.
+// It analyzes the underlying error cause to provide specific guidance.
 func createExportError(command, format, path string, cause error) *werrors.WeaverError {
 	errStr := cause.Error()
 
 	switch {
 	case strings.Contains(errStr, "permission denied"):
-		return werrors.CommandWrap(cause, werrors.ErrIOWriteFailed, "export failed: permission denied").
+		return werrors.IOWrap(cause, werrors.ErrExportPermissionDenied, "export failed: permission denied").
 			WithContext("command", command).
 			WithContext("format", format).
 			WithContext("path", path).
 			WithSuggestion("Check write permissions for the export directory").
-			WithSuggestion("Try exporting to a different location")
+			WithSuggestion("Try exporting to a different location").
+			WithSuggestion("Run 'ls -la' on the directory to check permissions")
 
-	case strings.Contains(errStr, "no space left"):
-		return werrors.CommandWrap(cause, werrors.ErrIOWriteFailed, "export failed: disk space full").
+	case strings.Contains(errStr, "no space left") || strings.Contains(errStr, "disk quota"):
+		return werrors.IOWrap(cause, werrors.ErrExportDiskFull, "export failed: disk space full").
 			WithContext("command", command).
 			WithContext("format", format).
 			WithContext("path", path).
 			WithSuggestion("Free up disk space").
-			WithSuggestion("Try exporting to a different location")
+			WithSuggestion("Try exporting to a different disk or location").
+			WithSuggestion("Check disk usage with 'df -h'")
 
 	case strings.Contains(errStr, "read-only"):
-		return werrors.CommandWrap(cause, werrors.ErrIOWriteFailed, "export failed: read-only filesystem").
+		return werrors.IOWrap(cause, werrors.ErrExportReadOnly, "export failed: read-only filesystem").
 			WithContext("command", command).
 			WithContext("format", format).
 			WithContext("path", path).
 			WithSuggestion("The target location is on a read-only filesystem").
-			WithSuggestion("Try exporting to a different location")
+			WithSuggestion("Try exporting to a different location").
+			WithSuggestion("Remount the filesystem with write permissions if applicable")
+
+	case strings.Contains(errStr, "file name too long") || strings.Contains(errStr, "name too long"):
+		return werrors.IOWrap(cause, werrors.ErrExportPathTooLong, "export failed: path too long").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithContext("path_length", fmt.Sprintf("%d", len(path))).
+			WithSuggestion("Use a shorter export path").
+			WithSuggestion("Configure a different export directory in session settings")
+
+	case strings.Contains(errStr, "invalid argument") || strings.Contains(errStr, "invalid path"):
+		return werrors.IOWrap(cause, werrors.ErrExportInvalidPath, "export failed: invalid path").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check the export path for invalid characters").
+			WithSuggestion("Ensure the path is properly formatted")
+
+	case strings.Contains(errStr, "no such file or directory"):
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "export failed: directory does not exist").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check if the parent directory exists").
+			WithSuggestion("The export directory could not be created")
+
+	case strings.Contains(errStr, "is a directory"):
+		return werrors.IOWrap(cause, werrors.ErrExportWriteFailed, "export failed: path is a directory").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("The specified path is a directory, not a file").
+			WithSuggestion("Check the export path configuration")
+
+	case strings.Contains(errStr, "too many open files"):
+		return werrors.IOWrap(cause, werrors.ErrExportWriteFailed, "export failed: too many open files").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Too many files are currently open").
+			WithSuggestion("Close some files or increase the system file descriptor limit")
 
 	default:
-		return werrors.CommandWrap(cause, werrors.ErrIOWriteFailed, "export failed").
+		return werrors.IOWrap(cause, werrors.ErrExportWriteFailed, "export failed").
 			WithContext("command", command).
 			WithContext("format", format).
 			WithContext("path", path).
 			WithSuggestion("Check if the export directory exists and is writable").
-			WithSuggestion("Review the error details for more information")
+			WithSuggestion("Review the error details for more information").
+			WithSuggestion("Try running the export command again")
 	}
+}
+
+// createExportNoDataError creates a structured error when no data is available to export.
+func createExportNoDataError(command, format string) *werrors.WeaverError {
+	return werrors.IO(werrors.ErrExportNoData, "no data available to export").
+		WithContext("command", command).
+		WithContext("format", format).
+		WithSuggestion("Run some analyses first to generate data").
+		WithSuggestion("Use /extract and /analyze commands to create measurements").
+		WithSuggestion("Use /session to check current session status")
+}
+
+// createExportDirError creates a structured error for directory creation failures.
+func createExportDirError(command, format, path string, cause error) *werrors.WeaverError {
+	errStr := cause.Error()
+
+	switch {
+	case strings.Contains(errStr, "permission denied"):
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "failed to create export directory: permission denied").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check write permissions for the parent directory").
+			WithSuggestion("Try exporting to a different location")
+
+	case strings.Contains(errStr, "no space left"):
+		return werrors.IOWrap(cause, werrors.ErrExportDiskFull, "failed to create export directory: disk full").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Free up disk space before exporting")
+
+	case strings.Contains(errStr, "file exists"):
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "failed to create export directory: path exists as file").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("A file exists at the directory path").
+			WithSuggestion("Remove the file or use a different export location")
+
+	default:
+		return werrors.IOWrap(cause, werrors.ErrExportDirCreateFailed, "failed to create export directory").
+			WithContext("command", command).
+			WithContext("format", format).
+			WithContext("path", path).
+			WithSuggestion("Check if the parent directory exists").
+			WithSuggestion("Verify write permissions for the directory")
+	}
+}
+
+// createExportMultipleError creates a structured error for /export_all failures.
+func createExportMultipleError(failedFormats []string, firstError error) *werrors.WeaverError {
+	return werrors.IOWrap(firstError, werrors.ErrExportFailed, "some exports failed").
+		WithContext("command", "/export_all").
+		WithContext("failed_formats", strings.Join(failedFormats, ", ")).
+		WithSuggestion("Check individual export error messages above").
+		WithSuggestion("Fix the issues and run /export_all again").
+		WithSuggestion("Or run individual export commands for specific formats")
 }
 
 // Suppress unused import warnings for time package

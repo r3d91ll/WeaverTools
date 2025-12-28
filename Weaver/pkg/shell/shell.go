@@ -253,6 +253,7 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
+	responseTime := spin.Elapsed() // Capture response time before spinner stops
 	if err != nil {
 		return createChatError(agent.Name(), agent.BackendName(), err)
 	}
@@ -268,6 +269,9 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 		dim := resp.HiddenState.Dimension()
 		fmt.Printf("\033[90m  └─ hidden state: %d dimensions\033[0m\n", dim)
 	}
+
+	// Show response time
+	fmt.Printf("\033[90m  └─ response time: %s\033[0m\n", spinner.FormatElapsedShort(responseTime))
 
 	fmt.Println()
 	return nil

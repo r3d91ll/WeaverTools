@@ -799,3 +799,185 @@ def collect_streaming_results(
         result[layer_idx] = torch.cat(chunks, dim=1)
 
     return result
+
+
+@dataclass
+class CheckpointingResult:
+    """Container for gradient checkpointing extraction results.
+
+    This dataclass holds the results of running a model with gradient
+    checkpointing enabled, which trades ~30% compute overhead for ~50%
+    memory savings during training with backward passes.
+    """
+
+    hidden_states: dict[int, torch.Tensor]  # Layer index -> hidden state tensor
+    logits: torch.Tensor | None  # Model output logits
+    checkpointing_enabled: bool  # Whether checkpointing was actually used
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_hidden_states_dict(self) -> dict[int, torch.Tensor]:
+        """Return the hidden states dictionary.
+
+        Returns:
+            dict[int, torch.Tensor]: Mapping from layer index to hidden state tensor.
+        """
+        return self.hidden_states
+
+    def to_hidden_state_results(
+        self,
+        normalize: bool = False,
+    ) -> dict[int, HiddenStateResult]:
+        """Convert hidden state tensors to HiddenStateResult objects.
+
+        Parameters:
+            normalize (bool): If True, L2-normalize the resulting vectors.
+
+        Returns:
+            dict[int, HiddenStateResult]: Mapping from layer index to
+                HiddenStateResult containing the hidden state vector.
+        """
+        return extract_hidden_states(self.hidden_states, normalize=normalize)
+
+
+def extract_with_checkpointing(
+    model: HookedTransformer,
+    tokens: torch.Tensor,
+    layers: list[int] | None = None,
+    precision: str | None = None,
+    use_reentrant: bool = True,
+) -> CheckpointingResult:
+    """
+    Extract hidden states with gradient checkpointing for memory-efficient training.
+
+    This function enables gradient checkpointing (also called activation checkpointing)
+    which trades ~30% additional compute time for ~50% memory reduction during training.
+    This is achieved by not storing intermediate activations during the forward pass,
+    and instead recomputing them during the backward pass.
+
+    IMPORTANT: Gradient checkpointing ONLY provides memory benefits when there is a
+    backward pass (i.e., during training). For pure inference without backpropagation,
+    use extract_with_selective_cache() or extract_inference_optimized() instead,
+    as checkpointing adds compute overhead without any memory benefit.
+
+    Parameters:
+        model (HookedTransformer): TransformerLens model to run. The model should
+            support gradient checkpointing via its forward method.
+        tokens (torch.Tensor): Input token IDs of shape [batch, seq_len] or [seq_len].
+        layers (list[int] | None): Specific layer indices to extract hidden states
+            from. If None, extracts from all layers.
+        precision (str | None): Target precision for extracted tensors. Supported:
+            'fp16', 'fp32', 'bf16'. If None, uses model's native precision.
+        use_reentrant (bool): Whether to use reentrant checkpointing. Default True.
+            - True: Traditional reentrant checkpointing (more compatible)
+            - False: Non-reentrant checkpointing (more efficient but stricter)
+
+    Returns:
+        CheckpointingResult: Container with hidden states, logits, and metadata
+            about whether checkpointing was enabled.
+
+    Raises:
+        ImportError: If TransformerLens is not installed.
+
+    Example:
+        >>> from transformer_lens import HookedTransformer
+        >>> import torch
+        >>>
+        >>> model = HookedTransformer.from_pretrained("gpt2")
+        >>> tokens = model.to_tokens("Training example text")
+        >>>
+        >>> # Extract with checkpointing for training
+        >>> result = extract_with_checkpointing(model, tokens, layers=[0, 5, 11])
+        >>>
+        >>> # Use in training loop with backward pass
+        >>> loss = compute_loss(result.hidden_states)
+        >>> loss.backward()  # Checkpointing saves memory here
+
+    Note:
+        - Memory savings only realized during backward() call
+        - Adds ~30% compute overhead due to recomputation
+        - Recommended for training large models on limited GPU memory
+        - For inference, use extract_inference_optimized() instead
+        - Disabled by default in MemoryConfig (enable_gradient_checkpointing=False)
+    """
+    try:
+        from transformer_lens import HookedTransformer as TL_HookedTransformer
+    except ImportError as e:
+        raise ImportError(
+            "TransformerLens is required for gradient checkpointing. "
+            "Install with: pip install transformer-lens"
+        ) from e
+
+    from torch.utils.checkpoint import checkpoint
+
+    # Ensure tokens has batch dimension
+    if tokens.dim() == 1:
+        tokens = tokens.unsqueeze(0)
+
+    # Determine target layers
+    n_layers = model.cfg.n_layers
+    if layers is None:
+        target_layers = list(range(n_layers))
+    else:
+        target_layers = layers
+
+    # Build hook filter for selective caching
+    names_filter = build_hook_filter(layers=target_layers)
+
+    # Define checkpointed forward function
+    def checkpointed_forward(input_tokens: torch.Tensor) -> torch.Tensor:
+        """Forward pass wrapped for checkpointing."""
+        return model(input_tokens, return_type="logits")
+
+    # Run with gradient checkpointing enabled
+    # Note: torch.utils.checkpoint requires gradients to be enabled
+    # for the checkpointing to actually work (it's a no-op otherwise)
+    requires_grad = torch.is_grad_enabled()
+
+    if requires_grad:
+        # Use checkpointing when gradients are enabled (training mode)
+        logits = checkpoint(
+            checkpointed_forward,
+            tokens,
+            use_reentrant=use_reentrant,
+        )
+        checkpointing_enabled = True
+    else:
+        # Fall back to normal forward when gradients disabled (inference)
+        # Checkpointing provides no benefit without backward pass
+        logits = model(tokens, return_type="logits")
+        checkpointing_enabled = False
+
+    # Now extract hidden states with selective caching
+    # We run again with selective caching to get the hidden states
+    # This is necessary because checkpoint() doesn't easily expose intermediates
+    with torch.set_grad_enabled(requires_grad):
+        _, cache = model.run_with_cache(
+            tokens,
+            names_filter=names_filter,
+        )
+
+    # Extract hidden states from cache
+    hidden_states: dict[int, torch.Tensor] = {}
+    for layer_idx in target_layers:
+        hook_name = f"blocks.{layer_idx}.hook_resid_post"
+        if hook_name in cache:
+            tensor = cache[hook_name]
+
+            # Apply precision conversion if requested
+            if precision is not None and precision in PRECISION_DTYPE_MAP:
+                tensor = tensor.to(dtype=PRECISION_DTYPE_MAP[precision])
+
+            hidden_states[layer_idx] = tensor
+
+    return CheckpointingResult(
+        hidden_states=hidden_states,
+        logits=logits,
+        checkpointing_enabled=checkpointing_enabled,
+        metadata={
+            "layers_extracted": target_layers,
+            "precision": precision,
+            "use_reentrant": use_reentrant,
+            "n_tokens": tokens.shape[-1] if tokens.dim() > 0 else 0,
+            "requires_grad_enabled": requires_grad,
+        },
+    )

@@ -577,3 +577,14 @@ func createEmptyConceptNameError() *werrors.WeaverError {
 		WithSuggestion("Concept names should be lowercase with optional hyphens or underscores").
 		WithSuggestion("Use '/extract <concept-name> <count>' to specify a valid concept name")
 }
+
+// createEmptySampleIDError creates a structured error when sample ID is empty.
+func createEmptySampleIDError(conceptName string) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsEmptySampleID,
+		"sample ID cannot be empty").
+		WithContext("concept", conceptName).
+		WithContext("operation", "add").
+		WithSuggestion("Generate a unique sample ID using UUID (e.g., uuid.New().String())").
+		WithSuggestion("Sample IDs must be unique within a concept to allow proper tracking").
+		WithSuggestion("Consider using a combination of timestamp and random suffix if UUID is unavailable")
+}

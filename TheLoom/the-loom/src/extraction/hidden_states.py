@@ -6,6 +6,7 @@ from transformer models - the core capability for conveyance measurement.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -551,3 +552,250 @@ def analyze_hidden_state(
     analysis["percentile_75"] = float(np.percentile(vector, 75))
 
     return analysis
+
+
+@dataclass
+class StreamingChunkResult:
+    """Container for a single chunk result from streaming extraction.
+
+    This dataclass holds the hidden states extracted from a single chunk
+    of a long sequence, along with metadata about the chunk's position
+    within the full sequence.
+    """
+
+    chunk_index: int  # Index of this chunk (0-based)
+    start_position: int  # Start token position in original sequence
+    end_position: int  # End token position (exclusive) in original sequence
+    hidden_states: dict[int, torch.Tensor]  # Layer index -> hidden state tensor
+    is_last_chunk: bool  # Whether this is the final chunk
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def chunk_length(self) -> int:
+        """Return the number of tokens in this chunk."""
+        return self.end_position - self.start_position
+
+    def to_hidden_state_results(
+        self,
+        normalize: bool = False,
+    ) -> dict[int, HiddenStateResult]:
+        """Convert hidden state tensors to HiddenStateResult objects.
+
+        Parameters:
+            normalize (bool): If True, L2-normalize the resulting vectors.
+
+        Returns:
+            dict[int, HiddenStateResult]: Mapping from layer index to
+                HiddenStateResult containing the hidden state vector.
+        """
+        return extract_hidden_states(self.hidden_states, normalize=normalize)
+
+
+def extract_streaming(
+    model: HookedTransformer,
+    tokens: torch.Tensor,
+    chunk_size: int = 512,
+    overlap: int = 0,
+    layers: list[int] | None = None,
+    precision: str | None = None,
+    clear_cache_between_chunks: bool = True,
+) -> Generator[StreamingChunkResult, None, None]:
+    """
+    Stream hidden state extraction for long sequences in memory-efficient chunks.
+
+    This generator function processes long token sequences incrementally without
+    loading the entire context into GPU memory at once. It yields results for
+    each chunk, enabling processing of sequences that exceed available GPU memory.
+
+    Parameters:
+        model (HookedTransformer): TransformerLens model to run.
+        tokens (torch.Tensor): Input token IDs of shape [batch, seq_len] or [seq_len].
+            For batch dimension > 1, each batch element is processed independently.
+        chunk_size (int): Number of tokens to process per chunk. Default is 512.
+            Smaller values reduce memory usage but increase processing time.
+        overlap (int): Number of tokens to overlap between consecutive chunks.
+            Useful for maintaining context continuity. Default is 0.
+            Must be less than chunk_size.
+        layers (list[int] | None): Specific layer indices to extract hidden states
+            from. If None, extracts from all layers. Use to reduce memory usage.
+        precision (str | None): Target precision for extracted tensors. Supported:
+            'fp16', 'fp32', 'bf16'. If None, uses model's native precision.
+        clear_cache_between_chunks (bool): If True, clears GPU cache between chunks
+            to prevent memory fragmentation. Default is True.
+
+    Yields:
+        StreamingChunkResult: Container with hidden states for each chunk, including
+            position metadata and whether it's the final chunk.
+
+    Raises:
+        ValueError: If overlap >= chunk_size or if chunk_size <= 0.
+        ImportError: If TransformerLens is not installed.
+
+    Example:
+        >>> from transformer_lens import HookedTransformer
+        >>> model = HookedTransformer.from_pretrained("gpt2")
+        >>> tokens = model.to_tokens("Very long text..." * 1000)  # Long sequence
+        >>>
+        >>> # Process in chunks of 512 tokens
+        >>> for chunk_result in extract_streaming(model, tokens, chunk_size=512):
+        ...     print(f"Chunk {chunk_result.chunk_index}: "
+        ...           f"positions {chunk_result.start_position}-{chunk_result.end_position}")
+        ...     # Process chunk hidden states
+        ...     layer_0_hidden = chunk_result.hidden_states.get(0)
+
+    Note:
+        - Each chunk is processed independently; attention patterns within a chunk
+          do not see tokens from other chunks.
+        - For causal models, this is appropriate as future tokens shouldn't influence
+          past token representations.
+        - Use overlap > 0 if you need context continuity between chunks.
+        - Memory usage scales with chunk_size * model_hidden_dim * num_layers.
+    """
+    # Validate parameters
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if overlap < 0:
+        raise ValueError(f"overlap must be non-negative, got {overlap}")
+    if overlap >= chunk_size:
+        raise ValueError(
+            f"overlap ({overlap}) must be less than chunk_size ({chunk_size})"
+        )
+
+    try:
+        from transformer_lens import HookedTransformer as TL_HookedTransformer
+    except ImportError as e:
+        raise ImportError(
+            "TransformerLens is required for streaming extraction. "
+            "Install with: pip install transformer-lens"
+        ) from e
+
+    # Ensure tokens has batch dimension
+    if tokens.dim() == 1:
+        tokens = tokens.unsqueeze(0)
+
+    batch_size, seq_len = tokens.shape
+
+    # Build hook filter for selective caching
+    n_layers = model.cfg.n_layers
+    if layers is None:
+        target_layers = list(range(n_layers))
+    else:
+        target_layers = layers
+
+    names_filter = build_hook_filter(layers=target_layers)
+
+    # Calculate step size (accounting for overlap)
+    step_size = chunk_size - overlap
+
+    # Process tokens in chunks
+    chunk_index = 0
+    position = 0
+
+    while position < seq_len:
+        # Determine chunk boundaries
+        start_pos = position
+        end_pos = min(position + chunk_size, seq_len)
+        is_last = end_pos >= seq_len
+
+        # Extract chunk tokens
+        chunk_tokens = tokens[:, start_pos:end_pos]
+
+        # Run model with selective caching for memory efficiency
+        with torch.set_grad_enabled(False):
+            _, cache = model.run_with_cache(
+                chunk_tokens,
+                names_filter=names_filter,
+            )
+
+        # Extract hidden states from cache
+        hidden_states: dict[int, torch.Tensor] = {}
+        for layer_idx in target_layers:
+            hook_name = f"blocks.{layer_idx}.hook_resid_post"
+            if hook_name in cache:
+                tensor = cache[hook_name]
+
+                # Apply precision conversion if requested
+                if precision is not None and precision in PRECISION_DTYPE_MAP:
+                    tensor = tensor.to(dtype=PRECISION_DTYPE_MAP[precision])
+
+                hidden_states[layer_idx] = tensor
+
+        # Create result for this chunk
+        result = StreamingChunkResult(
+            chunk_index=chunk_index,
+            start_position=start_pos,
+            end_position=end_pos,
+            hidden_states=hidden_states,
+            is_last_chunk=is_last,
+            metadata={
+                "batch_size": batch_size,
+                "total_seq_len": seq_len,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+                "precision": precision,
+                "layers_extracted": target_layers,
+            },
+        )
+
+        yield result
+
+        # Clear GPU cache between chunks to prevent fragmentation
+        if clear_cache_between_chunks and not is_last:
+            # Delete cache reference to allow garbage collection
+            del cache
+            torch.cuda.empty_cache()
+
+        # Move to next chunk position
+        if is_last:
+            break
+        position += step_size
+        chunk_index += 1
+
+
+def collect_streaming_results(
+    streaming_generator: Generator[StreamingChunkResult, None, None],
+    aggregate_method: str = "concat",
+) -> dict[int, torch.Tensor]:
+    """
+    Collect all chunks from a streaming extraction into a single result.
+
+    This convenience function consumes the streaming generator and combines
+    the chunk results into a single dictionary of hidden states. Use this
+    when you need the full sequence hidden states but still want memory-efficient
+    chunk-by-chunk processing.
+
+    Parameters:
+        streaming_generator (Generator[StreamingChunkResult, None, None]):
+            Generator from extract_streaming().
+        aggregate_method (str): How to combine chunk hidden states. Currently
+            supported: 'concat' (concatenate along sequence dimension).
+
+    Returns:
+        dict[int, torch.Tensor]: Mapping from layer index to hidden state tensor
+            containing the full sequence. Shape is [batch, total_seq_len, hidden_dim].
+
+    Example:
+        >>> generator = extract_streaming(model, tokens, chunk_size=512)
+        >>> full_hidden_states = collect_streaming_results(generator)
+        >>> layer_0_full = full_hidden_states[0]  # [batch, seq_len, hidden_dim]
+    """
+    if aggregate_method != "concat":
+        raise ValueError(
+            f"Unsupported aggregate_method '{aggregate_method}'. "
+            "Currently only 'concat' is supported."
+        )
+
+    layer_chunks: dict[int, list[torch.Tensor]] = {}
+
+    for chunk_result in streaming_generator:
+        for layer_idx, tensor in chunk_result.hidden_states.items():
+            if layer_idx not in layer_chunks:
+                layer_chunks[layer_idx] = []
+            layer_chunks[layer_idx].append(tensor)
+
+    # Concatenate chunks along sequence dimension (dim=1)
+    result: dict[int, torch.Tensor] = {}
+    for layer_idx, chunks in layer_chunks.items():
+        result[layer_idx] = torch.cat(chunks, dim=1)
+
+    return result

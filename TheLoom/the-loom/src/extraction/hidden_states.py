@@ -312,7 +312,9 @@ def extract_with_selective_cache(
             )
 
     # Run with selective caching - use inference mode for memory efficiency
-    with torch.set_grad_enabled(False):
+    # Using inference_mode() rather than no_grad() for optimal efficiency
+    # (disables autograd version tracking in addition to gradient computation)
+    with torch.inference_mode():
         logits, cache = model.run_with_cache(
             tokens,
             names_filter=names_filter,

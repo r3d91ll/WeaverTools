@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/r3d91ll/weaver/pkg/concepts"
+	"github.com/r3d91ll/yarn"
 )
 
 // =============================================================================
@@ -744,5 +745,239 @@ func TestClearConcepts_ForceWithEmptyStore(t *testing.T) {
 	// Verify: confirmation was NOT requested
 	if mock.CallCount != 0 {
 		t.Errorf("Expected 0 confirmation calls for empty store with force, got %d", mock.CallCount)
+	}
+}
+
+// =============================================================================
+// /clear Command Tests with Confirmation
+// =============================================================================
+
+// newTestShellForClearWithMessages creates a Shell for testing /clear with a real conversation.
+func newTestShellForClearWithMessages(prompter Prompter, messageCount int) *Shell {
+	// Create real yarn session and conversation
+	session := yarn.NewSession("test-session")
+	conv := session.ActiveConversation()
+
+	// Add test messages to the conversation
+	for i := 0; i < messageCount; i++ {
+		msg := yarn.NewAgentMessage(yarn.RoleUser, "test message", "user", "user")
+		conv.Add(msg)
+	}
+
+	return &Shell{
+		session:      session,
+		conv:         conv,
+		conceptStore: concepts.NewStore(),
+		Prompter:     prompter,
+	}
+}
+
+func TestClear_UserConfirms(t *testing.T) {
+	// Setup: Create shell with MockPrompter that returns true (user confirms)
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearWithMessages(mock, 3)
+
+	// Verify we have messages before clear
+	if len(shell.conv.History(-1)) != 3 {
+		t.Fatalf("Expected 3 messages before clear, got %d", len(shell.conv.History(-1)))
+	}
+
+	// Execute /clear command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was requested
+	if mock.CallCount != 1 {
+		t.Errorf("Expected 1 confirmation call, got %d", mock.CallCount)
+	}
+
+	// Verify: prompt message includes message count
+	if !strings.Contains(mock.LastPrompt(), "3 message(s)") {
+		t.Errorf("Expected prompt to mention '3 message(s)', got: %q", mock.LastPrompt())
+	}
+
+	// Verify: messages were cleared (user confirmed) - a new conversation was created
+	if len(shell.conv.History(-1)) != 0 {
+		t.Errorf("Expected 0 messages after confirmed clear, got %d", len(shell.conv.History(-1)))
+	}
+}
+
+func TestClear_UserRejects(t *testing.T) {
+	// Setup: Create shell with MockPrompter that returns false (user rejects)
+	mock := NewMockPrompter(false)
+	shell := newTestShellForClearWithMessages(mock, 3)
+
+	// Verify we have messages before clear
+	if len(shell.conv.History(-1)) != 3 {
+		t.Fatalf("Expected 3 messages before clear, got %d", len(shell.conv.History(-1)))
+	}
+
+	// Execute /clear command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was requested
+	if mock.CallCount != 1 {
+		t.Errorf("Expected 1 confirmation call, got %d", mock.CallCount)
+	}
+
+	// Verify: messages were NOT cleared (user rejected)
+	if len(shell.conv.History(-1)) != 3 {
+		t.Errorf("Expected 3 messages after rejected clear, got %d", len(shell.conv.History(-1)))
+	}
+}
+
+func TestClear_ForceFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "--force flag",
+			command: "/clear --force",
+		},
+		{
+			name:    "-f flag",
+			command: "/clear -f",
+		},
+		{
+			name:    "--force with extra space",
+			command: "/clear  --force",
+		},
+		{
+			name:    "-f with extra space",
+			command: "/clear  -f",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup: Create shell with MockPrompter (should NOT be called with --force)
+			mock := NewMockPrompter(false) // Would reject if called
+			shell := newTestShellForClearWithMessages(mock, 3)
+
+			// Verify we have messages before clear
+			if len(shell.conv.History(-1)) != 3 {
+				t.Fatalf("Expected 3 messages before clear, got %d", len(shell.conv.History(-1)))
+			}
+
+			// Execute /clear with force flag
+			ctx := context.Background()
+			err := shell.handleCommand(ctx, tt.command)
+			if err != nil {
+				t.Fatalf("handleCommand() returned unexpected error: %v", err)
+			}
+
+			// Verify: confirmation was NOT requested (force flag skips it)
+			if mock.CallCount != 0 {
+				t.Errorf("Expected 0 confirmation calls with force flag, got %d", mock.CallCount)
+			}
+
+			// Verify: messages were cleared even though mock would have rejected
+			if len(shell.conv.History(-1)) != 0 {
+				t.Errorf("Expected 0 messages after forced clear, got %d", len(shell.conv.History(-1)))
+			}
+		})
+	}
+}
+
+func TestClear_EmptyHistory(t *testing.T) {
+	// Setup: Create shell with empty conversation
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearWithMessages(mock, 0)
+
+	// Verify conversation is empty
+	if len(shell.conv.History(-1)) != 0 {
+		t.Fatalf("Expected 0 messages in empty conversation, got %d", len(shell.conv.History(-1)))
+	}
+
+	// Execute /clear command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was NOT requested (no messages to clear)
+	if mock.CallCount != 0 {
+		t.Errorf("Expected 0 confirmation calls for empty history, got %d", mock.CallCount)
+	}
+}
+
+func TestClear_ConfirmationError(t *testing.T) {
+	// Setup: Create shell with MockPrompter that returns an error
+	expectedErr := errors.New("stdin closed unexpectedly")
+	mock := NewMockPrompterWithError(expectedErr)
+	shell := newTestShellForClearWithMessages(mock, 3)
+
+	// Execute /clear command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear")
+
+	// Verify: error was returned
+	if err == nil {
+		t.Fatal("Expected error from handleCommand(), got nil")
+	}
+
+	// Verify: error message contains context about confirmation failure
+	if !strings.Contains(err.Error(), "confirmation") {
+		t.Errorf("Expected error to mention 'confirmation', got: %v", err)
+	}
+
+	// Verify: messages were NOT cleared (error occurred)
+	if len(shell.conv.History(-1)) != 3 {
+		t.Errorf("Expected 3 messages after error, got %d", len(shell.conv.History(-1)))
+	}
+}
+
+func TestClear_SingleMessage(t *testing.T) {
+	// Setup: Create shell with MockPrompter that confirms
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearWithMessages(mock, 1)
+
+	// Verify we have one message
+	if len(shell.conv.History(-1)) != 1 {
+		t.Fatalf("Expected 1 message before clear, got %d", len(shell.conv.History(-1)))
+	}
+
+	// Execute /clear command
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: prompt message uses correct grammar for single message
+	if !strings.Contains(mock.LastPrompt(), "1 message(s)") {
+		t.Errorf("Expected prompt to mention '1 message(s)', got: %q", mock.LastPrompt())
+	}
+
+	// Verify: message was cleared
+	if len(shell.conv.History(-1)) != 0 {
+		t.Errorf("Expected 0 messages after clear, got %d", len(shell.conv.History(-1)))
+	}
+}
+
+func TestClear_ForceWithEmptyHistory(t *testing.T) {
+	// Setup: Create shell with empty conversation
+	mock := NewMockPrompter(true)
+	shell := newTestShellForClearWithMessages(mock, 0)
+
+	// Execute /clear --force command on empty history
+	ctx := context.Background()
+	err := shell.handleCommand(ctx, "/clear --force")
+	if err != nil {
+		t.Fatalf("handleCommand() returned unexpected error: %v", err)
+	}
+
+	// Verify: confirmation was NOT requested
+	if mock.CallCount != 0 {
+		t.Errorf("Expected 0 confirmation calls for empty history with force, got %d", mock.CallCount)
 	}
 }

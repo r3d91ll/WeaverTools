@@ -843,3 +843,119 @@ func TestNonTTYFailWithoutStart(t *testing.T) {
 		t.Error("non-TTY Fail should not contain color codes")
 	}
 }
+
+// TestFormatElapsed verifies the exported FormatElapsed function.
+func TestFormatElapsed(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		expected string
+	}{
+		// Edge cases
+		{"zero duration", 0, "(0.0s)"},
+		{"1 millisecond", 1 * time.Millisecond, "(0.0s)"},
+		{"10 milliseconds", 10 * time.Millisecond, "(0.0s)"},
+		{"100 milliseconds", 100 * time.Millisecond, "(0.1s)"},
+
+		// Sub-second durations
+		{"500 milliseconds", 500 * time.Millisecond, "(0.5s)"},
+		{"750 milliseconds", 750 * time.Millisecond, "(0.8s)"}, // rounds to 0.8
+		{"999 milliseconds", 999 * time.Millisecond, "(1.0s)"}, // rounds to 1.0
+
+		// Multi-second durations (less than a minute)
+		{"1 second", 1 * time.Second, "(1.0s)"},
+		{"1.5 seconds", 1500 * time.Millisecond, "(1.5s)"},
+		{"10 seconds", 10 * time.Second, "(10.0s)"},
+		{"30 seconds", 30 * time.Second, "(30.0s)"},
+		{"59.9 seconds", 59*time.Second + 900*time.Millisecond, "(59.9s)"},
+
+		// Exactly 1 minute (edge case)
+		{"exactly 1 minute", 60 * time.Second, "(1m 0s)"},
+		{"1 minute", 1 * time.Minute, "(1m 0s)"},
+
+		// Minute+ durations
+		{"1 minute 1 second", 61 * time.Second, "(1m 1s)"},
+		{"1 minute 30 seconds", 90 * time.Second, "(1m 30s)"},
+		{"2 minutes", 2 * time.Minute, "(2m 0s)"},
+		{"5 minutes 30 seconds", 5*time.Minute + 30*time.Second, "(5m 30s)"},
+		{"10 minutes", 10 * time.Minute, "(10m 0s)"},
+
+		// Large durations
+		{"1 hour", 1 * time.Hour, "(60m 0s)"},
+		{"1 hour 30 minutes", 1*time.Hour + 30*time.Minute, "(90m 0s)"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := FormatElapsed(tc.duration)
+			if result != tc.expected {
+				t.Errorf("FormatElapsed(%v): expected %q, got %q", tc.duration, tc.expected, result)
+			}
+		})
+	}
+}
+
+// TestFormatElapsedShort verifies the exported FormatElapsedShort function.
+func TestFormatElapsedShort(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		expected string
+	}{
+		// Edge cases
+		{"zero duration", 0, "0.0s"},
+		{"1 millisecond", 1 * time.Millisecond, "0.0s"},
+		{"100 milliseconds", 100 * time.Millisecond, "0.1s"},
+
+		// Sub-second durations
+		{"500 milliseconds", 500 * time.Millisecond, "0.5s"},
+
+		// Multi-second durations (less than a minute)
+		{"1 second", 1 * time.Second, "1.0s"},
+		{"1.5 seconds", 1500 * time.Millisecond, "1.5s"},
+		{"30 seconds", 30 * time.Second, "30.0s"},
+		{"59.9 seconds", 59*time.Second + 900*time.Millisecond, "59.9s"},
+
+		// Exactly 1 minute (edge case)
+		{"exactly 1 minute", 60 * time.Second, "1m 0s"},
+		{"1 minute", 1 * time.Minute, "1m 0s"},
+
+		// Minute+ durations
+		{"1 minute 1 second", 61 * time.Second, "1m 1s"},
+		{"1 minute 30 seconds", 90 * time.Second, "1m 30s"},
+		{"5 minutes 30 seconds", 5*time.Minute + 30*time.Second, "5m 30s"},
+
+		// Large durations
+		{"1 hour", 1 * time.Hour, "60m 0s"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := FormatElapsedShort(tc.duration)
+			if result != tc.expected {
+				t.Errorf("FormatElapsedShort(%v): expected %q, got %q", tc.duration, tc.expected, result)
+			}
+		})
+	}
+}
+
+// TestFormatElapsedRelationship verifies FormatElapsed wraps FormatElapsedShort with parentheses.
+func TestFormatElapsedRelationship(t *testing.T) {
+	durations := []time.Duration{
+		0,
+		500 * time.Millisecond,
+		1 * time.Second,
+		30 * time.Second,
+		1 * time.Minute,
+		5*time.Minute + 30*time.Second,
+	}
+
+	for _, d := range durations {
+		short := FormatElapsedShort(d)
+		full := FormatElapsed(d)
+		expected := "(" + short + ")"
+		if full != expected {
+			t.Errorf("FormatElapsed(%v)=%q should equal (%q)=%q", d, full, short, expected)
+		}
+	}
+}

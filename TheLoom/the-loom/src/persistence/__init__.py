@@ -23,6 +23,7 @@ from .database import (
     MetricRecord,
     init_db,
 )
+from .query import ExperimentQuery, ExperimentSummary
 from .storage import HiddenStateStorage
 
 logger = logging.getLogger(__name__)
@@ -680,6 +681,9 @@ __all__ = [
     "init_db",
     # Storage
     "HiddenStateStorage",
+    # Query
+    "ExperimentQuery",
+    "ExperimentSummary",
     # Manager
     "ExperimentPersistence",
 ]

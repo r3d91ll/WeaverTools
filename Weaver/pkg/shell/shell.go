@@ -188,8 +188,26 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		return s.handleMetrics(ctx, parts[1:])
 
 	case "/clear_concepts":
-		count := s.conceptStore.ClearAll()
-		fmt.Printf("Cleared %d concepts.\n", count)
+		count := s.conceptStore.Count()
+		if count == 0 {
+			fmt.Println("No concepts to clear.")
+			return nil
+		}
+
+		// Prompt for confirmation
+		message := fmt.Sprintf("This will delete %d concept(s). Are you sure?", count)
+		confirmed, err := s.Prompter.Confirm(message)
+		if err != nil {
+			return fmt.Errorf("failed to get confirmation: %w", err)
+		}
+
+		if !confirmed {
+			fmt.Println("Operation cancelled.")
+			return nil
+		}
+
+		cleared := s.conceptStore.ClearAll()
+		fmt.Printf("Cleared %d concepts.\n", cleared)
 
 	// Academic export commands
 	case "/export_latex":

@@ -6,11 +6,16 @@
 #   2. Tag is annotated (not lightweight)
 #   3. Tag message is present and meaningful
 #
+# IMPORTANT: This workflow enforces STRICT production semver only.
+# Pre-release tags (v1.0.0-alpha, v1.0.0-beta.1) are intentionally rejected.
+# Pre-release and build metadata are handled by release.yml only.
+# This separation ensures production releases meet stricter quality requirements.
+#
 # Usage:
 #   Automatically runs when any tag starting with 'v' is pushed
-#   Blocks releases if validation fails
+#   Pre-release tags will fail this workflow but succeed in release.yml
 #
-# See also: release.yml (creates GitHub releases after validation)
+# See also: release.yml (creates GitHub releases, allows pre-release tags)
 
 name: Version Check
 
@@ -130,6 +135,7 @@ jobs:
           echo "✅ Tag '${TAG}' is properly annotated (type: ${TAG_TYPE})"
 
       - name: Validate tag message exists
+        id: message_check
         run: |
           TAG="${{ steps.extract.outputs.tag }}"
 
@@ -149,9 +155,11 @@ jobs:
             echo "Recommended format:"
             echo "  git tag -a ${TAG} -m 'Release ${TAG}' -m '- Feature A' -m '- Bug fix B'"
             echo ""
+            echo "has_message=false" >> $GITHUB_OUTPUT
             # Don't fail, just warn
           else
             echo "✅ Tag message found: ${TAG_MESSAGE}"
+            echo "has_message=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Display tag details
@@ -197,7 +205,11 @@ jobs:
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Semver Format (\`v[0-9]+.[0-9]+.[0-9]+\`) | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
           echo "| Annotated Tag (not lightweight) | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tag Message Present | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.message_check.outputs.has_message }}" == "true" ]]; then
+            echo "| Tag Message Present | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Tag Message Present | ⚠️ Warning |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Version Components" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

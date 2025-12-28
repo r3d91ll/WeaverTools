@@ -179,7 +179,19 @@ jobs:
       - name: Run tests
         run: |
           echo "🧪 Running tests..."
-          go test ./... -v
+
+          # Test Yarn
+          echo "Testing Yarn..."
+          cd Yarn && go test ./... -v && cd ..
+
+          # Test Wool
+          echo "Testing Wool..."
+          cd Wool && go test ./... -v && cd ..
+
+          # Test Weaver
+          echo "Testing Weaver..."
+          cd Weaver && go test ./... -v && cd ..
+
           echo "✅ All tests passed"
 
       - name: Create GitHub Release

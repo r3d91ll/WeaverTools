@@ -77,7 +77,7 @@ WeaverTools enforces a **minimum 6-month deprecation window** for all public API
 
 ### Example Timeline
 
-```
+```text
 January 2025:  DoOldThing() deprecated in v1.5.0
                Removal eligible: July 2025 (6 months)
 
@@ -219,7 +219,7 @@ git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'
 
 WeaverTools uses a monorepo structure. A single tag covers all Go modules:
 
-```
+```text
 v1.0.0 applies to:
 ├── Yarn   (github.com/r3d91ll/yarn)
 ├── Wool   (github.com/r3d91ll/wool)
@@ -355,7 +355,7 @@ Use this checklist before creating any release:
 
 ### Semver Decision Tree
 
-```
+```text
 Is this a bug fix with no API changes?
 ├── Yes → PATCH (v1.0.0 → v1.0.1)
 └── No

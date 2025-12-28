@@ -2,12 +2,14 @@ package yarn
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestNewSessionRegistry verifies the constructor creates a properly initialized registry.
@@ -2129,4 +2131,898 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 			t.Error("session should not be retrievable by session.Name when registry key differs")
 		}
 	})
+}
+
+// ============================================================================
+// Edge Case and Error Tests
+// ============================================================================
+
+// TestLoadCorruptedJSON verifies Load returns an error with context for corrupted files.
+func TestLoadCorruptedJSON(t *testing.T) {
+	t.Run("corrupted session file returns error", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a valid manifest
+		manifest := `{"version": 1, "sessions": {"test": "test"}}`
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644); err != nil {
+			t.Fatalf("failed to write manifest: %v", err)
+		}
+
+		// Create a corrupted session file
+		corrupted := `{"id": "abc", "name": "test", invalid json here`
+		if err := os.WriteFile(filepath.Join(dir, "test.json"), []byte(corrupted), 0644); err != nil {
+			t.Fatalf("failed to write corrupted file: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		err := registry.Load(dir)
+		if err == nil {
+			t.Fatal("expected error for corrupted JSON, got nil")
+		}
+
+		// Verify error wraps ErrRegistryLoadFailed
+		if !errors.Is(err, ErrRegistryLoadFailed) {
+			t.Errorf("expected error to wrap ErrRegistryLoadFailed, got %v", err)
+		}
+
+		// Verify error message contains file context
+		errStr := err.Error()
+		if !contains(errStr, "test.json") {
+			t.Errorf("expected error to mention filename, got %q", errStr)
+		}
+	})
+
+	t.Run("corrupted manifest returns error", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a corrupted manifest
+		corrupted := `{"version": 1, "sessions": { invalid }`
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(corrupted), 0644); err != nil {
+			t.Fatalf("failed to write corrupted manifest: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		err := registry.Load(dir)
+		if err == nil {
+			t.Fatal("expected error for corrupted manifest, got nil")
+		}
+
+		// Verify error wraps ErrRegistryLoadFailed
+		if !errors.Is(err, ErrRegistryLoadFailed) {
+			t.Errorf("expected error to wrap ErrRegistryLoadFailed, got %v", err)
+		}
+	})
+
+	t.Run("empty session file returns error", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a valid manifest
+		manifest := `{"version": 1, "sessions": {"test": "test"}}`
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644); err != nil {
+			t.Fatalf("failed to write manifest: %v", err)
+		}
+
+		// Create an empty session file
+		if err := os.WriteFile(filepath.Join(dir, "test.json"), []byte(""), 0644); err != nil {
+			t.Fatalf("failed to write empty file: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		err := registry.Load(dir)
+		if err == nil {
+			t.Fatal("expected error for empty JSON file, got nil")
+		}
+	})
+
+	t.Run("valid JSON but wrong structure returns no error but empty fields", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a valid manifest
+		manifest := `{"version": 1, "sessions": {"test": "test"}}`
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0644); err != nil {
+			t.Fatalf("failed to write manifest: %v", err)
+		}
+
+		// Create a session file with valid JSON but different structure
+		// (e.g., array instead of object)
+		wrongStructure := `{"foo": "bar", "baz": 123}`
+		if err := os.WriteFile(filepath.Join(dir, "test.json"), []byte(wrongStructure), 0644); err != nil {
+			t.Fatalf("failed to write file: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		err := registry.Load(dir)
+		// JSON unmarshaling into struct with missing fields is valid in Go
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Session should exist but with empty/zero fields
+		got, ok := registry.Get("test")
+		if !ok {
+			t.Fatal("session not found after load")
+		}
+		// Session fields should be empty/zero since JSON didn't match
+		if got.ID != "" {
+			t.Errorf("expected empty ID for mismatched JSON, got %q", got.ID)
+		}
+	})
+}
+
+// TestSaveSessionWithSpecialChars verifies Save handles special characters in names safely.
+func TestSaveSessionWithSpecialChars(t *testing.T) {
+	testCases := []struct {
+		name        string
+		registryKey string
+		sessionName string
+	}{
+		{"slash in name", "test/session", "session/with/slashes"},
+		{"backslash in name", "test\\session", "session\\with\\backslashes"},
+		{"colon in name", "test:session", "session:with:colons"},
+		{"asterisk in name", "test*session", "session*with*asterisks"},
+		{"question mark in name", "test?session", "session?with?questions"},
+		{"quote in name", `test"session`, `session"with"quotes`},
+		{"less than in name", "test<session", "session<with<lessthan"},
+		{"greater than in name", "test>session", "session>with>greaterthan"},
+		{"pipe in name", "test|session", "session|with|pipes"},
+		{"percent in name", "test%session", "session%with%percent"},
+		{"mixed special chars", "a/b\\c:d*e?f", "session<a>b|c%d"},
+		{"unicode characters", "test-日本語", "セッション-unicode"},
+		{"emoji in name", "test-🎉-session", "session-🚀-emoji"},
+		{"spaces and dots", "test . session", "  session...dots  "},
+		{"empty registry key", "", "empty-key-session"},
+		{"very long name", string(make([]byte, 300)), "very-long-session"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			original := NewSessionRegistry()
+			session := NewSession(tc.sessionName, "test description")
+			_ = original.Register(tc.registryKey, session)
+
+			dir := t.TempDir()
+
+			// Save should not fail
+			err := original.Save(dir)
+			if err != nil {
+				t.Fatalf("Save failed for %q: %v", tc.name, err)
+			}
+
+			// Verify manifest exists and is valid JSON
+			manifestPath := filepath.Join(dir, "manifest.json")
+			data, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatalf("failed to read manifest: %v", err)
+			}
+
+			var manifest struct {
+				Sessions map[string]string `json:"sessions"`
+			}
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				t.Fatalf("manifest is not valid JSON: %v", err)
+			}
+
+			// Verify session can be loaded back
+			loaded := NewSessionRegistry()
+			if err := loaded.Load(dir); err != nil {
+				t.Fatalf("Load failed: %v", err)
+			}
+
+			got, ok := loaded.Get(tc.registryKey)
+			if !ok {
+				t.Fatalf("session not found after roundtrip with key %q", tc.registryKey)
+			}
+			if got.Name != tc.sessionName {
+				t.Errorf("session Name mismatch: got %q, want %q", got.Name, tc.sessionName)
+			}
+			if got.ID != session.ID {
+				t.Errorf("session ID mismatch: got %q, want %q", got.ID, session.ID)
+			}
+		})
+	}
+
+	t.Run("multiple sessions with similar names after sanitization", func(t *testing.T) {
+		// Test that sessions with names that sanitize to similar values don't collide
+		original := NewSessionRegistry()
+		session1 := NewSession("session-1", "desc 1")
+		session2 := NewSession("session-2", "desc 2")
+		session3 := NewSession("session-3", "desc 3")
+
+		// These names might sanitize to similar filenames
+		_ = original.Register("test/a", session1)
+		_ = original.Register("test\\a", session2)
+		_ = original.Register("test:a", session3)
+
+		dir := t.TempDir()
+
+		err := original.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Load and verify all three sessions are distinct
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if loaded.Count() != 3 {
+			t.Fatalf("expected 3 sessions, got %d", loaded.Count())
+		}
+
+		for _, key := range []string{"test/a", "test\\a", "test:a"} {
+			if _, ok := loaded.Get(key); !ok {
+				t.Errorf("session %q not found after roundtrip", key)
+			}
+		}
+	})
+}
+
+// TestLoadSessionWithConversations verifies Load preserves session conversations.
+func TestLoadSessionWithConversations(t *testing.T) {
+	t.Run("single conversation preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		// Add a conversation with messages
+		conv := NewConversation("test-conversation")
+		conv.Add(&Message{
+			ID:        "msg-1",
+			Role:      RoleUser,
+			Content:   "Hello",
+			Timestamp: time.Now(),
+		})
+		conv.Add(&Message{
+			ID:        "msg-2",
+			Role:      RoleAssistant,
+			Content:   "Hi there!",
+			AgentID:   "agent-1",
+			AgentName: "TestAgent",
+			Timestamp: time.Now(),
+		})
+		session.AddConversation(conv)
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, ok := loaded.Get("test")
+		if !ok {
+			t.Fatal("session not found after load")
+		}
+
+		if len(got.Conversations) != 1 {
+			t.Fatalf("expected 1 conversation, got %d", len(got.Conversations))
+		}
+
+		loadedConv := got.Conversations[0]
+		if loadedConv.ID != conv.ID {
+			t.Errorf("conversation ID mismatch: got %q, want %q", loadedConv.ID, conv.ID)
+		}
+		if loadedConv.Name != conv.Name {
+			t.Errorf("conversation Name mismatch: got %q, want %q", loadedConv.Name, conv.Name)
+		}
+		if len(loadedConv.Messages) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(loadedConv.Messages))
+		}
+		if loadedConv.Messages[0].Content != "Hello" {
+			t.Errorf("message content mismatch: got %q, want %q", loadedConv.Messages[0].Content, "Hello")
+		}
+		if loadedConv.Messages[1].AgentID != "agent-1" {
+			t.Errorf("message AgentID mismatch: got %q, want %q", loadedConv.Messages[1].AgentID, "agent-1")
+		}
+	})
+
+	t.Run("multiple conversations preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		// Add multiple conversations
+		for i := 1; i <= 3; i++ {
+			conv := NewConversation(fmt.Sprintf("conversation-%d", i))
+			conv.Add(&Message{
+				ID:        fmt.Sprintf("msg-%d", i),
+				Role:      RoleUser,
+				Content:   fmt.Sprintf("Message %d", i),
+				Timestamp: time.Now(),
+			})
+			session.AddConversation(conv)
+		}
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if len(got.Conversations) != 3 {
+			t.Errorf("expected 3 conversations, got %d", len(got.Conversations))
+		}
+	})
+
+	t.Run("empty conversations slice preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		// No conversations added - should preserve empty slice
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if got.Conversations == nil {
+			t.Error("expected non-nil Conversations slice after load")
+		}
+		if len(got.Conversations) != 0 {
+			t.Errorf("expected 0 conversations, got %d", len(got.Conversations))
+		}
+	})
+
+	t.Run("conversation participants preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		conv := NewConversation("test-conversation")
+		conv.Add(&Message{
+			ID:        "msg-1",
+			Role:      RoleAssistant,
+			Content:   "Hello",
+			AgentID:   "agent-1",
+			AgentName: "Agent One",
+			Timestamp: time.Now(),
+		})
+		conv.Add(&Message{
+			ID:        "msg-2",
+			Role:      RoleAssistant,
+			Content:   "World",
+			AgentID:   "agent-2",
+			AgentName: "Agent Two",
+			Timestamp: time.Now(),
+		})
+		session.AddConversation(conv)
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		loadedConv := got.Conversations[0]
+
+		if len(loadedConv.Participants) != 2 {
+			t.Errorf("expected 2 participants, got %d", len(loadedConv.Participants))
+		}
+
+		if p, ok := loadedConv.Participants["agent-1"]; !ok {
+			t.Error("participant agent-1 not found")
+		} else if p.AgentName != "Agent One" {
+			t.Errorf("participant name mismatch: got %q, want %q", p.AgentName, "Agent One")
+		}
+	})
+}
+
+// TestLoadSessionWithMeasurements verifies Load preserves session measurements.
+func TestLoadSessionWithMeasurements(t *testing.T) {
+	t.Run("single measurement preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		// Add a measurement
+		m := NewMeasurement()
+		m.DEff = 256
+		m.Beta = 1.8
+		m.Alignment = 0.85
+		m.CPair = 0.72
+		m.BetaStatus = BetaOptimal
+		m.SenderID = "sender-1"
+		m.SenderName = "Sender"
+		m.ReceiverID = "receiver-1"
+		m.ReceiverName = "Receiver"
+		m.TurnNumber = 5
+		m.MessageContent = "Test message"
+		m.TokenCount = 42
+
+		session.AddMeasurement(m)
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, ok := loaded.Get("test")
+		if !ok {
+			t.Fatal("session not found after load")
+		}
+
+		if len(got.Measurements) != 1 {
+			t.Fatalf("expected 1 measurement, got %d", len(got.Measurements))
+		}
+
+		loadedM := got.Measurements[0]
+		if loadedM.ID != m.ID {
+			t.Errorf("measurement ID mismatch: got %q, want %q", loadedM.ID, m.ID)
+		}
+		if loadedM.DEff != 256 {
+			t.Errorf("DEff mismatch: got %d, want %d", loadedM.DEff, 256)
+		}
+		if loadedM.Beta != 1.8 {
+			t.Errorf("Beta mismatch: got %f, want %f", loadedM.Beta, 1.8)
+		}
+		if loadedM.Alignment != 0.85 {
+			t.Errorf("Alignment mismatch: got %f, want %f", loadedM.Alignment, 0.85)
+		}
+		if loadedM.CPair != 0.72 {
+			t.Errorf("CPair mismatch: got %f, want %f", loadedM.CPair, 0.72)
+		}
+		if loadedM.BetaStatus != BetaOptimal {
+			t.Errorf("BetaStatus mismatch: got %q, want %q", loadedM.BetaStatus, BetaOptimal)
+		}
+		if loadedM.SenderID != "sender-1" {
+			t.Errorf("SenderID mismatch: got %q, want %q", loadedM.SenderID, "sender-1")
+		}
+		if loadedM.TurnNumber != 5 {
+			t.Errorf("TurnNumber mismatch: got %d, want %d", loadedM.TurnNumber, 5)
+		}
+		if loadedM.MessageContent != "Test message" {
+			t.Errorf("MessageContent mismatch: got %q, want %q", loadedM.MessageContent, "Test message")
+		}
+		if loadedM.TokenCount != 42 {
+			t.Errorf("TokenCount mismatch: got %d, want %d", loadedM.TokenCount, 42)
+		}
+	})
+
+	t.Run("multiple measurements preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		// Add multiple measurements with different statuses
+		for i := 1; i <= 5; i++ {
+			m := NewMeasurement()
+			m.DEff = i * 100
+			m.Beta = float64(i) * 0.5
+			m.SenderID = fmt.Sprintf("sender-%d", i)
+			session.AddMeasurement(m)
+		}
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if len(got.Measurements) != 5 {
+			t.Errorf("expected 5 measurements, got %d", len(got.Measurements))
+		}
+	})
+
+	t.Run("measurement with hidden states preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		m := NewMeasurement()
+		m.SenderID = "sender-1"
+		m.SenderHidden = &HiddenState{
+			ID:        "hidden-1",
+			Timestamp: time.Now(),
+			Vector:    []float64{0.1, 0.2, 0.3, 0.4, 0.5},
+			Source:    "test-source",
+			LayerID:   "layer-1",
+			ModelID:   "model-1",
+		}
+		m.ReceiverID = "receiver-1"
+		m.ReceiverHidden = &HiddenState{
+			ID:        "hidden-2",
+			Timestamp: time.Now(),
+			Vector:    []float64{0.5, 0.4, 0.3, 0.2, 0.1},
+			Source:    "test-source",
+			LayerID:   "layer-2",
+			ModelID:   "model-2",
+		}
+
+		session.AddMeasurement(m)
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		loadedM := got.Measurements[0]
+
+		if loadedM.SenderHidden == nil {
+			t.Fatal("SenderHidden is nil after load")
+		}
+		if len(loadedM.SenderHidden.Vector) != 5 {
+			t.Errorf("SenderHidden vector length mismatch: got %d, want 5", len(loadedM.SenderHidden.Vector))
+		}
+		if loadedM.SenderHidden.LayerID != "layer-1" {
+			t.Errorf("SenderHidden LayerID mismatch: got %q, want %q", loadedM.SenderHidden.LayerID, "layer-1")
+		}
+
+		if loadedM.ReceiverHidden == nil {
+			t.Fatal("ReceiverHidden is nil after load")
+		}
+		if loadedM.ReceiverHidden.ModelID != "model-2" {
+			t.Errorf("ReceiverHidden ModelID mismatch: got %q, want %q", loadedM.ReceiverHidden.ModelID, "model-2")
+		}
+	})
+
+	t.Run("empty measurements slice preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		// No measurements added
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if got.Measurements == nil {
+			t.Error("expected non-nil Measurements slice after load")
+		}
+		if len(got.Measurements) != 0 {
+			t.Errorf("expected 0 measurements, got %d", len(got.Measurements))
+		}
+	})
+
+	t.Run("session stats reflect loaded measurements", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+
+		// Add measurements with known values
+		for i := 0; i < 4; i++ {
+			m := NewMeasurement()
+			m.DEff = 100
+			m.Beta = 2.0
+			m.Alignment = 0.5
+			m.SenderID = "sender-1"
+			if i%2 == 0 {
+				m.SenderHidden = &HiddenState{Vector: []float64{0.1}}
+				m.ReceiverHidden = &HiddenState{Vector: []float64{0.2}}
+			}
+			session.AddMeasurement(m)
+		}
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		stats := got.Stats()
+
+		if stats.MeasurementCount != 4 {
+			t.Errorf("MeasurementCount mismatch: got %d, want 4", stats.MeasurementCount)
+		}
+		if stats.BilateralCount != 2 {
+			t.Errorf("BilateralCount mismatch: got %d, want 2", stats.BilateralCount)
+		}
+	})
+}
+
+// TestSaveNilSession verifies Save handles nil sessions gracefully.
+func TestSaveNilSession(t *testing.T) {
+	t.Run("nil session is skipped", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("nil-session", nil)
+		_ = registry.Register("real-session", NewSession("real", "d"))
+
+		dir := t.TempDir()
+
+		// Save should succeed
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify only real session in manifest
+		manifestPath := filepath.Join(dir, "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatalf("failed to read manifest: %v", err)
+		}
+
+		var manifest struct {
+			Sessions map[string]string `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("failed to parse manifest: %v", err)
+		}
+
+		if len(manifest.Sessions) != 1 {
+			t.Errorf("expected 1 session in manifest (nil skipped), got %d", len(manifest.Sessions))
+		}
+		if _, ok := manifest.Sessions["real-session"]; !ok {
+			t.Error("real-session not found in manifest")
+		}
+		if _, ok := manifest.Sessions["nil-session"]; ok {
+			t.Error("nil-session should not be in manifest")
+		}
+
+		// Verify only one session file exists (plus manifest)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("failed to read directory: %v", err)
+		}
+
+		jsonCount := 0
+		for _, entry := range entries {
+			if filepath.Ext(entry.Name()) == ".json" {
+				jsonCount++
+			}
+		}
+		// Should have 2: manifest.json and real-session.json
+		if jsonCount != 2 {
+			t.Errorf("expected 2 JSON files, got %d", jsonCount)
+		}
+	})
+
+	t.Run("all nil sessions results in empty manifest", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_ = registry.Register("nil-1", nil)
+		_ = registry.Register("nil-2", nil)
+		_ = registry.Register("nil-3", nil)
+
+		dir := t.TempDir()
+
+		err := registry.Save(dir)
+		if err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		// Verify empty manifest
+		manifestPath := filepath.Join(dir, "manifest.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatalf("failed to read manifest: %v", err)
+		}
+
+		var manifest struct {
+			Sessions map[string]string `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("failed to parse manifest: %v", err)
+		}
+
+		if len(manifest.Sessions) != 0 {
+			t.Errorf("expected 0 sessions in manifest, got %d", len(manifest.Sessions))
+		}
+	})
+}
+
+// TestLoadFallbackWithoutManifest verifies Load works without manifest.json.
+func TestLoadFallbackWithoutManifest(t *testing.T) {
+	t.Run("loads sessions by filename when no manifest", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create session files directly without manifest
+		session1 := NewSession("session-1", "description 1")
+		data1, _ := json.MarshalIndent(session1, "", "  ")
+		if err := os.WriteFile(filepath.Join(dir, "my-session.json"), data1, 0644); err != nil {
+			t.Fatalf("failed to write session file: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		if err := registry.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Session should be loaded with filename as registry name
+		got, ok := registry.Get("my-session")
+		if !ok {
+			t.Fatal("session not found with filename as key")
+		}
+		if got.Name != "session-1" {
+			t.Errorf("session Name mismatch: got %q, want %q", got.Name, "session-1")
+		}
+	})
+
+	t.Run("ignores non-json files when no manifest", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a JSON session file
+		session := NewSession("test-session", "description")
+		data, _ := json.MarshalIndent(session, "", "  ")
+		if err := os.WriteFile(filepath.Join(dir, "valid.json"), data, 0644); err != nil {
+			t.Fatalf("failed to write session file: %v", err)
+		}
+
+		// Create some non-JSON files
+		if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("readme"), 0644); err != nil {
+			t.Fatalf("failed to write text file: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("config: value"), 0644); err != nil {
+			t.Fatalf("failed to write yaml file: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		if err := registry.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Only the JSON session should be loaded
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 session, got %d", registry.Count())
+		}
+		if _, ok := registry.Get("valid"); !ok {
+			t.Error("valid session not found")
+		}
+	})
+
+	t.Run("ignores subdirectories", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a JSON session file
+		session := NewSession("test-session", "description")
+		data, _ := json.MarshalIndent(session, "", "  ")
+		if err := os.WriteFile(filepath.Join(dir, "valid.json"), data, 0644); err != nil {
+			t.Fatalf("failed to write session file: %v", err)
+		}
+
+		// Create a subdirectory with JSON files (should be ignored)
+		subdir := filepath.Join(dir, "subdir")
+		if err := os.MkdirAll(subdir, 0755); err != nil {
+			t.Fatalf("failed to create subdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(subdir, "nested.json"), data, 0644); err != nil {
+			t.Fatalf("failed to write nested file: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		if err := registry.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		// Only the top-level JSON session should be loaded
+		if registry.Count() != 1 {
+			t.Errorf("expected 1 session, got %d", registry.Count())
+		}
+	})
+}
+
+// TestLoadWithSessionMetadata verifies session metadata is preserved.
+func TestLoadWithSessionMetadata(t *testing.T) {
+	t.Run("session metadata preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		session.Metadata["key1"] = "value1"
+		session.Metadata["key2"] = 42.5
+		session.Metadata["key3"] = true
+		session.Metadata["key4"] = []any{"a", "b", "c"}
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+		if got.Metadata == nil {
+			t.Fatal("Metadata is nil after load")
+		}
+
+		if got.Metadata["key1"] != "value1" {
+			t.Errorf("Metadata key1 mismatch: got %v, want %v", got.Metadata["key1"], "value1")
+		}
+		if got.Metadata["key2"] != 42.5 {
+			t.Errorf("Metadata key2 mismatch: got %v, want %v", got.Metadata["key2"], 42.5)
+		}
+		if got.Metadata["key3"] != true {
+			t.Errorf("Metadata key3 mismatch: got %v, want %v", got.Metadata["key3"], true)
+		}
+	})
+
+	t.Run("session config preserved", func(t *testing.T) {
+		original := NewSessionRegistry()
+		session := NewSession("test-session", "test description")
+		session.Config.MeasurementMode = MeasureTriggered
+		session.Config.AutoExport = false
+		session.Config.ExportPath = "/custom/path"
+
+		_ = original.Register("test", session)
+
+		dir := t.TempDir()
+		if err := original.Save(dir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		loaded := NewSessionRegistry()
+		if err := loaded.Load(dir); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		got, _ := loaded.Get("test")
+
+		if got.Config.MeasurementMode != MeasureTriggered {
+			t.Errorf("MeasurementMode mismatch: got %q, want %q", got.Config.MeasurementMode, MeasureTriggered)
+		}
+		if got.Config.AutoExport != false {
+			t.Errorf("AutoExport mismatch: got %v, want %v", got.Config.AutoExport, false)
+		}
+		if got.Config.ExportPath != "/custom/path" {
+			t.Errorf("ExportPath mismatch: got %q, want %q", got.Config.ExportPath, "/custom/path")
+		}
+	})
+}
+
+// contains is a helper function to check if a string contains a substring.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

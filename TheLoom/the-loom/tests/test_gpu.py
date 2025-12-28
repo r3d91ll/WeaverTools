@@ -505,6 +505,7 @@ class TestGPUInfo:
             total_memory_gb=10.0,
             free_memory_gb=8.0,
             used_memory_gb=2.0,
+            peak_memory_gb=1.5,
             utilization_percent=25.0,
             compute_capability=(8, 6),
         )
@@ -514,6 +515,7 @@ class TestGPUInfo:
         assert info.total_memory_gb == 10.0
         assert info.free_memory_gb == 8.0
         assert info.used_memory_gb == 2.0
+        assert info.peak_memory_gb == 1.5
         assert info.utilization_percent == 25.0
         assert info.compute_capability == (8, 6)
 
@@ -525,11 +527,13 @@ class TestGPUInfo:
             total_memory_gb=10.0,
             free_memory_gb=8.0,
             used_memory_gb=2.0,
+            peak_memory_gb=0.0,
             utilization_percent=None,
             compute_capability=(7, 5),
         )
 
         assert info.utilization_percent is None
+        assert info.peak_memory_gb == 0.0
 
 
 class TestClearCache:

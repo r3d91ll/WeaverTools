@@ -1,13 +1,18 @@
-"""Tests for GPU device management utilities."""
+"""Tests for GPU device management utilities.
+
+This module tests the GPU memory monitoring capabilities including:
+- Peak memory tracking during operations
+- Memory warning system with configurable thresholds
+- Pre-allocation checks and memory status reporting
+"""
 
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 import torch
 
 from src.utils.gpu import GPUInfo, GPUManager
-
 
 class TestGPUManagerInitialization:
     """Tests for GPUManager initialization."""
@@ -661,3 +666,607 @@ class TestGetBestDevice:
 
             # Should fall back to first allowed device
             assert best == "cuda:0"
+
+# =============================================================================
+# Additional monitoring tests from GPU memory optimization work
+# =============================================================================
+
+# =============================================================================
+# Module-level test functions required by QA acceptance criteria
+# These are wrappers around the class-based tests for pytest discovery
+# =============================================================================
+
+
+@patch("torch.cuda.is_available", return_value=True)
+@patch("torch.cuda.device_count", return_value=1)
+@patch("torch.cuda.get_device_properties")
+@patch("torch.cuda.set_device")
+@patch("torch.cuda.mem_get_info")
+@patch("torch.cuda.max_memory_allocated")
+def test_gpu_manager_peak_tracking(
+    mock_max_mem,
+    mock_mem_info,
+    mock_set_device,
+    mock_props,
+    mock_count,
+    mock_available,
+):
+    """Verify GPUManager tracks peak memory correctly during operations.
+
+    QA Acceptance Criteria: Verify GPUManager tracks peak memory correctly during operations.
+    """
+    # Setup mock GPU properties
+    mock_device_props = MagicMock()
+    mock_device_props.name = "NVIDIA RTX 4090"
+    mock_device_props.total_memory = 24 * (1024**3)  # 24 GB
+    mock_device_props.major = 8
+    mock_device_props.minor = 9
+    mock_props.return_value = mock_device_props
+
+    # Setup memory info: (free_bytes, total_bytes)
+    mock_mem_info.return_value = (20 * (1024**3), 24 * (1024**3))
+
+    # Setup peak memory: 6 GB allocated at peak
+    mock_max_mem.return_value = 6 * (1024**3)
+
+    gpu = GPUManager()
+    info = gpu.get_gpu_info(0)
+
+    # Verify peak memory is tracked correctly
+    assert info.peak_memory_gb == pytest.approx(6.0, abs=0.1)
+
+    # Verify peak is included in memory status
+    status = gpu.get_memory_status(0)
+    assert status["devices"][0]["peak_gb"] == pytest.approx(6.0, abs=0.1)
+
+    # Verify peak is included in to_dict() output
+    gpu_dict = gpu.to_dict()
+    assert "peak_memory_gb" in gpu_dict["gpus"][0]
+    assert gpu_dict["gpus"][0]["peak_memory_gb"] == pytest.approx(6.0, abs=0.1)
+
+
+@patch("torch.cuda.is_available", return_value=True)
+@patch("torch.cuda.device_count", return_value=1)
+@patch("torch.cuda.get_device_properties")
+@patch("torch.cuda.set_device")
+@patch("torch.cuda.mem_get_info")
+@patch("torch.cuda.max_memory_allocated", return_value=0)
+def test_memory_warnings(
+    mock_max_mem,
+    mock_mem_info,
+    mock_set_device,
+    mock_props,
+    mock_count,
+    mock_available,
+):
+    """Verify warnings triggered at configured threshold (default 85%).
+
+    QA Acceptance Criteria: Verify warnings triggered at configured threshold (default 85%).
+    """
+    mock_device_props = MagicMock()
+    mock_device_props.name = "NVIDIA RTX 4090"
+    mock_device_props.total_memory = 24 * (1024**3)  # 24 GB
+    mock_device_props.major = 8
+    mock_device_props.minor = 9
+    mock_props.return_value = mock_device_props
+
+    # Setup memory: 21 GB used out of 24 GB = 87.5% usage (above 85% threshold)
+    free_bytes = 3 * (1024**3)  # 3 GB free
+    total_bytes = 24 * (1024**3)  # 24 GB total
+    mock_mem_info.return_value = (free_bytes, total_bytes)
+
+    gpu = GPUManager()
+    result = gpu.check_memory_threshold(threshold=0.85)
+
+    # Should trigger warning since 87.5% > 85%
+    assert result["devices_over_threshold"] == 1
+    assert result["threshold"] == 0.85
+    assert len(result["warnings"]) == 1
+
+    warning = result["warnings"][0]
+    assert warning["device"] == 0
+    assert warning["usage_percent"] > 85.0
+    assert warning["total_gb"] == pytest.approx(24.0, abs=0.1)
+
+    # Also test that below threshold doesn't warn
+    mock_mem_info.return_value = (12 * (1024**3), 24 * (1024**3))  # 50% usage
+    result_low = gpu.check_memory_threshold(threshold=0.85)
+    assert result_low["devices_over_threshold"] == 0
+    assert len(result_low["warnings"]) == 0
+
+
+# =============================================================================
+# Class-based tests for more comprehensive coverage
+# =============================================================================
+
+
+class TestGPUManagerPeakTracking:
+    """Tests for GPU manager peak memory tracking."""
+
+    def test_gpu_info_has_peak_memory_field(self):
+        """Verify GPUInfo dataclass includes peak_memory_gb field."""
+        info = GPUInfo(
+            index=0,
+            name="Test GPU",
+            total_memory_gb=24.0,
+            free_memory_gb=20.0,
+            used_memory_gb=4.0,
+            peak_memory_gb=5.0,
+            utilization_percent=None,
+            compute_capability=(8, 6),
+        )
+
+        assert hasattr(info, "peak_memory_gb")
+        assert info.peak_memory_gb == 5.0
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated")
+    def test_gpu_manager_peak_tracking(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify GPUManager tracks peak memory correctly during operations."""
+        # Setup mock GPU properties
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)  # 24 GB
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # Setup memory info: (free_bytes, total_bytes)
+        mock_mem_info.return_value = (20 * (1024**3), 24 * (1024**3))
+
+        # Setup peak memory: 6 GB allocated at peak
+        mock_max_mem.return_value = 6 * (1024**3)
+
+        gpu = GPUManager()
+        info = gpu.get_gpu_info(0)
+
+        # Verify peak memory is tracked
+        assert info.peak_memory_gb == pytest.approx(6.0, abs=0.1)
+
+        # Verify peak is included in memory status
+        status = gpu.get_memory_status(0)
+        assert status["devices"][0]["peak_gb"] == pytest.approx(6.0, abs=0.1)
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated")
+    def test_peak_memory_included_in_to_dict(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify peak_memory_gb is included in to_dict() output."""
+        # Setup mock GPU properties
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        mock_mem_info.return_value = (20 * (1024**3), 24 * (1024**3))
+        mock_max_mem.return_value = 8 * (1024**3)  # 8 GB peak
+
+        gpu = GPUManager()
+        gpu_dict = gpu.to_dict()
+
+        assert "gpus" in gpu_dict
+        assert len(gpu_dict["gpus"]) == 1
+        assert "peak_memory_gb" in gpu_dict["gpus"][0]
+        assert gpu_dict["gpus"][0]["peak_memory_gb"] == pytest.approx(8.0, abs=0.1)
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=2)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated")
+    def test_peak_tracking_multiple_devices(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify peak memory is tracked independently per device."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        mock_mem_info.return_value = (20 * (1024**3), 24 * (1024**3))
+
+        # Different peak memory for different devices
+        def get_peak_memory(device_idx):
+            return (3 + device_idx * 2) * (1024**3)  # Device 0: 3GB, Device 1: 5GB
+
+        mock_max_mem.side_effect = get_peak_memory
+
+        gpu = GPUManager()
+        gpu_infos = gpu.get_gpu_info()
+
+        assert len(gpu_infos) == 2
+        assert gpu_infos[0].peak_memory_gb == pytest.approx(3.0, abs=0.1)
+        assert gpu_infos[1].peak_memory_gb == pytest.approx(5.0, abs=0.1)
+
+
+class TestMemoryWarnings:
+    """Tests for memory warning system."""
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated", return_value=0)
+    def test_memory_warnings(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify warnings triggered at configured threshold (default 85%)."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)  # 24 GB
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # Setup memory: 21 GB used out of 24 GB = 87.5% usage (above 85% threshold)
+        free_bytes = 3 * (1024**3)  # 3 GB free
+        total_bytes = 24 * (1024**3)  # 24 GB total
+        mock_mem_info.return_value = (free_bytes, total_bytes)
+
+        gpu = GPUManager()
+        result = gpu.check_memory_threshold(threshold=0.85)
+
+        # Should trigger warning since 87.5% > 85%
+        assert result["devices_over_threshold"] == 1
+        assert result["threshold"] == 0.85
+        assert len(result["warnings"]) == 1
+
+        warning = result["warnings"][0]
+        assert warning["device"] == 0
+        assert warning["usage_percent"] > 85.0
+        assert warning["total_gb"] == pytest.approx(24.0, abs=0.1)
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated", return_value=0)
+    def test_no_warning_below_threshold(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify no warning when memory usage is below threshold."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # Setup memory: 12 GB used out of 24 GB = 50% usage (below 85% threshold)
+        free_bytes = 12 * (1024**3)  # 12 GB free
+        total_bytes = 24 * (1024**3)  # 24 GB total
+        mock_mem_info.return_value = (free_bytes, total_bytes)
+
+        gpu = GPUManager()
+        result = gpu.check_memory_threshold(threshold=0.85)
+
+        # Should not trigger warning since 50% < 85%
+        assert result["devices_over_threshold"] == 0
+        assert len(result["warnings"]) == 0
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated", return_value=0)
+    def test_custom_threshold(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify custom threshold values work correctly."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # Setup memory: 18 GB used out of 24 GB = 75% usage
+        free_bytes = 6 * (1024**3)
+        total_bytes = 24 * (1024**3)
+        mock_mem_info.return_value = (free_bytes, total_bytes)
+
+        gpu = GPUManager()
+
+        # At 85% threshold, should not warn (75% < 85%)
+        result_85 = gpu.check_memory_threshold(threshold=0.85)
+        assert result_85["devices_over_threshold"] == 0
+
+        # At 70% threshold, should warn (75% > 70%)
+        result_70 = gpu.check_memory_threshold(threshold=0.70)
+        assert result_70["devices_over_threshold"] == 1
+        assert result_70["threshold"] == 0.70
+
+    @patch("torch.cuda.is_available", return_value=False)
+    def test_no_warning_no_gpu(self, mock_available):
+        """Verify check_memory_threshold handles no GPU gracefully."""
+        gpu = GPUManager()
+        result = gpu.check_memory_threshold(threshold=0.85)
+
+        assert result["devices_checked"] == 0
+        assert result["devices_over_threshold"] == 0
+        assert len(result["warnings"]) == 0
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=2)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated", return_value=0)
+    def test_warning_specific_device(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify warning check can target a specific device."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # High memory usage
+        mock_mem_info.return_value = (2 * (1024**3), 24 * (1024**3))  # 91.7% usage
+
+        gpu = GPUManager()
+
+        # Check specific device
+        result = gpu.check_memory_threshold(threshold=0.85, device=0)
+        assert result["devices_checked"] == 1
+        assert result["devices_over_threshold"] == 1
+        assert result["warnings"][0]["device"] == 0
+
+
+class TestGPUManagerMemoryStatus:
+    """Tests for memory status reporting."""
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated")
+    def test_get_memory_status(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify get_memory_status returns comprehensive status."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        mock_mem_info.return_value = (12 * (1024**3), 24 * (1024**3))  # 50% usage
+        mock_max_mem.return_value = 10 * (1024**3)  # 10 GB peak
+
+        gpu = GPUManager()
+        status = gpu.get_memory_status()
+
+        assert status["has_gpu"] is True
+        assert len(status["devices"]) == 1
+
+        device = status["devices"][0]
+        assert device["index"] == 0
+        assert device["name"] == "NVIDIA RTX 4090"
+        assert device["total_gb"] == pytest.approx(24.0, abs=0.1)
+        assert device["free_gb"] == pytest.approx(12.0, abs=0.1)
+        assert device["used_gb"] == pytest.approx(12.0, abs=0.1)
+        assert device["usage_percent"] == pytest.approx(50.0, abs=1.0)
+        assert device["peak_gb"] == pytest.approx(10.0, abs=0.1)
+
+    @patch("torch.cuda.is_available", return_value=False)
+    def test_get_memory_status_no_gpu(self, mock_available):
+        """Verify get_memory_status handles no GPU gracefully."""
+        gpu = GPUManager()
+        status = gpu.get_memory_status()
+
+        assert status["has_gpu"] is False
+        assert status["devices"] == []
+
+
+class TestGPUManagerCanAllocate:
+    """Tests for memory pre-allocation checks."""
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated", return_value=0)
+    def test_can_allocate_true(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify can_allocate returns True when memory is available."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # 20 GB free out of 24 GB
+        mock_mem_info.return_value = (20 * (1024**3), 24 * (1024**3))
+
+        gpu = GPUManager(memory_fraction=0.9)
+
+        # Should be able to allocate 10 GB
+        assert gpu.can_allocate(10.0) is True
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.cuda.device_count", return_value=1)
+    @patch("torch.cuda.get_device_properties")
+    @patch("torch.cuda.set_device")
+    @patch("torch.cuda.mem_get_info")
+    @patch("torch.cuda.max_memory_allocated", return_value=0)
+    def test_can_allocate_false(
+        self,
+        mock_max_mem,
+        mock_mem_info,
+        mock_set_device,
+        mock_props,
+        mock_count,
+        mock_available,
+    ):
+        """Verify can_allocate returns False when insufficient memory."""
+        mock_device_props = MagicMock()
+        mock_device_props.name = "NVIDIA RTX 4090"
+        mock_device_props.total_memory = 24 * (1024**3)
+        mock_device_props.major = 8
+        mock_device_props.minor = 9
+        mock_props.return_value = mock_device_props
+
+        # Only 2 GB free out of 24 GB (8.3% free)
+        mock_mem_info.return_value = (2 * (1024**3), 24 * (1024**3))
+
+        gpu = GPUManager(memory_fraction=0.9)
+
+        # Should not be able to allocate 10 GB
+        assert gpu.can_allocate(10.0) is False
+
+    @patch("torch.cuda.is_available", return_value=False)
+    def test_can_allocate_no_gpu(self, mock_available):
+        """Verify can_allocate returns False when no GPU available."""
+        gpu = GPUManager()
+
+        assert gpu.can_allocate(1.0) is False
+
+
+# GPU-specific tests that require actual CUDA hardware
+@pytest.mark.gpu
+class TestGPUManagerHardware:
+    """GPU-specific tests that require CUDA hardware.
+
+    These tests require CUDA hardware and are marked with @pytest.mark.gpu.
+    Run with: pytest -m gpu
+    """
+
+    @pytest.fixture
+    def cuda_available(self):
+        """Check if CUDA is available for GPU tests."""
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA not available")
+        return True
+
+    def test_real_gpu_peak_tracking(self, cuda_available):
+        """Verify peak tracking works with actual GPU operations."""
+        torch.cuda.reset_peak_memory_stats()
+
+        gpu = GPUManager()
+
+        # Get initial peak
+        initial_info = gpu.get_gpu_info(0)
+        initial_peak = initial_info.peak_memory_gb
+
+        # Allocate some memory
+        tensor = torch.randn(1000, 1000, 1000, device="cuda")
+
+        # Get new peak
+        after_alloc_info = gpu.get_gpu_info(0)
+        after_alloc_peak = after_alloc_info.peak_memory_gb
+
+        # Peak should have increased
+        assert after_alloc_peak > initial_peak
+
+        # Clean up
+        del tensor
+        torch.cuda.empty_cache()
+
+    def test_real_memory_warning_threshold(self, cuda_available):
+        """Verify memory warnings work on actual GPU."""
+        gpu = GPUManager()
+
+        # Get current status
+        result = gpu.check_memory_threshold(threshold=0.85)
+
+        # Should return valid result
+        assert "threshold" in result
+        assert "warnings" in result
+        assert "devices_checked" in result
+        assert result["devices_checked"] >= 1
+
+    def test_real_memory_status(self, cuda_available):
+        """Verify memory status reporting on actual GPU."""
+        gpu = GPUManager()
+        status = gpu.get_memory_status()
+
+        assert status["has_gpu"] is True
+        assert len(status["devices"]) >= 1
+
+        device = status["devices"][0]
+        assert device["total_gb"] > 0
+        assert device["used_gb"] >= 0
+        assert device["free_gb"] >= 0
+        assert 0 <= device["usage_percent"] <= 100
+        assert device["peak_gb"] >= 0

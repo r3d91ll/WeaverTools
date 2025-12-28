@@ -240,3 +240,38 @@ func (r *SessionRegistry) Count() int {
 	defer r.mu.RUnlock()
 	return len(r.sessions)
 }
+
+// -----------------------------------------------------------------------------
+// Helper Functions
+// -----------------------------------------------------------------------------
+
+// suggestSimilarSessions returns suggestions for similar session names.
+// It checks for case-insensitive matches and substring/partial matches.
+// This helps users identify typos or find sessions with similar names.
+func suggestSimilarSessions(name string, available []string) []string {
+	var suggestions []string
+	nameLower := strings.ToLower(name)
+
+	// Check for common variations
+	for _, session := range available {
+		sessionLower := strings.ToLower(session)
+
+		// Check for case-insensitive match
+		if nameLower == sessionLower && name != session {
+			suggestions = append(suggestions, fmt.Sprintf("Did you mean %q? (case mismatch)", session))
+			continue
+		}
+
+		// Check for common typos or variations
+		// e.g., "experiment" -> "experiment-2024", "my-session" -> "my"
+		// Skip exact matches (no suggestion needed)
+		if nameLower == sessionLower {
+			continue
+		}
+		if strings.Contains(sessionLower, nameLower) || strings.Contains(nameLower, sessionLower) {
+			suggestions = append(suggestions, fmt.Sprintf("Did you mean %q?", session))
+		}
+	}
+
+	return suggestions
+}

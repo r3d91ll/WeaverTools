@@ -48,6 +48,19 @@ from .layer_utils import (
     compute_layer_similarity_matrix,
 )
 
+from .agent_flow import (
+    # Result types
+    AgentAlignmentResult,
+    AgentBottleneckResult,
+    AgentFlowGraphResult,
+    FlowComparisonResult,
+    # Main agent flow analysis functions
+    build_agent_flow_graph,
+    compare_flow_patterns,
+    find_agent_bottlenecks,
+    visualize_agent_alignment,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -84,4 +97,14 @@ __all__ = [
     "BottleneckResult",
     "LayerComparisonResult",
     "LayerTrajectoryResult",
+    # Agent flow analysis functions
+    "build_agent_flow_graph",
+    "compare_flow_patterns",
+    "find_agent_bottlenecks",
+    "visualize_agent_alignment",
+    # Agent flow result types
+    "AgentAlignmentResult",
+    "AgentBottleneckResult",
+    "AgentFlowGraphResult",
+    "FlowComparisonResult",
 ]

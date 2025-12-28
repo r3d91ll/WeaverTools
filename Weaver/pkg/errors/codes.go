@@ -259,6 +259,43 @@ const (
 )
 
 // -----------------------------------------------------------------------------
+// Export Error Codes
+// -----------------------------------------------------------------------------
+// Use these codes for academic format export errors.
+
+const (
+	// ErrExportFailed indicates a general export failure.
+	ErrExportFailed = "EXPORT_FAILED"
+
+	// ErrExportNoData indicates no data available to export.
+	ErrExportNoData = "EXPORT_NO_DATA"
+
+	// ErrExportDirCreateFailed indicates directory creation failed.
+	ErrExportDirCreateFailed = "EXPORT_DIR_CREATE_FAILED"
+
+	// ErrExportWriteFailed indicates file write failed during export.
+	ErrExportWriteFailed = "EXPORT_WRITE_FAILED"
+
+	// ErrExportInvalidFormat indicates an invalid export format was specified.
+	ErrExportInvalidFormat = "EXPORT_INVALID_FORMAT"
+
+	// ErrExportPermissionDenied indicates permission denied during export.
+	ErrExportPermissionDenied = "EXPORT_PERMISSION_DENIED"
+
+	// ErrExportDiskFull indicates disk is full during export.
+	ErrExportDiskFull = "EXPORT_DISK_FULL"
+
+	// ErrExportReadOnly indicates the target filesystem is read-only.
+	ErrExportReadOnly = "EXPORT_READ_ONLY"
+
+	// ErrExportPathTooLong indicates the export path exceeds system limits.
+	ErrExportPathTooLong = "EXPORT_PATH_TOO_LONG"
+
+	// ErrExportInvalidPath indicates the export path is invalid.
+	ErrExportInvalidPath = "EXPORT_INVALID_PATH"
+)
+
+// -----------------------------------------------------------------------------
 // Shell Error Codes
 // -----------------------------------------------------------------------------
 // Use these codes for shell-specific errors.
@@ -330,6 +367,13 @@ func CodeCategory(code string) Category {
 	case ErrSessionNotFound, ErrSessionExportFailed, ErrSessionLoadFailed:
 		return CategoryIO // Sessions are file-based
 
+	// Export codes
+	case ErrExportFailed, ErrExportNoData, ErrExportDirCreateFailed,
+		ErrExportWriteFailed, ErrExportInvalidFormat, ErrExportPermissionDenied,
+		ErrExportDiskFull, ErrExportReadOnly, ErrExportPathTooLong,
+		ErrExportInvalidPath:
+		return CategoryIO // Export is file-based
+
 	// Shell codes
 	case ErrShellInitFailed, ErrShellHistoryFailed, ErrShellReadlineFailed:
 		return CategoryCommand // Shell is part of command interface
@@ -382,4 +426,17 @@ func IsIOCode(code string) bool {
 // IsInternalCode returns true if the code is an internal error code.
 func IsInternalCode(code string) bool {
 	return CodeCategory(code) == CategoryInternal
+}
+
+// IsExportCode returns true if the code is an export error code.
+func IsExportCode(code string) bool {
+	switch code {
+	case ErrExportFailed, ErrExportNoData, ErrExportDirCreateFailed,
+		ErrExportWriteFailed, ErrExportInvalidFormat, ErrExportPermissionDenied,
+		ErrExportDiskFull, ErrExportReadOnly, ErrExportPathTooLong,
+		ErrExportInvalidPath:
+		return true
+	default:
+		return false
+	}
 }

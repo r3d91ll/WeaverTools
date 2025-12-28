@@ -399,3 +399,94 @@ func IOPermissionDenied(path string) *WeaverError {
 func InternalPanic(recovered interface{}) *WeaverError {
 	return Internalf(ErrInternalPanic, "panic recovered: %v", recovered)
 }
+
+// -----------------------------------------------------------------------------
+// Export Error Quick Constructors
+// -----------------------------------------------------------------------------
+// These are convenience functions for creating export-related errors.
+
+// ExportFailed creates an EXPORT_FAILED error for general export failures.
+func ExportFailed(command, format string, cause error) *WeaverError {
+	return IOWrap(cause, ErrExportFailed, "export failed").
+		WithContext("command", command).
+		WithContext("format", format)
+}
+
+// ExportNoData creates an EXPORT_NO_DATA error when no data is available to export.
+func ExportNoData(command, format string) *WeaverError {
+	return IO(ErrExportNoData, "no data available to export").
+		WithContext("command", command).
+		WithContext("format", format).
+		WithSuggestion("Run some analyses first to generate data").
+		WithSuggestion("Use /extract and /analyze commands to create measurements")
+}
+
+// ExportDirCreateFailed creates an EXPORT_DIR_CREATE_FAILED error.
+func ExportDirCreateFailed(path string, cause error) *WeaverError {
+	return IOWrap(cause, ErrExportDirCreateFailed, "failed to create export directory").
+		WithContext("path", path).
+		WithSuggestion("Check if the parent directory exists").
+		WithSuggestion("Verify write permissions for the directory")
+}
+
+// ExportWriteFailed creates an EXPORT_WRITE_FAILED error.
+func ExportWriteFailed(path, format string, cause error) *WeaverError {
+	return IOWrap(cause, ErrExportWriteFailed, "failed to write export file").
+		WithContext("path", path).
+		WithContext("format", format)
+}
+
+// ExportPermissionDenied creates an EXPORT_PERMISSION_DENIED error.
+func ExportPermissionDenied(path string) *WeaverError {
+	return IO(ErrExportPermissionDenied, "permission denied for export path").
+		WithContext("path", path).
+		WithSuggestion("Check write permissions for the export directory").
+		WithSuggestion("Try exporting to a different location")
+}
+
+// ExportDiskFull creates an EXPORT_DISK_FULL error.
+func ExportDiskFull(path string) *WeaverError {
+	return IO(ErrExportDiskFull, "disk is full, cannot write export").
+		WithContext("path", path).
+		WithSuggestion("Free up disk space").
+		WithSuggestion("Try exporting to a different disk or location")
+}
+
+// ExportReadOnly creates an EXPORT_READ_ONLY error.
+func ExportReadOnly(path string) *WeaverError {
+	return IO(ErrExportReadOnly, "filesystem is read-only").
+		WithContext("path", path).
+		WithSuggestion("The target location is on a read-only filesystem").
+		WithSuggestion("Try exporting to a different location")
+}
+
+// ExportPathTooLong creates an EXPORT_PATH_TOO_LONG error.
+func ExportPathTooLong(path string) *WeaverError {
+	return IO(ErrExportPathTooLong, "export path exceeds system limits").
+		WithContext("path", path).
+		WithContext("path_length", fmt.Sprintf("%d", len(path))).
+		WithSuggestion("Use a shorter export path").
+		WithSuggestion("Configure a different export directory in session settings")
+}
+
+// ExportInvalidPath creates an EXPORT_INVALID_PATH error.
+func ExportInvalidPath(path, reason string) *WeaverError {
+	return IO(ErrExportInvalidPath, "invalid export path").
+		WithContext("path", path).
+		WithContext("reason", reason).
+		WithSuggestion("Check the export path for invalid characters").
+		WithSuggestion("Ensure the path is properly formatted")
+}
+
+// ExportInvalidFormat creates an EXPORT_INVALID_FORMAT error.
+func ExportInvalidFormat(format string, validFormats []string) *WeaverError {
+	err := IO(ErrExportInvalidFormat, fmt.Sprintf("invalid export format: %s", format)).
+		WithContext("format", format)
+
+	if len(validFormats) > 0 {
+		err.WithContext("valid_formats", fmt.Sprintf("%v", validFormats))
+		err.WithSuggestion("Valid formats: " + fmt.Sprintf("%v", validFormats))
+	}
+
+	return err
+}

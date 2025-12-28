@@ -15,7 +15,6 @@ import torch
 
 if TYPE_CHECKING:
     from transformer_lens import HookedTransformer
-    from transformer_lens.ActivationCache import ActivationCache
 
 
 @dataclass
@@ -285,7 +284,7 @@ def extract_with_selective_cache(
         >>> layer_0_hidden = result.get_residual_stream(0)
     """
     try:
-        from transformer_lens import HookedTransformer as TL_HookedTransformer
+        import transformer_lens  # noqa: F401 - import check only
     except ImportError as e:
         raise ImportError(
             "TransformerLens is required for selective caching. "
@@ -662,7 +661,7 @@ def extract_streaming(
         )
 
     try:
-        from transformer_lens import HookedTransformer as TL_HookedTransformer
+        import transformer_lens  # noqa: F401 - import check only
     except ImportError as e:
         raise ImportError(
             "TransformerLens is required for streaming extraction. "
@@ -743,7 +742,8 @@ def extract_streaming(
         if clear_cache_between_chunks and not is_last:
             # Delete cache reference to allow garbage collection
             del cache
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         # Move to next chunk position
         if is_last:
@@ -915,7 +915,7 @@ def extract_for_training(
         - For inference, use extract_inference_optimized() instead
     """
     try:
-        from transformer_lens import HookedTransformer as TL_HookedTransformer
+        import transformer_lens  # noqa: F401 - import check only
     except ImportError as e:
         raise ImportError(
             "TransformerLens is required for training extraction. "
@@ -1079,7 +1079,7 @@ def extract_inference_optimized(
         - Combines well with precision='fp16' for additional memory savings.
     """
     try:
-        from transformer_lens import HookedTransformer as TL_HookedTransformer
+        import transformer_lens  # noqa: F401 - import check only
     except ImportError as e:
         raise ImportError(
             "TransformerLens is required for inference-optimized extraction. "

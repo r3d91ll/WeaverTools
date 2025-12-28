@@ -311,6 +311,33 @@ class TestSelectiveCaching:
         for hook in hooks:
             assert isinstance(hook, str)
 
+    def test_extract_with_selective_cache_rejects_invalid_names_filter(self):
+        """Verify extract_with_selective_cache rejects non-list names_filter types."""
+        from unittest.mock import MagicMock
+
+        from src.extraction.hidden_states import extract_with_selective_cache
+
+        # Create a mock model
+        mock_model = MagicMock()
+        mock_model.cfg.n_layers = 12
+        tokens = torch.tensor([[1, 2, 3]])
+
+        # Lambda functions should be rejected with ValueError
+        with pytest.raises(ValueError, match="names_filter must be a list"):
+            extract_with_selective_cache(
+                mock_model,
+                tokens,
+                names_filter=lambda name: "resid" in name,  # type: ignore
+            )
+
+        # Other callable types should be rejected with ValueError
+        with pytest.raises(ValueError, match="names_filter must be a list"):
+            extract_with_selective_cache(
+                mock_model,
+                tokens,
+                names_filter=lambda x: True,  # type: ignore
+            )
+
 
 class TestStreamingChunking:
     """Tests for streaming extraction for long sequences."""
@@ -393,6 +420,91 @@ class TestStreamingChunking:
 
         assert result.metadata["total_seq_len"] == 2048
         assert result.metadata["chunk_size"] == 512
+
+    def test_collect_streaming_results_removes_overlap(self):
+        """Verify collect_streaming_results properly removes overlapping tokens."""
+
+        def mock_streaming_generator():
+            """Generate mock chunks with overlap metadata."""
+            # First chunk: positions 0-512, full 512 tokens
+            yield StreamingChunkResult(
+                chunk_index=0,
+                start_position=0,
+                end_position=512,
+                hidden_states={0: torch.randn(1, 512, 768)},
+                is_last_chunk=False,
+                metadata={"overlap": 64, "chunk_size": 512},
+            )
+            # Second chunk: positions 448-960 (64 overlap)
+            # Should only contribute tokens 64-512 (448 new tokens)
+            yield StreamingChunkResult(
+                chunk_index=1,
+                start_position=448,
+                end_position=960,
+                hidden_states={0: torch.randn(1, 512, 768)},
+                is_last_chunk=False,
+                metadata={"overlap": 64, "chunk_size": 512},
+            )
+            # Third chunk: positions 896-1024 (64 overlap, last chunk)
+            yield StreamingChunkResult(
+                chunk_index=2,
+                start_position=896,
+                end_position=1024,
+                hidden_states={0: torch.randn(1, 128, 768)},
+                is_last_chunk=True,
+                metadata={"overlap": 64, "chunk_size": 512},
+            )
+
+        result = collect_streaming_results(mock_streaming_generator())
+
+        # Expected: 512 + (512-64) + (128-64) = 512 + 448 + 64 = 1024
+        assert 0 in result
+        assert result[0].shape[1] == 1024  # Sequence dimension
+
+    def test_collect_streaming_results_no_overlap(self):
+        """Verify collect_streaming_results works with zero overlap."""
+
+        def mock_streaming_generator():
+            """Generate mock chunks without overlap."""
+            yield StreamingChunkResult(
+                chunk_index=0,
+                start_position=0,
+                end_position=256,
+                hidden_states={0: torch.randn(1, 256, 768)},
+                is_last_chunk=False,
+                metadata={"overlap": 0, "chunk_size": 256},
+            )
+            yield StreamingChunkResult(
+                chunk_index=1,
+                start_position=256,
+                end_position=512,
+                hidden_states={0: torch.randn(1, 256, 768)},
+                is_last_chunk=True,
+                metadata={"overlap": 0, "chunk_size": 256},
+            )
+
+        result = collect_streaming_results(mock_streaming_generator())
+
+        # 256 + 256 = 512
+        assert result[0].shape[1] == 512
+
+    def test_collect_streaming_results_single_chunk(self):
+        """Verify collect_streaming_results handles single chunk (short sequence)."""
+
+        def mock_streaming_generator():
+            yield StreamingChunkResult(
+                chunk_index=0,
+                start_position=0,
+                end_position=100,
+                hidden_states={0: torch.randn(1, 100, 768)},
+                is_last_chunk=True,
+                metadata={"overlap": 64, "chunk_size": 512},
+            )
+
+        result = collect_streaming_results(mock_streaming_generator())
+
+        # Single chunk, no overlap removal needed
+        assert result[0].shape[1] == 100
 
 
 class TestTrainingExtraction:

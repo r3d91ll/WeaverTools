@@ -112,6 +112,48 @@ class LoggingConfig(BaseModel):
     )
 
 
+class PatchingConfig(BaseModel):
+    """Activation patching configuration for causal intervention studies."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable activation patching functionality",
+    )
+    default_layers: list[int] = Field(
+        default=[],
+        description="Default layers to target for patching (empty = all layers)",
+    )
+    default_components: list[str] = Field(
+        default=["resid_pre"],
+        description="Default activation components to patch: resid_pre, resid_post, attn, mlp",
+    )
+    cache_dir: str = Field(
+        default="~/.cache/loom/activations",
+        description="Directory for storing activation caches",
+    )
+    max_cache_size_mb: int = Field(
+        default=4096,
+        ge=256,
+        description="Maximum activation cache size in megabytes",
+    )
+    fold_layer_norm: bool = Field(
+        default=False,
+        description="Fold LayerNorm into weights (False preserves exact model behavior)",
+    )
+    cleanup_on_completion: bool = Field(
+        default=True,
+        description="Automatically clean up activation caches after experiments",
+    )
+    validate_hook_shapes: bool = Field(
+        default=True,
+        description="Validate that hook outputs match expected shapes",
+    )
+    stream_activations: bool = Field(
+        default=False,
+        description="Stream activations to disk for large models (reduces memory usage)",
+    )
+
+
 class Config(BaseSettings):
     """Main configuration for The Loom."""
 
@@ -121,6 +163,7 @@ class Config(BaseSettings):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     loaders: LoadersConfig = Field(default_factory=LoadersConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    patching: PatchingConfig = Field(default_factory=PatchingConfig)
 
     # Model-specific overrides (loader, dtype, device, etc.)
     model_overrides: dict[str, dict[str, Any]] = Field(

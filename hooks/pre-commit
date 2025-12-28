@@ -1,0 +1,143 @@
+#!/bin/bash
+#
+# Pre-commit hook for WeaverTools
+# Scans staged files for potential secrets and tokens before allowing commits
+#
+# Installation:
+#   ./hooks/install.sh
+#
+# To bypass this hook (use with caution):
+#   git commit --no-verify
+#
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+# Patterns to detect (POSIX Extended Regex - compatible with grep -E)
+# Each pattern has a name and regex separated by |
+# Note: Using POSIX ERE syntax (no (?:...) non-capturing groups)
+PATTERNS=(
+    "GitHub OAuth Token|gho_[a-zA-Z0-9]{36,}"
+    "GitHub PAT (classic)|ghp_[a-zA-Z0-9]{36,}"
+    "GitHub Fine-grained PAT|github_pat_[a-zA-Z0-9]{22,}"
+    "GitHub App Token|ghs_[a-zA-Z0-9]{36,}"
+    "GitHub Refresh Token|ghr_[a-zA-Z0-9]{36,}"
+    "Anthropic API Key|sk-ant-[a-zA-Z0-9_-]{40,}"
+    "OpenAI API Key|sk-[a-zA-Z0-9]{48,}"
+    "AWS Access Key|AKIA[0-9A-Z]{16}"
+    "Private Key Header|[-][-][-][-][-]BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY[-][-][-][-][-]"
+    "Generic API Key|['\"]?(api[_-]?key|api[_-]?secret|auth[_-]?token|access[_-]?token|secret[_-]?key)['\"]?[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9_-]{20,}['\"]"
+    "AWS Secret Pattern|(aws[_-]?secret|secret[_-]?access)['\"]?[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9/+=]{40}['\"]"
+)
+
+# Files to skip (patterns)
+SKIP_PATTERNS=(
+    "\.md$"           # Markdown files (documentation)
+    "\.example$"      # Example files
+    "\.sample$"       # Sample files
+    "hooks/pre-commit$"  # This hook itself
+    "hooks/install\.sh$" # Install script
+)
+
+# Function to check if a file should be skipped
+should_skip() {
+    local file="$1"
+    for pattern in "${SKIP_PATTERNS[@]}"; do
+        if echo "$file" | grep -qE "$pattern"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Function to scan a file for secrets
+scan_file() {
+    local file="$1"
+    local found_secrets=0
+
+    # Get the staged content of the file
+    local content
+    content=$(git show ":$file" 2>/dev/null) || return 0
+
+    for pattern_entry in "${PATTERNS[@]}"; do
+        IFS='|' read -r name pattern <<< "$pattern_entry"
+
+        # Check if pattern is found in the file
+        if echo "$content" | grep -qE "$pattern"; then
+            if [ $found_secrets -eq 0 ]; then
+                echo -e "${RED}BLOCKED:${NC} $file"
+                found_secrets=1
+            fi
+            # Show matching lines (line numbers)
+            echo -e "  ${YELLOW}Potential $name detected${NC}"
+            echo "$content" | grep -nE "$pattern" | head -3 | while read -r line; do
+                # Truncate long lines and mask potential secrets
+                local truncated
+                truncated=$(echo "$line" | sed 's/\(.\{80\}\).*/\1.../' | sed -E 's/([a-zA-Z0-9_-]{8})[a-zA-Z0-9_-]{20,}/\1**REDACTED**/g')
+                echo -e "    ${truncated}"
+            done
+        fi
+    done
+
+    return $found_secrets
+}
+
+echo "Scanning staged files for secrets..."
+echo ""
+
+# Get list of staged files (added, copied, modified)
+staged_files=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+
+if [ -z "$staged_files" ]; then
+    echo -e "${GREEN}No files to scan.${NC}"
+    exit 0
+fi
+
+blocked_files=0
+scanned_files=0
+skipped_files=0
+
+for file in $staged_files; do
+    # Check if file exists in the staging area
+    if ! git ls-files --stage "$file" | grep -q .; then
+        continue
+    fi
+
+    # Skip certain file types
+    if should_skip "$file"; then
+        ((skipped_files++)) || true
+        continue
+    fi
+
+    ((scanned_files++)) || true
+
+    if ! scan_file "$file"; then
+        ((blocked_files++)) || true
+    fi
+done
+
+echo ""
+echo "Scanned $scanned_files file(s), skipped $skipped_files file(s)"
+
+if [ $blocked_files -gt 0 ]; then
+    echo ""
+    echo -e "${RED}============================================${NC}"
+    echo -e "${RED}COMMIT BLOCKED: Potential secrets detected!${NC}"
+    echo -e "${RED}============================================${NC}"
+    echo ""
+    echo "Please remove the sensitive data before committing."
+    echo ""
+    echo "If this is a false positive, you can:"
+    echo "  1. Add the file pattern to SKIP_PATTERNS in hooks/pre-commit"
+    echo "  2. Use 'git commit --no-verify' to bypass (NOT recommended)"
+    echo ""
+    exit 1
+fi
+
+echo -e "${GREEN}No secrets detected. Commit allowed.${NC}"
+exit 0

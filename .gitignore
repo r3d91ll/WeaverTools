@@ -35,9 +35,21 @@ dist/
 *~
 .DS_Store
 
-# Environment
+# Environment files
+# All .env variations - these commonly contain secrets
 .env
+*.env
 .env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.staging
+.env.staging.local
+.env.*
+!.env.example
 *.local
 
 # Logs
@@ -71,16 +83,134 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Secrets
+# Secrets and Credentials
+# ========================
+# IMPORTANT: Never commit files containing passwords, API keys, tokens, or certificates
+
+# Private keys and certificates
 *.pem
 *.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+id_rsa
+id_rsa.*
+id_dsa
+id_dsa.*
+id_ecdsa
+id_ecdsa.*
+id_ed25519
+id_ed25519.*
+
+# Token files
+*.token
+*.tokens
+*_token
+*_tokens
+*_TOKEN
+*_TOKENS
+token.txt
+tokens.txt
+token.json
+tokens.json
+
+# API key files
+*.apikey
+*.apikeys
+*_apikey
+*_apikeys
+api_key*
+apikey*
+api-key*
+
+# Secret files
+*.secret
+*.secrets
+*_secret
+*_secrets
+secret.txt
+secrets.txt
+secret.json
+secrets.json
+secrets.yaml
+secrets.yml
+
+# Credential files
 credentials.json
+credentials.yaml
+credentials.yml
+credentials.ini
+credentials.txt
+*.credentials
+*_credentials
+*-credentials.*
+auth.json
+auth.yaml
+auth.yml
+oauth*.json
+.auth*
+
+# AWS
+.aws/
+aws-credentials*
+aws_credentials*
+
+# GCP / Google Cloud
+.gcloud/
+gcloud.json
+*-keyfile.json
+*_keyfile.json
+service-account*.json
+service_account*.json
+
+# Azure
+.azure/
+azure-credentials*
+
+# Kubernetes
+kubeconfig
+kube.config
+.kube/config
+
+# Docker secrets
+docker-compose.secrets.yml
+docker-compose.secrets.yaml
+*.docker-secrets
+
+# NPM / Yarn (may contain auth tokens)
+.npmrc
+.yarnrc
+
+# Git credentials
+.git-credentials
+.netrc
+.netrc.gpg
+
+# HashiCorp Vault
+.vault-token
+vault.json
+
+# Terraform (may contain cloud provider secrets)
+*.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Database connection files
+database.yml
+database.json
+db.json
+db.yml
 
 # Local workspace for testing
 weaver-testing/
 
 # Auto-Claude (task automation tool)
-.auto-claude/
+# Ignore all .auto-claude contents except templates
+.auto-claude/*
+!.auto-claude/.env.example
 .auto-claude-status
 .worktrees/
 

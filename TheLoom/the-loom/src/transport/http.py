@@ -623,6 +623,98 @@ class ModelLoadRequest(BaseModel):
     )
 
 
+# ============================================================================
+# GPU Configuration Models (for Dynamic GPU Pool Management)
+# ============================================================================
+
+
+class GPUConfigureRequest(BaseModel):
+    """Request model for dynamic GPU configuration.
+
+    Allows runtime updates to the GPU device pool without server restart.
+    At least one of allowed_devices or default_device must be provided.
+    """
+
+    allowed_devices: list[int] | None = Field(
+        default=None,
+        description="List of CUDA device indices to allow (e.g., [0, 1]). "
+        "Must be valid device indices from available hardware.",
+    )
+    default_device: int | None = Field(
+        default=None,
+        description="Default CUDA device index for model loading. "
+        "Must be present in allowed_devices.",
+    )
+
+
+class GPUMemoryInfo(BaseModel):
+    """Memory information for a single GPU."""
+
+    device_index: int = Field(description="CUDA device index")
+    device_name: str = Field(description="GPU device name")
+    total_memory_mb: float = Field(description="Total GPU memory in MB")
+    used_memory_mb: float = Field(description="Currently used GPU memory in MB")
+    free_memory_mb: float = Field(description="Available GPU memory in MB")
+    memory_utilization: float = Field(
+        description="Memory utilization as a fraction (0.0 to 1.0)"
+    )
+
+
+class LoadedModelInfo(BaseModel):
+    """Information about a loaded model and its device assignment."""
+
+    model_id: str = Field(description="Model identifier")
+    device: str = Field(description="Device the model is loaded on (e.g., 'cuda:0')")
+    dtype: str = Field(description="Data type of the model")
+    idle_seconds: float = Field(description="Seconds since last access")
+
+
+class GPUConfigureResponse(BaseModel):
+    """Response model for GPU configuration updates.
+
+    Returns the updated GPU configuration after applying changes.
+    """
+
+    allowed_devices: list[int] = Field(
+        description="Currently allowed CUDA device indices"
+    )
+    default_device: str = Field(
+        description="Default device for model loading (e.g., 'cuda:0' or 'cpu')"
+    )
+    available_devices: list[int] = Field(
+        description="All available CUDA devices on the system"
+    )
+    message: str = Field(description="Status message describing the changes applied")
+
+
+class GPUStatusResponse(BaseModel):
+    """Response model for GPU status information.
+
+    Provides comprehensive GPU configuration and runtime status including
+    memory usage, loaded models, and device availability.
+    """
+
+    has_gpu: bool = Field(description="Whether CUDA GPUs are available")
+    available_devices: list[int] = Field(
+        description="All CUDA device indices available on the system"
+    )
+    allowed_devices: list[int] = Field(
+        description="Currently configured allowed device indices"
+    )
+    default_device: str = Field(
+        description="Default device for model loading (e.g., 'cuda:0' or 'cpu')"
+    )
+    memory_fraction: float = Field(
+        description="Configured maximum GPU memory fraction (0.0 to 1.0)"
+    )
+    gpu_memory: list[GPUMemoryInfo] = Field(
+        description="Memory information for each allowed GPU"
+    )
+    loaded_models: list[LoadedModelInfo] = Field(
+        description="Currently loaded models and their device assignments"
+    )
+
+
 class ModelLoadResponse(BaseModel):
     """Response model for model loading."""
 

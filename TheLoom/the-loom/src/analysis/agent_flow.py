@@ -475,4 +475,175 @@ class AgentAlignmentResult:
 # Core Analysis Functions
 # ============================================================================
 
-# Core functions will be implemented in subtasks 2-3 through 2-6
+
+def build_agent_flow_graph(
+    agent_states: dict[str, dict[int, NDArray[np.floating[Any]]]],
+    conveyance_edges: dict[tuple[str, str], float],
+    variance_threshold: float = 0.90,
+) -> AgentFlowGraphResult:
+    """Build directed graph of agent information flow.
+
+    Constructs a NetworkX DiGraph representing semantic information transfer
+    between agents across conversation turns. Nodes represent agent states
+    (with D_eff and beta attributes), edges represent information transfer
+    (with conveyance weights).
+
+    GRAPH STRUCTURE
+    ===============
+    - Nodes: Named "{agent}_t{turn}" (e.g., "assistant_t0", "user_t1")
+    - Node attributes: agent (str), turn (int), d_eff (int), beta (float)
+    - Edges: Connect consecutive turns in temporal order
+    - Edge attributes: weight (float), conveyance (float)
+
+    Parameters:
+        agent_states: dict[str, dict[int, NDArray]]
+            Mapping from agent name to turn-indexed hidden states.
+            Format: {agent_name: {turn_index: hidden_state_array}}
+            Each hidden_state_array should be 2D (n_samples, n_features).
+        conveyance_edges: dict[tuple[str, str], float]
+            Pre-computed conveyance weights for agent-to-agent transitions.
+            Format: {(from_agent, to_agent): conveyance_value}
+            If empty, edges are created with weight 1.0 between consecutive turns.
+        variance_threshold: float, default=0.90
+            Variance threshold for D_eff calculation.
+
+    Returns:
+        AgentFlowGraphResult containing:
+        - graph: nx.DiGraph with nodes and edges
+        - n_nodes: Number of nodes (agent turns)
+        - n_edges: Number of edges (information transfers)
+        - agents: Set of unique agent names
+        - turn_sequence: Agent names in turn order
+        - d_eff_by_turn: Turn index -> D_eff value
+        - beta_by_turn: Turn index -> beta value
+        - total_conveyance: Sum of all edge weights
+        - mean_conveyance: Average edge weight
+
+    Example:
+        >>> import numpy as np
+        >>> # Create sample hidden states for two agents
+        >>> agent_states = {
+        ...     "user": {0: np.random.randn(10, 768), 2: np.random.randn(10, 768)},
+        ...     "assistant": {1: np.random.randn(10, 768), 3: np.random.randn(10, 768)},
+        ... }
+        >>> conveyance_edges = {("user", "assistant"): 0.8, ("assistant", "user"): 0.7}
+        >>> result = build_agent_flow_graph(agent_states, conveyance_edges)
+        >>> print(f"Nodes: {result.n_nodes}, Edges: {result.n_edges}")
+        >>> print(f"Agents: {result.agents}")
+
+    Notes:
+        - Empty agent_states returns an empty graph (no error)
+        - Single-agent conversations have no edges
+        - Missing conveyance values default to 1.0
+        - L2 normalization is applied before D_eff calculation
+    """
+    # Initialize the directed graph
+    G = nx.DiGraph()
+
+    # Handle empty input
+    if not agent_states:
+        return AgentFlowGraphResult(
+            graph=G,
+            n_nodes=0,
+            n_edges=0,
+            agents=set(),
+            turn_sequence=[],
+            d_eff_by_turn={},
+            beta_by_turn={},
+            total_conveyance=0.0,
+            mean_conveyance=0.0,
+            metadata={"warning": "empty_input"},
+        )
+
+    # Collect all turns with their agent names for temporal ordering
+    # Format: list of (turn_index, agent_name, hidden_state)
+    all_turns: list[tuple[int, str, NDArray[np.floating[Any]]]] = []
+
+    for agent_name, turn_states in agent_states.items():
+        for turn_idx, hidden_state in turn_states.items():
+            all_turns.append((turn_idx, agent_name, hidden_state))
+
+    # Sort by turn index to establish temporal order
+    all_turns.sort(key=lambda x: x[0])
+
+    # Track unique agents and turn sequence
+    agents: set[str] = set()
+    turn_sequence: list[str] = []
+    d_eff_by_turn: dict[int, int] = {}
+    beta_by_turn: dict[int, float] = {}
+
+    # Add nodes with D_eff and beta attributes
+    for turn_idx, agent_name, hidden_state in all_turns:
+        node_id = f"{agent_name}_t{turn_idx}"
+
+        # Ensure hidden_state is 2D for D_eff calculation
+        if hidden_state.ndim == 1:
+            hidden_state = hidden_state.reshape(1, -1)
+
+        # Calculate D_eff and beta using conveyance_metrics module
+        d_eff = calculate_d_eff(hidden_state, variance_threshold=variance_threshold)
+        beta = calculate_beta(hidden_state, variance_threshold=variance_threshold)
+
+        # Add node with attributes
+        G.add_node(
+            node_id,
+            agent=agent_name,
+            turn=turn_idx,
+            d_eff=d_eff,
+            beta=beta,
+        )
+
+        # Track metadata
+        agents.add(agent_name)
+        turn_sequence.append(agent_name)
+        d_eff_by_turn[turn_idx] = d_eff
+        beta_by_turn[turn_idx] = beta
+
+    # Add edges between consecutive turns (temporal information flow)
+    total_conveyance = 0.0
+    n_edges = 0
+
+    for i in range(len(all_turns) - 1):
+        turn_idx_from, agent_from, _ = all_turns[i]
+        turn_idx_to, agent_to, _ = all_turns[i + 1]
+
+        node_from = f"{agent_from}_t{turn_idx_from}"
+        node_to = f"{agent_to}_t{turn_idx_to}"
+
+        # Look up conveyance weight from pre-computed edges
+        # Try both (from, to) key format
+        conveyance_key = (agent_from, agent_to)
+        if conveyance_key in conveyance_edges:
+            weight = conveyance_edges[conveyance_key]
+        else:
+            # Default weight if not specified
+            weight = 1.0
+
+        # Add edge with both 'weight' and 'conveyance' attributes
+        G.add_edge(
+            node_from,
+            node_to,
+            weight=weight,
+            conveyance=weight,
+        )
+
+        total_conveyance += weight
+        n_edges += 1
+
+    # Calculate mean conveyance
+    mean_conveyance = total_conveyance / n_edges if n_edges > 0 else 0.0
+
+    return AgentFlowGraphResult(
+        graph=G,
+        n_nodes=G.number_of_nodes(),
+        n_edges=G.number_of_edges(),
+        agents=agents,
+        turn_sequence=turn_sequence,
+        d_eff_by_turn=d_eff_by_turn,
+        beta_by_turn=beta_by_turn,
+        total_conveyance=total_conveyance,
+        mean_conveyance=mean_conveyance,
+    )
+
+
+# Additional core functions will be implemented in subtasks 2-4 through 2-6

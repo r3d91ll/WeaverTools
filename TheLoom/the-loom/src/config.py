@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import torch
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+
+# Valid precision modes for MemoryConfig
+VALID_PRECISION_MODES = frozenset({"auto", "fp32", "fp16", "bf16"})
+
+
+@dataclass
+class PrecisionValidationResult:
+    """Result from precision validation with GPU capability detection."""
+
+    is_valid: bool
+    resolved_precision: str
+    gpu_available: bool
+    bf16_supported: bool
+    compute_capability: tuple[int, int] | None
+    warnings: list[str]
 
 
 class ServerConfig(BaseModel):
@@ -192,6 +210,99 @@ class MemoryConfig(BaseModel):
         "Example: ['blocks.0.hook_resid_post', 'blocks.0.attn.hook_pattern']. "
         "Use selective caching to reduce memory from 2-3x overhead to <20%.",
     )
+
+    def validate_precision(self, device: int | None = None) -> PrecisionValidationResult:
+        """
+        Validate precision mode against GPU capabilities.
+
+        Checks if the configured precision_mode is valid and supported by the
+        available GPU hardware. BF16 requires Ampere+ GPU (compute capability 8.0+).
+
+        Parameters:
+            device (int | None): CUDA device index to check. Defaults to 0 if CUDA
+                is available, None otherwise.
+
+        Returns:
+            PrecisionValidationResult: Validation result containing:
+                - is_valid: True if precision mode is valid and supported
+                - resolved_precision: The actual precision that will be used
+                - gpu_available: Whether CUDA is available
+                - bf16_supported: Whether bf16 is supported on the GPU
+                - compute_capability: GPU compute capability tuple or None
+                - warnings: List of warning messages about precision selection
+        """
+        warnings: list[str] = []
+        gpu_available = torch.cuda.is_available()
+        bf16_supported = False
+        compute_capability: tuple[int, int] | None = None
+
+        # Validate precision_mode is a known value
+        if self.precision_mode not in VALID_PRECISION_MODES:
+            return PrecisionValidationResult(
+                is_valid=False,
+                resolved_precision=self.precision_mode,
+                gpu_available=gpu_available,
+                bf16_supported=bf16_supported,
+                compute_capability=compute_capability,
+                warnings=[
+                    f"Invalid precision_mode '{self.precision_mode}'. "
+                    f"Valid options: {sorted(VALID_PRECISION_MODES)}"
+                ],
+            )
+
+        # Detect GPU capabilities
+        if gpu_available:
+            device_idx = device if device is not None else 0
+            try:
+                compute_capability = torch.cuda.get_device_capability(device_idx)
+                # BF16 requires Ampere+ (compute capability 8.0+)
+                bf16_supported = compute_capability[0] >= 8
+            except (RuntimeError, AssertionError):
+                # Device not available or invalid index
+                compute_capability = None
+                bf16_supported = False
+
+        # Resolve "auto" precision based on GPU capability
+        if self.precision_mode == "auto":
+            if gpu_available and bf16_supported:
+                resolved_precision = "bf16"
+            elif gpu_available:
+                resolved_precision = "fp16"
+            else:
+                resolved_precision = "fp32"
+        else:
+            resolved_precision = self.precision_mode
+
+        # Check if requested precision is supported
+        is_valid = True
+        if resolved_precision == "bf16" and not bf16_supported:
+            if gpu_available:
+                warnings.append(
+                    f"BF16 requested but GPU compute capability {compute_capability} < 8.0. "
+                    "BF16 requires Ampere+ GPU. Consider using 'fp16' or 'auto'."
+                )
+            else:
+                warnings.append(
+                    "BF16 requested but no CUDA GPU available. "
+                    "Consider using 'fp32' for CPU or 'auto' for automatic selection."
+                )
+            # Still valid as torch will handle the fallback, but warn
+            is_valid = True
+
+        if resolved_precision in ("fp16", "bf16") and not gpu_available:
+            warnings.append(
+                f"'{resolved_precision}' precision works best on GPU. "
+                "No CUDA device detected."
+            )
+
+        return PrecisionValidationResult(
+            is_valid=is_valid,
+            resolved_precision=resolved_precision,
+            gpu_available=gpu_available,
+            bf16_supported=bf16_supported,
+            compute_capability=compute_capability,
+            warnings=warnings,
+        )
 
 
 class Config(BaseSettings):

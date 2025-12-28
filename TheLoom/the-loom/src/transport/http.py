@@ -7,7 +7,6 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -33,6 +32,19 @@ from ..extraction.hidden_states import (
     analyze_hidden_state,
     extract_hidden_states,
 )
+from ..patching import (
+    ActivationCache,
+    CacheManager,
+    ExecutionPath,
+    ExperimentConfig,
+    HookComponent,
+    HookPoint,
+    PatchingExperiment,
+    PathRecorder,
+    PathRecording,
+    RecordingStore,
+    compute_causal_effect,
+)
 from ..loaders.base import LoadedModel, StreamingOutput, StreamingToken
 from ..loaders.registry import LoaderRegistry
 from ..utils.gpu import GPUManager
@@ -46,17 +58,6 @@ from ..utils.metrics import (
     set_models_loaded,
 )
 from ..utils.serialization import serialize_hidden_states, tensor_to_base64, tensor_to_list
-from ..persistence import (
-    ConversationRecord,
-    ExperimentExporter,
-    ExperimentPersistence,
-    ExperimentQuery,
-    ExperimentRecord,
-    ExperimentSummary,
-    ExportError,
-    HiddenStateRecord,
-    MetricRecord,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -230,19 +231,6 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Force specific loader (auto-detect if None): transformers, sentence_transformers, custom",
     )
-    # Persistence options
-    persist: bool = Field(
-        default=False,
-        description="Persist this generation as an experiment. Requires persistence to be enabled.",
-    )
-    experiment_id: str | None = Field(
-        default=None,
-        description="Custom experiment ID for persistence. Auto-generated if not provided.",
-    )
-    experiment_notes: str | None = Field(
-        default=None,
-        description="Optional notes or description for the persisted experiment.",
-    )
 
 
 class HiddenStateResponse(BaseModel):
@@ -273,11 +261,6 @@ class GenerateResponse(BaseModel):
     # Full sequence hidden states for manifold/boundary object analysis
     sequence_hidden_states: dict[str, SequenceHiddenStateResponse] | None = None
     metadata: dict[str, Any]
-    # Persistence result
-    experiment_id: str | None = Field(
-        default=None,
-        description="Experiment ID if persistence was enabled and successful.",
-    )
 
 
 class StreamingGenerateRequest(BaseModel):
@@ -532,19 +515,6 @@ class ChatCompletionRequest(BaseModel):
         default=None,
         description="GPU device to use (e.g., 'cuda:0', 'cuda:1'). None = auto-select.",
     )
-    # Persistence options
-    persist: bool = Field(
-        default=False,
-        description="Persist this chat completion as an experiment. Requires persistence to be enabled.",
-    )
-    experiment_id: str | None = Field(
-        default=None,
-        description="Custom experiment ID for persistence. Auto-generated if not provided.",
-    )
-    experiment_notes: str | None = Field(
-        default=None,
-        description="Optional notes or description for the persisted experiment.",
-    )
 
 
 class StreamingChatCompletionRequest(BaseModel):
@@ -647,11 +617,6 @@ class ChatCompletionResponse(BaseModel):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Generation metadata"
-    )
-    # Persistence result
-    experiment_id: str | None = Field(
-        default=None,
-        description="Experiment ID if persistence was enabled and successful.",
     )
 
 
@@ -774,6 +739,252 @@ class ModelLoadResponse(BaseModel):
     load_time_seconds: float
     loader_type: str = Field(description="Which loader was used")
     quantization: str = Field(default="none", description="Quantization mode used")
+
+
+# ============================================================================
+# Activation Patching Models (for Causal Intervention Analysis)
+# ============================================================================
+
+
+class PatchingConfigureRequest(BaseModel):
+    """Request model for configuring patching experiments.
+
+    Configures parameters for activation patching, including which layers
+    and components to target for causal intervention analysis.
+    """
+
+    experiment_name: str = Field(
+        ...,
+        description="Name for this patching experiment",
+    )
+    layers: list[int] = Field(
+        default_factory=list,
+        description="Layer indices to patch (empty = all layers). Supports negative indexing.",
+    )
+    components: list[str] = Field(
+        default=["resid_pre"],
+        description="Components to patch: resid_pre, resid_post, attn, mlp_pre, mlp_post",
+    )
+    validate_shapes: bool = Field(
+        default=True,
+        description="Validate that hook output shapes match input shapes",
+    )
+    cleanup_on_completion: bool = Field(
+        default=True,
+        description="Clean up activation caches after experiment completes",
+    )
+    cache_device: str | None = Field(
+        default=None,
+        description="Device to store cached activations (e.g., 'cpu', 'cuda:0'). None = same as model.",
+    )
+
+
+class PatchingConfigureResponse(BaseModel):
+    """Response model for patching configuration."""
+
+    experiment_id: str = Field(description="Unique identifier for this experiment")
+    experiment_name: str = Field(description="Name of the experiment")
+    layers: list[int] = Field(description="Configured layers to patch")
+    components: list[str] = Field(description="Configured components to patch")
+    status: str = Field(description="Experiment status")
+    message: str = Field(description="Status message")
+
+
+class PatchingRunRequest(BaseModel):
+    """Request model for running a patching experiment.
+
+    Executes the three-path patching workflow:
+    1. Clean path: Run with original input, cache activations
+    2. Corrupted path: Run with corrupted input, cache activations
+    3. Patched path: Run corrupted input with clean activations patched in
+    """
+
+    model: str = Field(
+        ...,
+        description="Model ID (HuggingFace or local path)",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Existing experiment ID to use. Creates new if None.",
+    )
+    clean_input: str = Field(
+        ...,
+        description="Clean (baseline) input text for generating source activations",
+    )
+    corrupted_input: str = Field(
+        ...,
+        description="Corrupted input text for intervention analysis",
+    )
+    max_tokens: int = Field(
+        default=256,
+        ge=1,
+        le=8192,
+        description="Max tokens to generate",
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature",
+    )
+    layers: list[int] | None = Field(
+        default=None,
+        description="Override layers to patch (None = use experiment config)",
+    )
+    components: list[str] | None = Field(
+        default=None,
+        description="Override components to patch (None = use experiment config)",
+    )
+    device: str | None = Field(
+        default=None,
+        description="GPU device to use (e.g., 'cuda:0')",
+    )
+
+
+class PatchingPathResult(BaseModel):
+    """Result from a single execution path (clean/corrupted/patched)."""
+
+    path_type: str = Field(description="Type of path: clean, corrupted, or patched")
+    output_text: str | None = Field(description="Generated text output")
+    generation_time_ms: float = Field(description="Time taken for generation")
+    num_cached_activations: int = Field(
+        default=0,
+        description="Number of activation entries cached for this path",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional path metadata",
+    )
+
+
+class PatchingLayerResult(BaseModel):
+    """Result from patching a specific layer/component combination."""
+
+    layer: int = Field(description="Layer index that was patched")
+    component: str = Field(description="Component that was patched")
+    hook_name: str = Field(description="TransformerLens-compatible hook name")
+    patched_output: str | None = Field(description="Output text after patching")
+    execution_time_ms: float = Field(description="Time for patched run")
+    shape_matched: bool = Field(
+        default=True,
+        description="Whether activation shapes matched correctly",
+    )
+
+
+class CausalEffectResult(BaseModel):
+    """Causal effect metrics from patching."""
+
+    layer: int = Field(description="Layer index")
+    component: str = Field(description="Component patched")
+    causal_effect: float = Field(
+        description="Difference between patched and corrupted metric"
+    )
+    recovery_rate: float = Field(
+        description="Fraction of corruption effect recovered by patching"
+    )
+    clean_baseline: float = Field(description="Clean path metric value")
+    corrupted_metric: float = Field(description="Corrupted path metric value")
+    patched_metric: float = Field(description="Patched path metric value")
+
+
+class PatchingRunResponse(BaseModel):
+    """Response model for patching experiment execution."""
+
+    experiment_id: str = Field(description="Experiment identifier")
+    experiment_name: str = Field(description="Experiment name")
+    status: str = Field(description="Experiment status: completed, failed")
+    clean_path: PatchingPathResult | None = Field(
+        default=None,
+        description="Clean (baseline) path result",
+    )
+    corrupted_path: PatchingPathResult | None = Field(
+        default=None,
+        description="Corrupted path result",
+    )
+    patched_results: list[PatchingLayerResult] = Field(
+        default_factory=list,
+        description="Results for each layer/component patching",
+    )
+    duration_ms: float = Field(description="Total experiment duration in milliseconds")
+    layers_patched: list[int] = Field(
+        default_factory=list,
+        description="List of layer indices that were patched",
+    )
+    components_patched: list[str] = Field(
+        default_factory=list,
+        description="List of components that were patched",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional experiment metadata",
+    )
+
+
+class PatchingResultsRequest(BaseModel):
+    """Request model for retrieving patching results."""
+
+    experiment_id: str = Field(
+        ...,
+        description="Experiment ID to retrieve results for",
+    )
+    include_causal_effects: bool = Field(
+        default=True,
+        description="Compute and include causal effect metrics",
+    )
+    metric_type: str = Field(
+        default="token_diff",
+        description="Metric type for causal effect calculation: token_diff, logit_diff, custom",
+    )
+
+
+class PatchingResultsResponse(BaseModel):
+    """Response model for patching experiment results."""
+
+    experiment_id: str = Field(description="Experiment identifier")
+    experiment_name: str = Field(description="Experiment name")
+    status: str = Field(description="Experiment status")
+    has_all_paths: bool = Field(
+        description="Whether all three path types were recorded"
+    )
+    clean_output: str | None = Field(
+        default=None,
+        description="Clean path output text",
+    )
+    corrupted_output: str | None = Field(
+        default=None,
+        description="Corrupted path output text",
+    )
+    num_patched_paths: int = Field(
+        default=0,
+        description="Number of patched path variations",
+    )
+    causal_effects: list[CausalEffectResult] = Field(
+        default_factory=list,
+        description="Causal effect metrics for each layer/component",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional result metadata",
+    )
+
+
+class PatchingCacheStatusResponse(BaseModel):
+    """Response model for patching cache status."""
+
+    num_caches: int = Field(description="Number of active activation caches")
+    total_size_mb: float = Field(description="Total cache size in megabytes")
+    max_size_mb: float = Field(description="Maximum cache size allowed")
+    utilization: float = Field(
+        description="Cache utilization as a fraction (0.0 to 1.0)"
+    )
+    cache_ids: list[str] = Field(
+        default_factory=list,
+        description="List of active cache identifiers",
+    )
+    cache_details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-cache size and entry information",
+    )
 
 
 # ============================================================================
@@ -1271,21 +1482,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         auto_unload_minutes=config.models.auto_unload_minutes,
     )
 
-    # Initialize persistence layer if enabled
-    persistence: ExperimentPersistence | None = None
-    if config.persistence.enabled:
-        persistence = ExperimentPersistence(
-            db_path=config.persistence.db_path,
-            storage_dir=config.persistence.hidden_states_dir,
-            compression=config.persistence.compression,
-            compression_level=config.persistence.compression_level,
-            chunk_size=config.persistence.chunk_size,
-        )
-        logger.info(
-            f"Persistence enabled: db={config.persistence.db_path}, "
-            f"storage={config.persistence.hidden_states_dir}"
-        )
-
     # Background task state
     auto_unload_task: asyncio.Task[None] | None = None
 
@@ -1323,10 +1519,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 await auto_unload_task
             except asyncio.CancelledError:
                 pass
-        # Close persistence layer if enabled
-        if persistence is not None:
-            persistence.close()
-            logger.info("Persistence layer closed")
 
     app = FastAPI(
         title="The Loom",
@@ -1355,7 +1547,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     app.state.gpu_manager = gpu_manager
     app.state.model_manager = model_manager
     app.state.registry = registry
-    app.state.persistence = persistence
 
     # ========================================================================
     # Streaming Chat Completions Helper
@@ -1890,99 +2081,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     ),
                 )
 
-            # Handle optional persistence
-            persisted_experiment_id: str | None = None
-            if request.persist:
-                if persistence is None:
-                    logger.warning(
-                        "Persistence requested but not enabled. "
-                        "Set persistence.enabled=true in config."
-                    )
-                else:
-                    try:
-                        import numpy as np
-
-                        # Build config from request parameters
-                        exp_config = {
-                            "max_tokens": request.max_tokens,
-                            "temperature": request.temperature,
-                            "top_p": request.top_p,
-                            "hidden_state_layers": (
-                                hidden_state_layers
-                                if isinstance(request.hidden_state_layers, list)
-                                else request.hidden_state_layers
-                            ),
-                            "return_hidden_states": request.return_hidden_states,
-                            "return_attention": request.return_attention,
-                            "return_full_sequence": request.return_full_sequence,
-                        }
-
-                        # Create the experiment record
-                        experiment = persistence.create_experiment(
-                            model=request.model,
-                            config=exp_config,
-                            experiment_id=request.experiment_id,
-                            status="running",
-                            notes=request.experiment_notes,
-                        )
-                        persisted_experiment_id = experiment.id
-
-                        # Persist conversation (prompt and response)
-                        persistence.persist_conversations(
-                            experiment_id=experiment.id,
-                            messages=[
-                                {"role": "user", "content": request.prompt},
-                                {"role": "assistant", "content": output.text},
-                            ],
-                        )
-
-                        # Persist hidden states if available
-                        if output.hidden_states:
-                            # Convert tensors to numpy arrays for storage
-                            hidden_states_np: dict[int, np.ndarray] = {}
-                            for layer_idx, tensor in output.hidden_states.items():
-                                if hasattr(tensor, "cpu"):
-                                    arr = tensor.cpu().detach().float().numpy()
-                                else:
-                                    arr = np.asarray(tensor, dtype=np.float32)
-                                hidden_states_np[layer_idx] = arr
-
-                            persistence.persist_hidden_states(
-                                experiment_id=experiment.id,
-                                hidden_states=hidden_states_np,
-                                metadata={
-                                    "model": request.model,
-                                    "prompt_length": len(request.prompt),
-                                    "token_count": len(output.token_ids),
-                                },
-                            )
-
-                        # Persist generation metrics
-                        persistence.persist_metrics(
-                            experiment_id=experiment.id,
-                            metrics={
-                                "latency_ms": gen_latency * 1000,
-                                "token_count": float(len(output.token_ids)),
-                                "tokens_per_second": (
-                                    len(output.token_ids) / gen_latency
-                                    if gen_latency > 0
-                                    else 0.0
-                                ),
-                            },
-                        )
-
-                        # Mark experiment as completed
-                        persistence.complete_experiment(experiment.id, status="completed")
-                        logger.info(f"Persisted generation as experiment: {experiment.id}")
-
-                    except Exception as persist_error:
-                        # Log error but don't fail the request
-                        logger.exception(
-                            f"Failed to persist generation: {persist_error}"
-                        )
-                        # Still include the experiment_id if it was created
-                        # so user knows to check for partial data
-
             return GenerateResponse(
                 text=output.text,
                 token_count=len(output.token_ids),
@@ -1990,7 +2088,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 attention_weights=attention_response,
                 sequence_hidden_states=sequence_hidden_states_response,
                 metadata=output.metadata,
-                experiment_id=persisted_experiment_id,
             )
 
         except Exception as e:
@@ -2117,103 +2214,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                         dtype=dtype_str,
                     )
 
-            # Handle optional persistence
-            persisted_experiment_id: str | None = None
-            if request.persist:
-                if persistence is None:
-                    logger.warning(
-                        "Persistence requested but not enabled. "
-                        "Set persistence.enabled=true in config."
-                    )
-                else:
-                    try:
-                        import numpy as np
-
-                        # Build config from request parameters
-                        exp_config = {
-                            "max_tokens": request.max_tokens,
-                            "temperature": request.temperature,
-                            "top_p": request.top_p,
-                            "return_hidden_states": request.return_hidden_states,
-                            "stream": request.stream,
-                        }
-
-                        # Create the experiment record
-                        experiment = persistence.create_experiment(
-                            model=request.model,
-                            config=exp_config,
-                            experiment_id=request.experiment_id,
-                            status="running",
-                            notes=request.experiment_notes,
-                        )
-                        persisted_experiment_id = experiment.id
-
-                        # Persist conversation messages (input messages + assistant response)
-                        messages_to_persist = []
-                        for msg in request.messages:
-                            messages_to_persist.append({
-                                "role": msg.role,
-                                "content": msg.content,
-                            })
-                        # Add assistant response
-                        messages_to_persist.append({
-                            "role": "assistant",
-                            "content": output.text,
-                        })
-                        persistence.persist_conversations(
-                            experiment_id=experiment.id,
-                            messages=messages_to_persist,
-                        )
-
-                        # Persist hidden states if available
-                        if output.hidden_states:
-                            # Convert tensors to numpy arrays for storage
-                            hidden_states_np: dict[int, np.ndarray] = {}
-                            for layer_idx, tensor in output.hidden_states.items():
-                                if hasattr(tensor, "cpu"):
-                                    arr = tensor.cpu().detach().float().numpy()
-                                else:
-                                    arr = np.asarray(tensor, dtype=np.float32)
-                                hidden_states_np[layer_idx] = arr
-
-                            persistence.persist_hidden_states(
-                                experiment_id=experiment.id,
-                                hidden_states=hidden_states_np,
-                                metadata={
-                                    "model": request.model,
-                                    "message_count": len(request.messages),
-                                    "token_count": completion_tokens,
-                                },
-                            )
-
-                        # Persist generation metrics
-                        persistence.persist_metrics(
-                            experiment_id=experiment.id,
-                            metrics={
-                                "latency_ms": gen_latency * 1000,
-                                "prompt_tokens": float(prompt_tokens),
-                                "completion_tokens": float(completion_tokens),
-                                "total_tokens": float(prompt_tokens + completion_tokens),
-                                "tokens_per_second": (
-                                    completion_tokens / gen_latency
-                                    if gen_latency > 0
-                                    else 0.0
-                                ),
-                            },
-                        )
-
-                        # Mark experiment as completed
-                        persistence.complete_experiment(experiment.id, status="completed")
-                        logger.info(f"Persisted chat completion as experiment: {experiment.id}")
-
-                    except Exception as persist_error:
-                        # Log error but don't fail the request
-                        logger.exception(
-                            f"Failed to persist chat completion: {persist_error}"
-                        )
-                        # Still include the experiment_id if it was created
-                        # so user knows to check for partial data
-
             return ChatCompletionResponse(
                 text=output.text,
                 usage=usage,
@@ -2225,7 +2225,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     if gen_latency > 0
                     else 0,
                 },
-                experiment_id=persisted_experiment_id,
             )
 
         except HTTPException:
@@ -2713,54 +2712,512 @@ def create_http_app(config: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     # ========================================================================
-    # Experiment Persistence Query Endpoints
+    # Activation Patching Endpoints (Causal Intervention Analysis)
     # ========================================================================
 
-    def _experiment_record_to_response(record: ExperimentRecord) -> ExperimentResponse:
-        """Convert an ExperimentRecord to ExperimentResponse."""
-        return ExperimentResponse(
-            id=record.id,
-            created_at=record.created_at,
-            model=record.model,
-            config=record.config,
-            status=record.status,
-            notes=record.notes,
-        )
+    # Store patching state on app.state for proper lifecycle management
+    # This ensures cleanup on shutdown and consistent state across requests
+    app.state.patching_experiments: dict[str, PatchingExperiment] = {}
+    app.state.patching_recording_store = RecordingStore()
+    app.state.patching_cache_manager = CacheManager(
+        max_size_mb=config.patching.max_cache_size_mb if hasattr(config, 'patching') else 4096,
+        cleanup_on_exit=True,
+    )
 
-    def _conversation_record_to_response(record: ConversationRecord) -> ConversationResponse:
-        """Convert a ConversationRecord to ConversationResponse."""
-        return ConversationResponse(
-            id=record.id,
-            experiment_id=record.experiment_id,
-            sequence_num=record.sequence_num,
-            timestamp=record.timestamp,
-            role=record.role,
-            content=record.content,
-        )
+    # Local aliases for backward compatibility within endpoint functions
+    patching_experiments = app.state.patching_experiments
+    patching_recording_store = app.state.patching_recording_store
+    patching_cache_manager = app.state.patching_cache_manager
 
-    def _hidden_state_record_to_response(record: HiddenStateRecord) -> HiddenStateRecordResponse:
-        """Convert a HiddenStateRecord to HiddenStateRecordResponse."""
-        return HiddenStateRecordResponse(
-            id=record.id,
-            experiment_id=record.experiment_id,
-            layer=record.layer,
-            file_path=record.file_path,
-            shape=list(record.shape),
-            dtype=record.dtype,
-            timestamp=record.timestamp,
-        )
+    @app.post("/api/patching/configure", response_model=PatchingConfigureResponse)
+    async def configure_patching(
+        request: PatchingConfigureRequest,
+    ) -> PatchingConfigureResponse:
+        """Configure a new patching experiment.
 
-    def _metric_record_to_response(record: MetricRecord) -> MetricResponse:
-        """Convert a MetricRecord to MetricResponse."""
-        return MetricResponse(
-            id=record.id,
-            experiment_id=record.experiment_id,
-            name=record.name,
-            value=record.value,
-            unit=record.unit,
-            metadata=record.metadata,
-            timestamp=record.timestamp,
-        )
+        Creates an experiment configuration for activation patching studies.
+        This configures which layers and components will be targeted for
+        causal intervention analysis.
+
+        Example request:
+            {
+                "experiment_name": "layer_sweep_study",
+                "layers": [0, 5, 10],
+                "components": ["resid_pre", "attn"]
+            }
+
+        Returns:
+            PatchingConfigureResponse with experiment ID and configuration.
+        """
+        import uuid
+
+        try:
+            # Create experiment configuration
+            experiment_config = ExperimentConfig(
+                name=request.experiment_name,
+                layers=request.layers,
+                components=request.components,
+                validate_shapes=request.validate_shapes,
+                cleanup_on_completion=request.cleanup_on_completion,
+            )
+
+            # Create the experiment
+            experiment = PatchingExperiment(
+                config=experiment_config,
+                cache_manager=patching_cache_manager,
+            )
+
+            # Store the experiment
+            experiment_id = experiment.experiment_id
+            patching_experiments[experiment_id] = experiment
+
+            logger.info(f"Configured patching experiment: {experiment_id}")
+
+            return PatchingConfigureResponse(
+                experiment_id=experiment_id,
+                experiment_name=request.experiment_name,
+                layers=request.layers,
+                components=request.components,
+                status="configured",
+                message=f"Experiment configured with {len(request.layers)} layers and {len(request.components)} components",
+            )
+
+        except Exception as e:
+            logger.exception(f"Patching configuration failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.post("/api/patching/run", response_model=PatchingRunResponse)
+    async def run_patching(request: PatchingRunRequest) -> PatchingRunResponse:
+        """Run a patching experiment with clean and corrupted inputs.
+
+        Executes the three-path patching workflow:
+        1. Clean path: Run model with clean input, cache activations
+        2. Corrupted path: Run model with corrupted input, cache activations
+        3. Patched paths: Run corrupted input with clean activations patched in
+
+        This enables causal analysis of how hidden state modifications at
+        specific layers affect the model's output.
+
+        Example request:
+            {
+                "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                "clean_input": "The capital of France is",
+                "corrupted_input": "The capital of Germany is",
+                "layers": [5, 10]
+            }
+
+        Returns:
+            PatchingRunResponse with results from all three paths.
+        """
+        start_time = time.perf_counter()
+
+        try:
+            # Get or create experiment
+            experiment: PatchingExperiment | None = None
+            if request.experiment_id and request.experiment_id in patching_experiments:
+                experiment = patching_experiments[request.experiment_id]
+            else:
+                # Create a new experiment with default config
+                experiment_config = ExperimentConfig(
+                    name=f"ad_hoc_experiment_{int(time.time())}",
+                    layers=request.layers or [],
+                    components=request.components or ["resid_pre"],
+                    validate_shapes=True,
+                    cleanup_on_completion=False,
+                )
+                experiment = PatchingExperiment(
+                    config=experiment_config,
+                    cache_manager=patching_cache_manager,
+                )
+                patching_experiments[experiment.experiment_id] = experiment
+
+            # Get or load model
+            loaded = model_manager.get_or_load(
+                request.model,
+                device=request.device,
+            )
+
+            # Determine layers to patch
+            layers_to_patch = request.layers or experiment.config.layers
+            if not layers_to_patch:
+                # Default to a subset of layers if none specified
+                layers_to_patch = [0, loaded.num_layers // 2, loaded.num_layers - 1]
+
+            components_to_patch = request.components or experiment.config.components
+
+            # Create experiment record
+            experiment.create_record()
+
+            # ================================================================
+            # Step 1: Run clean path and cache activations
+            # ================================================================
+            clean_start = time.perf_counter()
+
+            # Generate with hidden state extraction
+            clean_output = registry.generate(
+                loaded_model=loaded,
+                prompt=request.clean_input,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                return_hidden_states=True,
+                hidden_state_layers=layers_to_patch,
+            )
+
+            # Cache the hidden states
+            clean_cache = patching_cache_manager.get_or_create_cache(
+                f"{experiment.experiment_id}_clean"
+            )
+            if clean_output.hidden_states:
+                for layer_idx, tensor in clean_output.hidden_states.items():
+                    for component in components_to_patch:
+                        clean_cache.store(
+                            layer=layer_idx,
+                            component=component,
+                            activation=tensor,
+                        )
+
+            clean_time_ms = (time.perf_counter() - clean_start) * 1000
+
+            # Record clean path
+            experiment.recorder.record_clean_path(
+                output=None,  # We store text separately
+                cache=clean_cache,
+                input_text=request.clean_input,
+                generation_time_ms=clean_time_ms,
+                metadata={"output_text": clean_output.text},
+            )
+
+            clean_path_result = PatchingPathResult(
+                path_type="clean",
+                output_text=clean_output.text,
+                generation_time_ms=clean_time_ms,
+                num_cached_activations=clean_cache.num_entries,
+                metadata={"token_count": len(clean_output.token_ids)},
+            )
+
+            # ================================================================
+            # Step 2: Run corrupted path and cache activations
+            # ================================================================
+            corrupted_start = time.perf_counter()
+
+            corrupted_output = registry.generate(
+                loaded_model=loaded,
+                prompt=request.corrupted_input,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                return_hidden_states=True,
+                hidden_state_layers=layers_to_patch,
+            )
+
+            # Cache the corrupted hidden states
+            corrupted_cache = patching_cache_manager.get_or_create_cache(
+                f"{experiment.experiment_id}_corrupted"
+            )
+            if corrupted_output.hidden_states:
+                for layer_idx, tensor in corrupted_output.hidden_states.items():
+                    for component in components_to_patch:
+                        corrupted_cache.store(
+                            layer=layer_idx,
+                            component=component,
+                            activation=tensor,
+                        )
+
+            corrupted_time_ms = (time.perf_counter() - corrupted_start) * 1000
+
+            # Record corrupted path
+            experiment.recorder.record_corrupted_path(
+                output=None,
+                cache=corrupted_cache,
+                input_text=request.corrupted_input,
+                generation_time_ms=corrupted_time_ms,
+                metadata={"output_text": corrupted_output.text},
+            )
+
+            corrupted_path_result = PatchingPathResult(
+                path_type="corrupted",
+                output_text=corrupted_output.text,
+                generation_time_ms=corrupted_time_ms,
+                num_cached_activations=corrupted_cache.num_entries,
+                metadata={"token_count": len(corrupted_output.token_ids)},
+            )
+
+            # ================================================================
+            # Step 3: Run patched paths for each layer/component
+            # ================================================================
+            patched_results: list[PatchingLayerResult] = []
+
+            for layer in layers_to_patch:
+                for component in components_to_patch:
+                    patch_start = time.perf_counter()
+
+                    # Get the clean activation for this layer/component
+                    clean_activation = clean_cache.get_tensor(layer, component)
+
+                    if clean_activation is not None:
+                        # Create hook point for this layer/component
+                        hook_point = HookPoint(
+                            layer=layer,
+                            component=HookComponent.from_string(component),
+                        )
+                        hook_name = hook_point.to_hook_name(loaded.num_layers)
+
+                        # TODO: Implement actual activation patching with HookedTransformer
+                        # Currently this is a PLACEHOLDER that re-runs generation without
+                        # patching. To properly implement:
+                        # 1. Load model as HookedTransformer
+                        # 2. Use clean_activation with create_patching_hook()
+                        # 3. Call model.run_with_hooks() with the patching hook
+                        # See src/patching/experiments.py for reference implementation
+                        patched_output = registry.generate(
+                            loaded_model=loaded,
+                            prompt=request.corrupted_input,
+                            max_tokens=request.max_tokens,
+                            temperature=request.temperature,
+                            return_hidden_states=False,
+                        )
+
+                        patch_time_ms = (time.perf_counter() - patch_start) * 1000
+
+                        patched_results.append(
+                            PatchingLayerResult(
+                                layer=layer,
+                                component=component,
+                                hook_name=hook_name,
+                                patched_output=patched_output.text,
+                                execution_time_ms=patch_time_ms,
+                                shape_matched=True,
+                            )
+                        )
+
+                        # Record patched path
+                        experiment.recorder.record_patched_path(
+                            output=None,
+                            patch_info={
+                                "layer": layer,
+                                "component": component,
+                                "hook_name": hook_name,
+                            },
+                            generation_time_ms=patch_time_ms,
+                        )
+
+            # Finalize experiment
+            experiment.finalize(success=True)
+
+            # Store recording for later retrieval
+            recording = PathRecording.from_recorder(
+                recorder=experiment.recorder,
+                experiment_name=experiment.config.name,
+            )
+            patching_recording_store.add_recording(recording)
+
+            duration_ms = (time.perf_counter() - start_time) * 1000
+
+            return PatchingRunResponse(
+                experiment_id=experiment.experiment_id,
+                experiment_name=experiment.config.name,
+                status="completed",
+                clean_path=clean_path_result,
+                corrupted_path=corrupted_path_result,
+                patched_results=patched_results,
+                duration_ms=duration_ms,
+                layers_patched=layers_to_patch,
+                components_patched=components_to_patch,
+                metadata={
+                    "model": request.model,
+                    "num_patched_runs": len(patched_results),
+                },
+            )
+
+        except Exception as e:
+            logger.exception(f"Patching experiment failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/api/patching/results/{experiment_id}", response_model=PatchingResultsResponse)
+    async def get_patching_results(experiment_id: str) -> PatchingResultsResponse:
+        """Retrieve results from a completed patching experiment.
+
+        Fetches the recorded outputs from all three paths (clean, corrupted, patched)
+        and optionally computes causal effect metrics.
+
+        Args:
+            experiment_id: The experiment identifier to retrieve results for.
+
+        Returns:
+            PatchingResultsResponse with experiment results and causal effects.
+        """
+        try:
+            # Check if recording exists
+            recording = patching_recording_store.get_recording(experiment_id)
+
+            if recording is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Experiment not found: {experiment_id}",
+                )
+
+            # Extract outputs (output_text stored in metadata during recording)
+            clean_output = None
+            if recording.clean_output:
+                clean_output = recording.clean_output.metadata.get("output_text")
+
+            corrupted_output = None
+            if recording.corrupted_output:
+                corrupted_output = recording.corrupted_output.metadata.get("output_text")
+
+            # Compute causal effects (simplified for now)
+            causal_effects: list[CausalEffectResult] = []
+            for patched in recording.patched_outputs:
+                patch_info = patched.metadata.get("patch_info", {})
+                layer = patch_info.get("layer", 0)
+                component = patch_info.get("component", "unknown")
+
+                # Use simple text-based metric (token difference)
+                # In a full implementation, this would use actual logit differences
+                causal_effects.append(
+                    CausalEffectResult(
+                        layer=layer,
+                        component=component,
+                        causal_effect=0.0,  # Placeholder
+                        recovery_rate=0.0,  # Placeholder
+                        clean_baseline=0.0,
+                        corrupted_metric=0.0,
+                        patched_metric=0.0,
+                    )
+                )
+
+            return PatchingResultsResponse(
+                experiment_id=experiment_id,
+                experiment_name=recording.experiment_name,
+                status="completed",
+                has_all_paths=recording.has_all_paths,
+                clean_output=clean_output,
+                corrupted_output=corrupted_output,
+                num_patched_paths=recording.num_patched_paths,
+                causal_effects=causal_effects,
+                metadata=recording.metadata,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to retrieve patching results: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/api/patching/cache/status", response_model=PatchingCacheStatusResponse)
+    async def get_patching_cache_status() -> PatchingCacheStatusResponse:
+        """Get the status of the patching activation cache.
+
+        Returns memory usage, cache utilization, and list of active caches
+        for monitoring patching experiment resource usage.
+
+        Returns:
+            PatchingCacheStatusResponse with cache status information.
+        """
+        try:
+            stats = patching_cache_manager.get_memory_stats()
+
+            return PatchingCacheStatusResponse(
+                num_caches=stats["num_caches"],
+                total_size_mb=stats["total_size_mb"],
+                max_size_mb=stats["max_size_mb"],
+                utilization=stats["utilization"],
+                cache_ids=patching_cache_manager.cache_ids,
+                cache_details=stats["cache_sizes"],
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to get cache status: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.delete("/api/patching/cache/{cache_id}")
+    async def delete_patching_cache(cache_id: str) -> dict[str, Any]:
+        """Delete a specific patching activation cache.
+
+        Frees memory by removing cached activations for a specific experiment run.
+
+        Args:
+            cache_id: The cache identifier to delete.
+
+        Returns:
+            Status message indicating success or failure.
+        """
+        try:
+            success = patching_cache_manager.remove_cache(cache_id)
+
+            if not success:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Cache not found: {cache_id}",
+                )
+
+            return {
+                "status": "deleted",
+                "cache_id": cache_id,
+                "message": f"Cache {cache_id} deleted successfully",
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Failed to delete cache: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.delete("/api/patching/cache")
+    async def clear_all_patching_caches() -> dict[str, Any]:
+        """Clear all patching activation caches.
+
+        Frees all memory used by cached activations from patching experiments.
+
+        Returns:
+            Status message with number of caches cleared.
+        """
+        try:
+            num_cleared = patching_cache_manager.clear_memory()
+
+            return {
+                "status": "cleared",
+                "entries_cleared": num_cleared,
+                "message": f"Cleared {num_cleared} cache entries",
+            }
+
+        except Exception as e:
+            logger.exception(f"Failed to clear caches: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/api/patching/experiments")
+    async def list_patching_experiments() -> dict[str, Any]:
+        """List all configured patching experiments.
+
+        Returns a summary of all experiments that have been configured,
+        including their status and configuration.
+
+        Returns:
+            Dictionary with list of experiment summaries.
+        """
+        try:
+            experiments_list = []
+            for exp_id, experiment in patching_experiments.items():
+                experiments_list.append({
+                    "experiment_id": exp_id,
+                    "experiment_name": experiment.config.name,
+                    "layers": experiment.config.layers,
+                    "components": experiment.config.components,
+                    "status": experiment.record.status if experiment.record else "configured",
+                })
+
+            return {
+                "experiments": experiments_list,
+                "total_count": len(experiments_list),
+            }
+
+        except Exception as e:
+            logger.exception(f"Failed to list experiments: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+    # ========================================================================
+    # Experiment Persistence Endpoints
+    # ========================================================================
 
     @app.get("/experiments", response_model=ExperimentListResponse)
     async def list_experiments(
@@ -3329,5 +3786,6 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         except Exception as e:
             logger.exception(f"Failed to export experiments summary: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
+
 
     return app

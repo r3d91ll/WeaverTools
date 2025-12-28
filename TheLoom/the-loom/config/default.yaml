@@ -52,6 +52,20 @@ memory:
   memory_warning_threshold: 0.85        # Warn at 85% GPU utilization
   activation_cache_filter: []           # TransformerLens hooks to cache (empty = all)
 
+# Activation patching for causal intervention studies
+# Enables TransformerLens-based activation patching for multi-agent scenarios
+patching:
+  enabled: true             # Enable activation patching functionality
+  default_layers: []        # Default layers to target (empty = all layers)
+  default_components:       # Activation components to patch
+    - resid_pre             # Options: resid_pre, resid_post, attn, mlp
+  cache_dir: ~/.cache/loom/activations  # Directory for activation caches
+  max_cache_size_mb: 4096   # Maximum cache size in megabytes (min: 256)
+  fold_layer_norm: false    # Fold LayerNorm into weights (false preserves exact behavior)
+  cleanup_on_completion: true  # Auto-cleanup activation caches after experiments
+  validate_hook_shapes: true   # Validate hook outputs match expected shapes
+  stream_activations: false    # Stream to disk for large models (reduces memory)
+
 # Per-model configuration overrides
 # Use this to force specific loaders or settings for certain models
 #

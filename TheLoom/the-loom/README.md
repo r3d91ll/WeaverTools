@@ -737,6 +737,174 @@ print(f"Text: {result['text']}")
 print(f"Hidden state shape: {result['hidden_states']['-1']['shape']}")
 ```
 
+## Layer-by-Layer Analysis
+
+The Loom supports extraction of hidden states from any transformer layer, enabling interpretability research, probing experiments, and analysis of how information flows through the model.
+
+### The `hidden_state_layers` Parameter
+
+Control which layers to extract hidden states from:
+
+| Value | Description | Use Case |
+|-------|-------------|----------|
+| `[-1]` | Last layer only (default) | Final semantic representation for embedding tasks |
+| `[-1, -2, -3]` | Specific layers (negative indexing) | Compare early vs. late representations |
+| `[0, 6, 11]` | Specific layers (positive indexing) | Target specific transformer blocks |
+| `"all"` | Every layer in the model | Full layer-by-layer analysis, D_eff computation |
+
+**Negative vs. Positive Indexing:**
+- **Negative indices** (e.g., `-1`, `-2`) count from the final layer backwards, which is portable across models of different depths
+- **Positive indices** (e.g., `0`, `5`, `11`) count from the first layer, useful when targeting specific architectural positions
+
+### Extracting All Layers
+
+Use `hidden_state_layers: "all"` to extract hidden states from every transformer layer:
+
+```bash
+curl -X POST http://localhost:8080/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "prompt": "The meaning of life is",
+    "max_tokens": 20,
+    "return_hidden_states": true,
+    "hidden_state_layers": "all"
+  }'
+```
+
+**Response structure:**
+
+```json
+{
+  "text": "to have fun, while having fun you are having too much fun.",
+  "token_count": 20,
+  "hidden_states": {
+    "-22": { "shape": [1, 2048], "dtype": "float16", "data": [...] },
+    "-21": { "shape": [1, 2048], "dtype": "float16", "data": [...] },
+    "-20": { "shape": [1, 2048], "dtype": "float16", "data": [...] },
+    "...": "...",
+    "-2": { "shape": [1, 2048], "dtype": "float16", "data": [...] },
+    "-1": { "shape": [1, 2048], "dtype": "float16", "data": [...] }
+  },
+  "metadata": {
+    "inference_time_ms": 892.45,
+    "tokens_per_second": 22.41
+  }
+}
+```
+
+**Notes:**
+- All layer keys use negative indexing (e.g., `-22` is the first layer, `-1` is the last layer for a 22-layer model)
+- Extracting all layers increases response size and memory usage proportionally
+- For large models, consider extracting a subset of layers or using `hidden_state_format: "base64"`
+
+### Understanding D_eff (Effective Dimensionality)
+
+D_eff measures how many dimensions are actively used in a hidden state representation. It's computed from the singular value distribution of the hidden state matrix.
+
+**Formula:**
+```
+D_eff = exp(H) where H = -Σ(p_i × log(p_i))
+p_i = σ_i² / Σ(σ_j²)  (normalized squared singular values)
+```
+
+**Interpretation Guide:**
+
+| D_eff Range | Interpretation | Implications |
+|-------------|----------------|--------------|
+| **High D_eff** (near hidden_dim) | Information distributed across many dimensions | Rich, diverse representations; higher semantic capacity |
+| **Medium D_eff** (50-80% of hidden_dim) | Typical for well-trained models | Balanced compression and expressiveness |
+| **Low D_eff** (< 50% of hidden_dim) | Information concentrated in few dimensions | Possible dimensional collapse; less semantic richness |
+
+**Layer-by-Layer Patterns:**
+
+Typical transformer models exhibit characteristic D_eff patterns:
+
+1. **Early layers** (low layer index): Higher D_eff, preserving input diversity
+2. **Middle layers**: Gradual compression as abstract features form
+3. **Final layers**: Task-specific representations, D_eff depends on task
+
+**Example D_eff Values (TinyLlama 1.1B):**
+
+| Layer | D_eff | % of Hidden Dim (2048) |
+|-------|-------|------------------------|
+| -22 (first) | 842.3 | 41.1% |
+| -11 (middle) | 756.8 | 36.9% |
+| -1 (last) | 689.2 | 33.6% |
+
+### Computing D_eff from Hidden States
+
+```python
+import numpy as np
+
+def compute_deff(hidden_states: np.ndarray) -> float:
+    """
+    Compute effective dimensionality (D_eff) from hidden states.
+
+    Args:
+        hidden_states: Array of shape [batch, hidden_dim] or [hidden_dim]
+
+    Returns:
+        D_eff value (float)
+    """
+    if hidden_states.ndim == 1:
+        hidden_states = hidden_states.reshape(1, -1)
+
+    # Compute singular values
+    _, singular_values, _ = np.linalg.svd(hidden_states, full_matrices=False)
+
+    # Normalize squared singular values to get probability distribution
+    squared_sv = singular_values ** 2
+    probabilities = squared_sv / squared_sv.sum()
+
+    # Remove zeros to avoid log(0)
+    probabilities = probabilities[probabilities > 1e-10]
+
+    # Compute entropy
+    entropy = -np.sum(probabilities * np.log(probabilities))
+
+    # D_eff is the exponential of entropy
+    return float(np.exp(entropy))
+
+
+# Example: Compute D_eff for each layer
+import httpx
+
+response = httpx.post("http://localhost:8080/generate", json={
+    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "prompt": "The meaning of life is",
+    "max_tokens": 20,
+    "return_hidden_states": True,
+    "hidden_state_layers": "all"
+})
+
+result = response.json()
+
+for layer_key, layer_data in sorted(result["hidden_states"].items(), key=lambda x: int(x[0])):
+    hidden_state = np.array(layer_data["data"]).reshape(layer_data["shape"])
+    deff = compute_deff(hidden_state)
+    print(f"Layer {layer_key}: D_eff = {deff:.2f}")
+```
+
+### Research Applications
+
+**Interpretability Research:**
+- Track how specific concepts evolve through layers
+- Identify which layers are most important for particular tasks
+- Compare information flow between different model architectures
+
+**Model Comparison:**
+- Compare D_eff curves between models to assess representation quality
+- Identify architectural differences in how models process information
+- Benchmark fine-tuned vs. base models
+
+**Probing Experiments:**
+- Extract representations from specific layers for downstream classifiers
+- Study where linguistic features emerge in the network
+- Analyze attention patterns in conjunction with hidden states
+
+See `demo/` for complete examples of multi-model geometric analysis.
+
 ## Development
 
 ```bash

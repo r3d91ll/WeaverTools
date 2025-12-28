@@ -1456,6 +1456,107 @@ def create_http_app(config: Config | None = None) -> FastAPI:
             logger.exception(f"GPU configuration failed: {e}")
             raise HTTPException(status_code=500, detail=str(e)) from e
 
+    @app.get("/gpu/status", response_model=GPUStatusResponse)
+    async def gpu_status() -> GPUStatusResponse:
+        """
+        Return comprehensive GPU configuration and runtime status.
+
+        Provides detailed information about GPU availability, configuration,
+        memory usage, and currently loaded models. Useful for monitoring
+        and debugging multi-GPU setups.
+
+        Returns:
+            GPUStatusResponse: Contains:
+                - has_gpu: Whether CUDA GPUs are available
+                - available_devices: All physical GPU indices on the system
+                - allowed_devices: Currently configured allowed GPU indices
+                - default_device: Default device for model loading
+                - memory_fraction: Configured max GPU memory fraction
+                - gpu_memory: Per-GPU memory statistics (total, used, free)
+                - loaded_models: Currently loaded models and their device assignments
+
+        Example response:
+            {
+                "has_gpu": true,
+                "available_devices": [0, 1],
+                "allowed_devices": [0],
+                "default_device": "cuda:0",
+                "memory_fraction": 0.9,
+                "gpu_memory": [
+                    {
+                        "device_index": 0,
+                        "device_name": "NVIDIA RTX 4090",
+                        "total_memory_mb": 24576.0,
+                        "used_memory_mb": 8192.0,
+                        "free_memory_mb": 16384.0,
+                        "memory_utilization": 0.33
+                    }
+                ],
+                "loaded_models": [
+                    {
+                        "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                        "device": "cuda:0",
+                        "dtype": "float16",
+                        "idle_seconds": 45.2
+                    }
+                ]
+            }
+        """
+        try:
+            # Get GPU configuration from manager
+            gpu_dict = gpu_manager.to_dict()
+
+            # Build GPU memory info list
+            gpu_memory_list: list[GPUMemoryInfo] = []
+            if gpu_dict["has_gpu"]:
+                gpu_info_list = gpu_manager.get_gpu_info()
+                if not isinstance(gpu_info_list, list):
+                    gpu_info_list = [gpu_info_list]
+
+                for gpu_info in gpu_info_list:
+                    total_mb = gpu_info.total_memory_gb * 1024
+                    free_mb = gpu_info.free_memory_gb * 1024
+                    used_mb = gpu_info.used_memory_gb * 1024
+                    utilization = used_mb / total_mb if total_mb > 0 else 0.0
+
+                    gpu_memory_list.append(
+                        GPUMemoryInfo(
+                            device_index=gpu_info.index,
+                            device_name=gpu_info.name,
+                            total_memory_mb=round(total_mb, 2),
+                            used_memory_mb=round(used_mb, 2),
+                            free_memory_mb=round(free_mb, 2),
+                            memory_utilization=round(utilization, 4),
+                        )
+                    )
+
+            # Get loaded models info from model manager
+            loaded_models_list: list[LoadedModelInfo] = []
+            loaded_info = model_manager.get_loaded_info()
+            for model_info in loaded_info:
+                loaded_models_list.append(
+                    LoadedModelInfo(
+                        model_id=model_info["model_id"],
+                        device=model_info["device"],
+                        dtype=model_info["dtype"],
+                        idle_seconds=model_info["idle_seconds"],
+                    )
+                )
+
+            return GPUStatusResponse(
+                has_gpu=gpu_dict["has_gpu"],
+                available_devices=gpu_manager.available_devices,
+                allowed_devices=gpu_dict["allowed_devices"],
+                default_device=gpu_dict["default_device"],
+                memory_fraction=gpu_dict["memory_fraction"],
+                gpu_memory=gpu_memory_list,
+                loaded_models=loaded_models_list,
+            )
+
+        except Exception as e:
+            logger.exception(f"GPU status retrieval failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
     @app.post("/generate", response_model=GenerateResponse)
     async def generate(request: GenerateRequest) -> GenerateResponse:
         """

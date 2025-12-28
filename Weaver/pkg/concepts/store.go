@@ -604,3 +604,19 @@ func createInvalidHiddenStateError(conceptName, sampleID string, validationErr *
 		WithSuggestion("Check that the hidden state vector is not empty and has valid dimensions").
 		WithSuggestion("Verify the dtype is 'float32' or 'float16'")
 }
+
+// createDimensionMismatchError creates a structured error when a sample's dimension
+// doesn't match the existing concept dimension.
+func createDimensionMismatchError(conceptName, sampleID string, expectedDim, actualDim int) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsDimensionMismatch,
+		"sample dimension does not match existing concept dimension").
+		WithContext("concept", conceptName).
+		WithContext("sample_id", sampleID).
+		WithContext("expected_dimension", formatSampleCount(expectedDim)).
+		WithContext("actual_dimension", formatSampleCount(actualDim)).
+		WithContext("operation", "add").
+		WithSuggestion("All samples in a concept must have the same hidden state dimension").
+		WithSuggestion("Re-extract this sample using the same model as existing samples").
+		WithSuggestion("Use '/concepts list' to see existing concepts and their sample counts").
+		WithSuggestion("Consider creating a new concept if using a different model")
+}

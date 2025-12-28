@@ -588,3 +588,19 @@ func createEmptySampleIDError(conceptName string) *werrors.WeaverError {
 		WithSuggestion("Sample IDs must be unique within a concept to allow proper tracking").
 		WithSuggestion("Consider using a combination of timestamp and random suffix if UUID is unavailable")
 }
+
+// createInvalidHiddenStateError creates a structured error when hidden state validation fails.
+// This wraps a yarn.ValidationError to provide context and suggestions for fixing the data.
+func createInvalidHiddenStateError(conceptName, sampleID string, validationErr *yarn.ValidationError) *werrors.WeaverError {
+	return werrors.ValidationWrap(validationErr, werrors.ErrConceptsSampleInvalid,
+		"hidden state validation failed").
+		WithContext("concept", conceptName).
+		WithContext("sample_id", sampleID).
+		WithContext("validation_field", validationErr.Field).
+		WithContext("validation_error", validationErr.Message).
+		WithContext("operation", "add").
+		WithSuggestion("Re-extract the sample with valid hidden state data using '/extract'").
+		WithSuggestion("Ensure the model supports hidden state extraction").
+		WithSuggestion("Check that the hidden state vector is not empty and has valid dimensions").
+		WithSuggestion("Verify the dtype is 'float32' or 'float16'")
+}

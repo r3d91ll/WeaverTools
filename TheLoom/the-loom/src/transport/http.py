@@ -230,6 +230,19 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Force specific loader (auto-detect if None): transformers, sentence_transformers, custom",
     )
+    # Persistence options
+    persist: bool = Field(
+        default=False,
+        description="Persist this generation as an experiment. Requires persistence to be enabled.",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Custom experiment ID for persistence. Auto-generated if not provided.",
+    )
+    experiment_notes: str | None = Field(
+        default=None,
+        description="Optional notes or description for the persisted experiment.",
+    )
 
 
 class HiddenStateResponse(BaseModel):
@@ -260,6 +273,11 @@ class GenerateResponse(BaseModel):
     # Full sequence hidden states for manifold/boundary object analysis
     sequence_hidden_states: dict[str, SequenceHiddenStateResponse] | None = None
     metadata: dict[str, Any]
+    # Persistence result
+    experiment_id: str | None = Field(
+        default=None,
+        description="Experiment ID if persistence was enabled and successful.",
+    )
 
 
 class StreamingGenerateRequest(BaseModel):
@@ -1590,6 +1608,99 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                     ),
                 )
 
+            # Handle optional persistence
+            persisted_experiment_id: str | None = None
+            if request.persist:
+                if persistence is None:
+                    logger.warning(
+                        "Persistence requested but not enabled. "
+                        "Set persistence.enabled=true in config."
+                    )
+                else:
+                    try:
+                        import numpy as np
+
+                        # Build config from request parameters
+                        exp_config = {
+                            "max_tokens": request.max_tokens,
+                            "temperature": request.temperature,
+                            "top_p": request.top_p,
+                            "hidden_state_layers": (
+                                hidden_state_layers
+                                if isinstance(request.hidden_state_layers, list)
+                                else request.hidden_state_layers
+                            ),
+                            "return_hidden_states": request.return_hidden_states,
+                            "return_attention": request.return_attention,
+                            "return_full_sequence": request.return_full_sequence,
+                        }
+
+                        # Create the experiment record
+                        experiment = persistence.create_experiment(
+                            model=request.model,
+                            config=exp_config,
+                            experiment_id=request.experiment_id,
+                            status="running",
+                            notes=request.experiment_notes,
+                        )
+                        persisted_experiment_id = experiment.id
+
+                        # Persist conversation (prompt and response)
+                        persistence.persist_conversations(
+                            experiment_id=experiment.id,
+                            messages=[
+                                {"role": "user", "content": request.prompt},
+                                {"role": "assistant", "content": output.text},
+                            ],
+                        )
+
+                        # Persist hidden states if available
+                        if output.hidden_states:
+                            # Convert tensors to numpy arrays for storage
+                            hidden_states_np: dict[int, np.ndarray] = {}
+                            for layer_idx, tensor in output.hidden_states.items():
+                                if hasattr(tensor, "cpu"):
+                                    arr = tensor.cpu().detach().float().numpy()
+                                else:
+                                    arr = np.asarray(tensor, dtype=np.float32)
+                                hidden_states_np[layer_idx] = arr
+
+                            persistence.persist_hidden_states(
+                                experiment_id=experiment.id,
+                                hidden_states=hidden_states_np,
+                                metadata={
+                                    "model": request.model,
+                                    "prompt_length": len(request.prompt),
+                                    "token_count": len(output.token_ids),
+                                },
+                            )
+
+                        # Persist generation metrics
+                        persistence.persist_metrics(
+                            experiment_id=experiment.id,
+                            metrics={
+                                "latency_ms": gen_latency * 1000,
+                                "token_count": float(len(output.token_ids)),
+                                "tokens_per_second": (
+                                    len(output.token_ids) / gen_latency
+                                    if gen_latency > 0
+                                    else 0.0
+                                ),
+                            },
+                        )
+
+                        # Mark experiment as completed
+                        persistence.complete_experiment(experiment.id, status="completed")
+                        logger.info(f"Persisted generation as experiment: {experiment.id}")
+
+                    except Exception as persist_error:
+                        # Log error but don't fail the request
+                        logger.exception(
+                            f"Failed to persist generation: {persist_error}"
+                        )
+                        # Still include the experiment_id if it was created
+                        # so user knows to check for partial data
+
             return GenerateResponse(
                 text=output.text,
                 token_count=len(output.token_ids),
@@ -1597,6 +1708,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 attention_weights=attention_response,
                 sequence_hidden_states=sequence_hidden_states_response,
                 metadata=output.metadata,
+                experiment_id=persisted_experiment_id,
             )
 
         except Exception as e:

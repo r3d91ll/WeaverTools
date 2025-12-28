@@ -97,6 +97,49 @@ agents:
     active: false
 ```
 
+## Version Pinning
+
+WeaverTools follows [Semantic Versioning](https://semver.org/) with a 6-month minimum deprecation policy for all public APIs. This ensures research reproducibility - experiments can be re-run with identical dependencies months or years later.
+
+### Using WeaverTools as a Dependency
+
+To use WeaverTools modules in your Go project with version pinning:
+
+```bash
+# Add a specific version of Yarn to your project
+go get github.com/r3d91ll/yarn@v1.0.0
+```
+
+This adds the following to your `go.mod`:
+
+```go
+// go.mod - single module
+require github.com/r3d91ll/yarn v1.0.0
+
+// go.mod - multiple modules
+require (
+    github.com/r3d91ll/yarn v1.0.0   // Conversation and measurement types
+    github.com/r3d91ll/wool v1.0.0   // Agent role definitions
+    github.com/r3d91ll/weaver v1.0.0 // Orchestration utilities
+)
+```
+
+### Version Pinning Best Practices
+
+1. **For long-running experiments**: Pin to a specific patch version (e.g., `v1.0.0`)
+2. **For active development**: Use minor version constraints (e.g., `v1.0.x`)
+3. **Check compatibility**: See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for version matrix
+
+### Version Guarantees
+
+| Change Type | Version Bump | Compatibility |
+|------------|--------------|---------------|
+| Bug fixes | Patch (1.0.x) | Fully backward compatible |
+| New features | Minor (1.x.0) | Backward compatible |
+| Breaking changes | Major (x.0.0) | Migration guide provided |
+
+For detailed versioning policy and deprecation procedures, see [docs/VERSIONING.md](docs/VERSIONING.md).
+
 ## Conveyance Hypothesis
 
 This ecosystem is designed to validate the Conveyance Hypothesis - that semantic information transfer between AI agents can be measured geometrically through hidden state analysis.

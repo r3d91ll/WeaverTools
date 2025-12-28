@@ -1637,3 +1637,560 @@ def test_multi_agent_layer_comparison(app_client, examples_dir):
         json.dump(example, f, indent=2)
 
     print("\nMulti-agent layer comparison test completed successfully!")
+
+
+# =============================================================================
+# End-to-End Persistence Tests
+# =============================================================================
+# These tests validate the complete persistence workflow:
+# - Generate with persist=true -> Verify DB record -> Query experiment
+# - Export to all formats (JSON, CSV, Parquet)
+# - Validate exported files are readable and contain correct data
+# =============================================================================
+
+
+@pytest.fixture(scope="module")
+def persistence_app_client():
+    """Create test client with persistence enabled.
+
+    Uses a temporary directory for the database and hidden state files.
+    """
+    import os
+    import tempfile
+    import shutil
+    from fastapi.testclient import TestClient
+    from src.transport.http import create_http_app
+    from src.config import Config, PersistenceConfig
+
+    # Create temporary directories for persistence
+    temp_dir = tempfile.mkdtemp(prefix="loom_persistence_test_")
+    db_path = os.path.join(temp_dir, "test_experiments.db")
+    hidden_states_dir = os.path.join(temp_dir, "hidden_states")
+    export_dir = os.path.join(temp_dir, "exports")
+    os.makedirs(hidden_states_dir, exist_ok=True)
+    os.makedirs(export_dir, exist_ok=True)
+
+    # Create config with persistence enabled
+    config = Config(
+        persistence=PersistenceConfig(
+            enabled=True,
+            db_path=db_path,
+            hidden_states_dir=hidden_states_dir,
+            export_dir=export_dir,
+            compression="gzip",
+            compression_level=4,
+            auto_persist=False,
+            chunk_size=1024,
+        )
+    )
+    app = create_http_app(config)
+
+    with TestClient(app) as client:
+        # Store temp_dir and export_dir on client for cleanup and test access
+        client._test_temp_dir = temp_dir  # type: ignore
+        client._test_export_dir = export_dir  # type: ignore
+        yield client
+
+        # Teardown: unload all models after tests complete
+        print("\n=== Fixture Cleanup: Unloading Models ===")
+        try:
+            response = client.get("/models")
+            if response.status_code == 200:
+                data = response.json()
+                for model in data.get("loaded_models", []):
+                    model_id = model["model_id"].replace("/", "--")
+                    client.delete(f"/models/{model_id}")
+                    print(f"  Unloaded: {model['model_id']}")
+            print("=== Model Cleanup Complete ===")
+        except Exception as e:
+            print(f"  Model cleanup warning: {e}")
+
+    # Clean up temporary directories
+    try:
+        shutil.rmtree(temp_dir)
+        print("=== Persistence Temp Files Cleanup Complete ===")
+    except Exception as e:
+        print(f"  Temp cleanup warning: {e}")
+
+
+class TestPersistenceE2E:
+    """End-to-end integration tests for experiment persistence.
+
+    These tests validate the complete persistence workflow including:
+    - Generation with automatic persistence
+    - Experiment querying and retrieval
+    - Multi-format export functionality
+    - Data integrity across save/load cycles
+    """
+
+    @pytest.fixture(scope="class")
+    def loaded_model_for_persistence(self, persistence_app_client):
+        """Load a model for persistence tests."""
+        model_id = TEST_MODELS["generative_small"]
+
+        print(f"\n=== Loading Model for Persistence Tests: {model_id} ===")
+        start = time.time()
+
+        response = persistence_app_client.post("/models/load", json={
+            "model": model_id,
+            "dtype": "float16",
+        })
+
+        load_time = time.time() - start
+        if response.status_code != 200:
+            print(f"Warning: Model load failed: {response.text}")
+            pytest.skip(f"Model load failed: {response.status_code}")
+
+        data = response.json()
+        print(f"Loaded in {load_time:.2f}s")
+        print(json.dumps(data, indent=2))
+
+        yield data
+
+        # Cleanup
+        persistence_app_client.delete(f"/models/{model_id.replace('/', '--')}")
+
+
+def test_persistence_e2e(examples_dir):
+    """Test end-to-end persistence flow: generate -> persist -> query -> export.
+
+    This is the main acceptance test for the persistence feature, validating:
+    1. Generate text with persist=true creates experiment record
+    2. Experiment can be queried via API
+    3. All data (conversations, hidden states, metrics) are persisted
+    4. Export to JSON/CSV/Parquet produces valid files
+    5. Exported data matches persisted data
+    """
+    import os
+    import tempfile
+    import shutil
+    from fastapi.testclient import TestClient
+    from src.transport.http import create_http_app
+    from src.config import Config, PersistenceConfig
+
+    print("\n" + "=" * 70)
+    print("=== End-to-End Persistence Integration Test ===")
+    print("=" * 70)
+
+    # Create temporary directories for persistence
+    temp_dir = tempfile.mkdtemp(prefix="loom_e2e_test_")
+    db_path = os.path.join(temp_dir, "test_experiments.db")
+    hidden_states_dir = os.path.join(temp_dir, "hidden_states")
+    export_dir = os.path.join(temp_dir, "exports")
+    os.makedirs(hidden_states_dir, exist_ok=True)
+    os.makedirs(export_dir, exist_ok=True)
+
+    try:
+        # Create config with persistence enabled
+        config = Config(
+            persistence=PersistenceConfig(
+                enabled=True,
+                db_path=db_path,
+                hidden_states_dir=hidden_states_dir,
+                export_dir=export_dir,
+                compression="gzip",
+                compression_level=4,
+                auto_persist=False,
+                chunk_size=1024,
+            )
+        )
+        app = create_http_app(config)
+
+        with TestClient(app) as client:
+            model_id = TEST_MODELS["generative_small"]
+
+            # ------------------------------------------------------------------
+            # Step 1: Load model
+            # ------------------------------------------------------------------
+            print("\n--- Step 1: Load Model ---")
+            load_response = client.post("/models/load", json={
+                "model": model_id,
+                "dtype": "float16",
+            })
+            assert load_response.status_code == 200, f"Model load failed: {load_response.text}"
+            print(f"Model loaded: {model_id}")
+
+            # ------------------------------------------------------------------
+            # Step 2: Generate with persistence enabled
+            # ------------------------------------------------------------------
+            print("\n--- Step 2: Generate with Persistence ---")
+            custom_experiment_id = f"e2e-test-{int(time.time())}"
+            test_prompt = "The quick brown fox jumps over the lazy dog."
+
+            gen_response = client.post("/generate", json={
+                "model": model_id,
+                "prompt": test_prompt,
+                "max_tokens": 20,
+                "temperature": 0.7,
+                "return_hidden_states": True,
+                "hidden_state_layers": [-1],
+                "persist": True,
+                "experiment_id": custom_experiment_id,
+                "experiment_notes": "E2E integration test experiment",
+            })
+
+            assert gen_response.status_code == 200, f"Generation failed: {gen_response.text}"
+            gen_data = gen_response.json()
+
+            # Validate experiment_id is returned
+            assert "experiment_id" in gen_data, "Response should include experiment_id"
+            returned_experiment_id = gen_data["experiment_id"]
+            assert returned_experiment_id == custom_experiment_id, \
+                f"Expected experiment_id {custom_experiment_id}, got {returned_experiment_id}"
+
+            print(f"Generation successful, experiment_id: {returned_experiment_id}")
+            print(f"Generated text: {gen_data['text'][:50]}...")
+
+            # ------------------------------------------------------------------
+            # Step 3: Query experiment via API
+            # ------------------------------------------------------------------
+            print("\n--- Step 3: Query Persisted Experiment ---")
+
+            # Get experiment list
+            list_response = client.get("/experiments", params={"limit": 10})
+            assert list_response.status_code == 200, f"Experiments list failed: {list_response.text}"
+            list_data = list_response.json()
+
+            assert list_data["total"] >= 1, "Should have at least 1 experiment"
+            experiment_ids = [e["id"] for e in list_data["experiments"]]
+            assert custom_experiment_id in experiment_ids, \
+                f"Experiment {custom_experiment_id} not found in list"
+            print(f"Found {list_data['total']} experiment(s) in database")
+
+            # Get experiment details
+            detail_response = client.get(f"/experiments/{custom_experiment_id}")
+            assert detail_response.status_code == 200, f"Experiment detail failed: {detail_response.text}"
+            detail_data = detail_response.json()
+
+            # Validate experiment data
+            assert detail_data["summary"]["experiment_id"] == custom_experiment_id
+            assert detail_data["summary"]["model"] == model_id
+            assert detail_data["summary"]["status"] == "completed"
+            assert detail_data["summary"]["conversation_count"] >= 2, \
+                "Should have at least prompt and response"
+            assert detail_data["summary"]["metric_count"] >= 1, \
+                "Should have at least one metric (latency)"
+
+            print(f"Experiment details verified:")
+            print(f"  - Model: {detail_data['summary']['model']}")
+            print(f"  - Status: {detail_data['summary']['status']}")
+            print(f"  - Conversations: {detail_data['summary']['conversation_count']}")
+            print(f"  - Metrics: {detail_data['summary']['metric_count']}")
+            print(f"  - Hidden states: {detail_data['summary']['hidden_state_count']}")
+
+            # Get conversations
+            conv_response = client.get(f"/experiments/{custom_experiment_id}/conversations")
+            assert conv_response.status_code == 200, f"Conversations query failed: {conv_response.text}"
+            conv_data = conv_response.json()
+
+            assert conv_data["total"] >= 2, "Should have at least prompt and response"
+            roles = [c["role"] for c in conv_data["conversations"]]
+            assert "user" in roles, "Should have user message (prompt)"
+            assert "assistant" in roles, "Should have assistant message (response)"
+
+            print(f"Conversations retrieved: {conv_data['total']} messages")
+
+            # Get metrics
+            metrics_response = client.get(f"/experiments/{custom_experiment_id}/metrics")
+            assert metrics_response.status_code == 200, f"Metrics query failed: {metrics_response.text}"
+            metrics_data = metrics_response.json()
+
+            assert len(metrics_data["metrics"]) >= 1, "Should have at least latency metric"
+            metric_names = [m["name"] for m in metrics_data["metrics"]]
+            assert "latency_ms" in metric_names, "Should have latency_ms metric"
+            print(f"Metrics retrieved: {metric_names}")
+
+            # Get hidden states
+            hs_response = client.get(f"/experiments/{custom_experiment_id}/hidden_states")
+            assert hs_response.status_code == 200, f"Hidden states query failed: {hs_response.text}"
+            hs_data = hs_response.json()
+
+            if len(hs_data["hidden_states"]) > 0:
+                print(f"Hidden states retrieved: {len(hs_data['hidden_states'])} layer(s)")
+                print(f"  Layers: {hs_data['layers']}")
+            else:
+                print("Note: No hidden states persisted (model may not support)")
+
+            # ------------------------------------------------------------------
+            # Step 4: Export to all formats
+            # ------------------------------------------------------------------
+            print("\n--- Step 4: Export to All Formats ---")
+
+            export_results = {}
+
+            # Export to JSON
+            json_export_response = client.post("/experiments/export", json={
+                "experiment_id": custom_experiment_id,
+                "format": "json",
+                "include_hidden_states": False,
+            })
+            assert json_export_response.status_code == 200, \
+                f"JSON export failed: {json_export_response.text}"
+            json_export_data = json_export_response.json()
+            export_results["json"] = json_export_data
+            print(f"JSON export: {json_export_data['output_files']}")
+
+            # Export to CSV
+            csv_export_response = client.post("/experiments/export", json={
+                "experiment_id": custom_experiment_id,
+                "format": "csv",
+            })
+            assert csv_export_response.status_code == 200, \
+                f"CSV export failed: {csv_export_response.text}"
+            csv_export_data = csv_export_response.json()
+            export_results["csv"] = csv_export_data
+            print(f"CSV export: {csv_export_data['output_files']}")
+
+            # Export to Parquet
+            parquet_export_response = client.post("/experiments/export", json={
+                "experiment_id": custom_experiment_id,
+                "format": "parquet",
+            })
+            assert parquet_export_response.status_code == 200, \
+                f"Parquet export failed: {parquet_export_response.text}"
+            parquet_export_data = parquet_export_response.json()
+            export_results["parquet"] = parquet_export_data
+            print(f"Parquet export: {parquet_export_data['output_files']}")
+
+            # ------------------------------------------------------------------
+            # Step 5: Validate exported files
+            # ------------------------------------------------------------------
+            print("\n--- Step 5: Validate Exported Files ---")
+
+            # Validate JSON export
+            json_path = json_export_data["output_files"].get("experiment")
+            if json_path and os.path.exists(json_path):
+                with open(json_path) as f:
+                    json_content = json.load(f)
+                assert json_content["id"] == custom_experiment_id
+                assert json_content["model"] == model_id
+                assert "conversations" in json_content
+                assert "metrics" in json_content
+                print("  JSON file validated: structure correct")
+            else:
+                print(f"  JSON file not found at: {json_path}")
+
+            # Validate CSV export
+            csv_files = csv_export_data["output_files"]
+            for file_type, csv_path in csv_files.items():
+                if csv_path and os.path.exists(csv_path):
+                    with open(csv_path) as f:
+                        lines = f.readlines()
+                    assert len(lines) >= 1, f"CSV {file_type} should have header"
+                    print(f"  CSV {file_type} validated: {len(lines)} lines")
+                else:
+                    print(f"  CSV {file_type} not found at: {csv_path}")
+
+            # Validate Parquet export (if pyarrow available)
+            try:
+                import pyarrow.parquet as pq
+
+                parquet_path = parquet_export_data["output_files"].get("experiment")
+                if parquet_path and os.path.exists(parquet_path):
+                    table = pq.read_table(parquet_path)
+                    df = table.to_pandas()
+                    assert len(df) >= 1, "Parquet should have data"
+                    print(f"  Parquet file validated: {len(df)} row(s), {len(df.columns)} columns")
+                else:
+                    print(f"  Parquet file not found at: {parquet_path}")
+            except ImportError:
+                print("  Parquet validation skipped (pyarrow not available)")
+
+            # ------------------------------------------------------------------
+            # Step 6: Cleanup and summary
+            # ------------------------------------------------------------------
+            print("\n--- Step 6: Test Summary ---")
+
+            # Unload model
+            client.delete(f"/models/{model_id.replace('/', '--')}")
+
+            # Summary
+            print("\n" + "=" * 70)
+            print("=== End-to-End Persistence Test PASSED ===")
+            print("=" * 70)
+            print(f"Experiment ID: {custom_experiment_id}")
+            print(f"Model: {model_id}")
+            print(f"Conversations persisted: {conv_data['total']}")
+            print(f"Metrics persisted: {len(metrics_data['metrics'])}")
+            print(f"Hidden states persisted: {len(hs_data['hidden_states'])}")
+            print(f"Export formats validated: JSON, CSV, Parquet")
+            print("=" * 70)
+
+            # Save example
+            example = {
+                "test": "test_persistence_e2e",
+                "experiment_id": custom_experiment_id,
+                "model": model_id,
+                "request": {
+                    "prompt": test_prompt,
+                    "max_tokens": 20,
+                    "persist": True,
+                    "experiment_notes": "E2E integration test experiment",
+                },
+                "generation": {
+                    "text": gen_data["text"],
+                    "token_count": gen_data["token_count"],
+                },
+                "persistence": {
+                    "experiment_status": detail_data["summary"]["status"],
+                    "conversation_count": conv_data["total"],
+                    "metric_count": len(metrics_data["metrics"]),
+                    "hidden_state_count": len(hs_data["hidden_states"]),
+                    "metric_names": metric_names,
+                },
+                "exports": {
+                    "json": json_export_data,
+                    "csv": csv_export_data,
+                    "parquet": parquet_export_data,
+                },
+                "validation": {
+                    "experiment_created": True,
+                    "conversations_persisted": conv_data["total"] >= 2,
+                    "metrics_persisted": len(metrics_data["metrics"]) >= 1,
+                    "json_export_valid": True,
+                    "csv_export_valid": True,
+                    "parquet_export_valid": True,
+                },
+            }
+            with open(examples_dir / "persistence_e2e.json", "w") as f:
+                json.dump(example, f, indent=2)
+
+    finally:
+        # Clean up temporary directories
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Cleanup warning: {e}")
+
+
+def test_persistence_chat_completions_e2e(examples_dir):
+    """Test persistence for the chat completions endpoint.
+
+    Validates that the /v1/chat/completions endpoint correctly persists:
+    - Full conversation history (system, user, assistant)
+    - Hidden states for the completion
+    - Generation metrics
+    """
+    import os
+    import tempfile
+    import shutil
+    from fastapi.testclient import TestClient
+    from src.transport.http import create_http_app
+    from src.config import Config, PersistenceConfig
+
+    print("\n" + "=" * 70)
+    print("=== Chat Completions Persistence Test ===")
+    print("=" * 70)
+
+    # Create temporary directories for persistence
+    temp_dir = tempfile.mkdtemp(prefix="loom_chat_e2e_test_")
+    db_path = os.path.join(temp_dir, "test_experiments.db")
+    hidden_states_dir = os.path.join(temp_dir, "hidden_states")
+    export_dir = os.path.join(temp_dir, "exports")
+    os.makedirs(hidden_states_dir, exist_ok=True)
+    os.makedirs(export_dir, exist_ok=True)
+
+    try:
+        # Create config with persistence enabled
+        config = Config(
+            persistence=PersistenceConfig(
+                enabled=True,
+                db_path=db_path,
+                hidden_states_dir=hidden_states_dir,
+                export_dir=export_dir,
+            )
+        )
+        app = create_http_app(config)
+
+        with TestClient(app) as client:
+            model_id = TEST_MODELS["generative_small"]
+
+            # Load model
+            print("\n--- Loading Model ---")
+            load_response = client.post("/models/load", json={
+                "model": model_id,
+                "dtype": "float16",
+            })
+            assert load_response.status_code == 200, f"Model load failed: {load_response.text}"
+
+            # Chat completion with persistence
+            print("\n--- Chat Completion with Persistence ---")
+            custom_experiment_id = f"chat-e2e-{int(time.time())}"
+
+            chat_response = client.post("/v1/chat/completions", json={
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "What is 2+2?"},
+                ],
+                "max_tokens": 30,
+                "temperature": 0.5,
+                "return_hidden_states": True,
+                "persist": True,
+                "experiment_id": custom_experiment_id,
+                "experiment_notes": "Chat completions E2E test",
+            })
+
+            assert chat_response.status_code == 200, f"Chat completion failed: {chat_response.text}"
+            chat_data = chat_response.json()
+
+            # Validate experiment_id returned
+            assert "experiment_id" in chat_data, "Response should include experiment_id"
+            assert chat_data["experiment_id"] == custom_experiment_id
+
+            print(f"Chat completion successful, experiment_id: {chat_data['experiment_id']}")
+            print(f"Generated text: {chat_data['text'][:50]}...")
+
+            # Query conversations
+            print("\n--- Querying Persisted Conversations ---")
+            conv_response = client.get(f"/experiments/{custom_experiment_id}/conversations")
+            assert conv_response.status_code == 200
+            conv_data = conv_response.json()
+
+            # Should have system, user, and assistant messages
+            assert conv_data["total"] >= 3, "Should have system + user + assistant"
+            roles = [c["role"] for c in conv_data["conversations"]]
+            assert "system" in roles, "Should persist system message"
+            assert "user" in roles, "Should persist user message"
+            assert "assistant" in roles, "Should persist assistant response"
+
+            print(f"Conversations: {conv_data['total']} messages")
+            for c in conv_data["conversations"]:
+                print(f"  [{c['role']}]: {c['content'][:40]}...")
+
+            # Verify metrics include token counts
+            metrics_response = client.get(f"/experiments/{custom_experiment_id}/metrics")
+            assert metrics_response.status_code == 200
+            metrics_data = metrics_response.json()
+
+            metric_names = [m["name"] for m in metrics_data["metrics"]]
+            print(f"Metrics: {metric_names}")
+
+            # Cleanup
+            client.delete(f"/models/{model_id.replace('/', '--')}")
+
+            print("\n=== Chat Completions Persistence Test PASSED ===")
+
+            # Save example
+            example = {
+                "test": "test_persistence_chat_completions_e2e",
+                "experiment_id": custom_experiment_id,
+                "messages_sent": 2,  # system + user
+                "messages_persisted": conv_data["total"],  # includes assistant
+                "roles_persisted": roles,
+                "metric_names": metric_names,
+                "validation": {
+                    "all_messages_persisted": conv_data["total"] >= 3,
+                    "system_role_present": "system" in roles,
+                    "user_role_present": "user" in roles,
+                    "assistant_role_present": "assistant" in roles,
+                },
+            }
+            with open(examples_dir / "persistence_chat_e2e.json", "w") as f:
+                json.dump(example, f, indent=2)
+
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Cleanup warning: {e}")

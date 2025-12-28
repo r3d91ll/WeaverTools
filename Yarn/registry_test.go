@@ -3022,3 +3022,557 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// ============================================================================
+// Save/Load Concurrency Tests
+// ============================================================================
+
+// TestConcurrentSave verifies thread-safety of Save operations.
+func TestConcurrentSave(t *testing.T) {
+	t.Run("multiple concurrent Save calls", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numSessions = 10
+
+		// Pre-populate registry with sessions
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = registry.Register(name, session)
+		}
+
+		const numGoroutines = 20
+		var wg sync.WaitGroup
+		errors := make(chan error, numGoroutines)
+
+		// Multiple concurrent saves to different directories
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				dir := filepath.Join(t.TempDir(), fmt.Sprintf("save-%d", idx))
+				if err := registry.Save(dir); err != nil {
+					errors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		for err := range errors {
+			t.Errorf("unexpected error during concurrent save: %v", err)
+		}
+	})
+
+	t.Run("concurrent Save to same directory", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		const numSessions = 5
+
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = registry.Register(name, session)
+		}
+
+		dir := t.TempDir()
+		const numGoroutines = 10
+		var wg sync.WaitGroup
+		errors := make(chan error, numGoroutines)
+
+		// Multiple concurrent saves to the same directory
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := registry.Save(dir); err != nil {
+					errors <- err
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errors)
+
+		for err := range errors {
+			t.Errorf("unexpected error during concurrent save: %v", err)
+		}
+
+		// Verify directory contains expected files
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("failed to read directory: %v", err)
+		}
+		// Should have manifest.json + numSessions session files
+		if len(entries) != numSessions+1 {
+			t.Errorf("expected %d files, got %d", numSessions+1, len(entries))
+		}
+	})
+}
+
+// TestConcurrentLoad verifies thread-safety of Load operations.
+func TestConcurrentLoad(t *testing.T) {
+	t.Run("multiple concurrent Load calls", func(t *testing.T) {
+		// Create and save a registry to disk
+		source := NewSessionRegistry()
+		const numSessions = 10
+
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = source.Register(name, session)
+		}
+
+		dir := t.TempDir()
+		if err := source.Save(dir); err != nil {
+			t.Fatalf("failed to save source registry: %v", err)
+		}
+
+		const numGoroutines = 20
+		var wg sync.WaitGroup
+		errors := make(chan error, numGoroutines)
+		results := make(chan int, numGoroutines)
+
+		// Multiple concurrent loads from the same directory into different registries
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				registry := NewSessionRegistry()
+				if err := registry.Load(dir); err != nil {
+					errors <- err
+					return
+				}
+				results <- registry.Count()
+			}()
+		}
+
+		wg.Wait()
+		close(errors)
+		close(results)
+
+		for err := range errors {
+			t.Errorf("unexpected error during concurrent load: %v", err)
+		}
+
+		for count := range results {
+			if count != numSessions {
+				t.Errorf("expected %d sessions after load, got %d", numSessions, count)
+			}
+		}
+	})
+
+	t.Run("concurrent Load into same registry", func(t *testing.T) {
+		// Create and save a registry to disk
+		source := NewSessionRegistry()
+		const numSessions = 5
+
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = source.Register(name, session)
+		}
+
+		dir := t.TempDir()
+		if err := source.Save(dir); err != nil {
+			t.Fatalf("failed to save source registry: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		const numGoroutines = 20
+		var wg sync.WaitGroup
+		errors := make(chan error, numGoroutines)
+
+		// Multiple concurrent loads into the same registry
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := registry.Load(dir); err != nil {
+					errors <- err
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errors)
+
+		for err := range errors {
+			t.Errorf("unexpected error during concurrent load: %v", err)
+		}
+
+		// All sessions should be present after concurrent loads
+		if registry.Count() != numSessions {
+			t.Errorf("expected %d sessions, got %d", numSessions, registry.Count())
+		}
+	})
+}
+
+// TestSaveDuringModifications verifies Save works correctly when registry is being modified.
+func TestSaveDuringModifications(t *testing.T) {
+	t.Run("Save while registering sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		dir := t.TempDir()
+
+		const numRegisters = 50
+		const numSaves = 10
+		var wg sync.WaitGroup
+
+		// Register goroutines
+		for i := 0; i < numRegisters; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx)
+				session := NewSession(name, fmt.Sprintf("description %d", idx))
+				_ = registry.Register(name, session) // Ignore duplicate errors
+			}(i)
+		}
+
+		// Save goroutines
+		saveErrors := make(chan error, numSaves)
+		for i := 0; i < numSaves; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				saveDir := filepath.Join(dir, fmt.Sprintf("save-%d", idx))
+				if err := registry.Save(saveDir); err != nil {
+					saveErrors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(saveErrors)
+
+		for err := range saveErrors {
+			t.Errorf("unexpected error during concurrent save: %v", err)
+		}
+	})
+
+	t.Run("Save while unregistering sessions", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		dir := t.TempDir()
+
+		// Pre-populate registry
+		const numSessions = 50
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = registry.Register(name, session)
+		}
+
+		const numUnregisters = 25
+		const numSaves = 10
+		var wg sync.WaitGroup
+
+		// Unregister goroutines
+		for i := 0; i < numUnregisters; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx)
+				_ = registry.Unregister(name) // Ignore not-found errors
+			}(i)
+		}
+
+		// Save goroutines
+		saveErrors := make(chan error, numSaves)
+		for i := 0; i < numSaves; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				saveDir := filepath.Join(dir, fmt.Sprintf("save-%d", idx))
+				if err := registry.Save(saveDir); err != nil {
+					saveErrors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(saveErrors)
+
+		for err := range saveErrors {
+			t.Errorf("unexpected error during concurrent save/unregister: %v", err)
+		}
+	})
+
+	t.Run("Save while using GetOrCreate", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		dir := t.TempDir()
+
+		const numCreates = 50
+		const numSaves = 10
+		var wg sync.WaitGroup
+
+		// GetOrCreate goroutines
+		for i := 0; i < numCreates; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx%10) // Some will collide
+				_, _ = registry.GetOrCreate(name, fmt.Sprintf("description %d", idx))
+			}(i)
+		}
+
+		// Save goroutines
+		saveErrors := make(chan error, numSaves)
+		for i := 0; i < numSaves; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				saveDir := filepath.Join(dir, fmt.Sprintf("save-%d", idx))
+				if err := registry.Save(saveDir); err != nil {
+					saveErrors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(saveErrors)
+
+		for err := range saveErrors {
+			t.Errorf("unexpected error during concurrent save/create: %v", err)
+		}
+	})
+}
+
+// TestLoadWithConcurrentReads verifies Load works correctly with concurrent reads.
+func TestLoadWithConcurrentReads(t *testing.T) {
+	t.Run("Load with concurrent Get calls", func(t *testing.T) {
+		// Create and save source registry
+		source := NewSessionRegistry()
+		const numSessions = 10
+
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = source.Register(name, session)
+		}
+
+		dir := t.TempDir()
+		if err := source.Save(dir); err != nil {
+			t.Fatalf("failed to save source registry: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		const numLoads = 5
+		const numGets = 50
+		var wg sync.WaitGroup
+
+		// Load goroutines
+		loadErrors := make(chan error, numLoads)
+		for i := 0; i < numLoads; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := registry.Load(dir); err != nil {
+					loadErrors <- err
+				}
+			}()
+		}
+
+		// Get goroutines - accessing potentially loaded sessions
+		for i := 0; i < numGets; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				name := fmt.Sprintf("session-%d", idx%numSessions)
+				_, _ = registry.Get(name) // Result doesn't matter, testing for race
+			}(i)
+		}
+
+		wg.Wait()
+		close(loadErrors)
+
+		for err := range loadErrors {
+			t.Errorf("unexpected error during concurrent load/get: %v", err)
+		}
+	})
+
+	t.Run("Load with concurrent List calls", func(t *testing.T) {
+		// Create and save source registry
+		source := NewSessionRegistry()
+		const numSessions = 10
+
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = source.Register(name, session)
+		}
+
+		dir := t.TempDir()
+		if err := source.Save(dir); err != nil {
+			t.Fatalf("failed to save source registry: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		const numLoads = 5
+		const numLists = 50
+		var wg sync.WaitGroup
+
+		// Load goroutines
+		loadErrors := make(chan error, numLoads)
+		for i := 0; i < numLoads; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := registry.Load(dir); err != nil {
+					loadErrors <- err
+				}
+			}()
+		}
+
+		// List goroutines
+		for i := 0; i < numLists; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = registry.List() // Result doesn't matter, testing for race
+			}()
+		}
+
+		wg.Wait()
+		close(loadErrors)
+
+		for err := range loadErrors {
+			t.Errorf("unexpected error during concurrent load/list: %v", err)
+		}
+	})
+
+	t.Run("Load with concurrent Status calls", func(t *testing.T) {
+		// Create and save source registry
+		source := NewSessionRegistry()
+		const numSessions = 10
+
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = source.Register(name, session)
+		}
+
+		dir := t.TempDir()
+		if err := source.Save(dir); err != nil {
+			t.Fatalf("failed to save source registry: %v", err)
+		}
+
+		registry := NewSessionRegistry()
+		const numLoads = 5
+		const numStatus = 50
+		var wg sync.WaitGroup
+
+		// Load goroutines
+		loadErrors := make(chan error, numLoads)
+		for i := 0; i < numLoads; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := registry.Load(dir); err != nil {
+					loadErrors <- err
+				}
+			}()
+		}
+
+		// Status goroutines
+		for i := 0; i < numStatus; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = registry.Status() // Result doesn't matter, testing for race
+			}()
+		}
+
+		wg.Wait()
+		close(loadErrors)
+
+		for err := range loadErrors {
+			t.Errorf("unexpected error during concurrent load/status: %v", err)
+		}
+	})
+}
+
+// TestConcurrentSaveLoad verifies combined Save and Load operations are thread-safe.
+func TestConcurrentSaveLoad(t *testing.T) {
+	t.Run("concurrent Save and Load on different registries", func(t *testing.T) {
+		dir := t.TempDir()
+		const numSessions = 5
+
+		// Create source registry and save it
+		source := NewSessionRegistry()
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = source.Register(name, session)
+		}
+		if err := source.Save(dir); err != nil {
+			t.Fatalf("failed to save source: %v", err)
+		}
+
+		const numSaves = 10
+		const numLoads = 10
+		var wg sync.WaitGroup
+		errors := make(chan error, numSaves+numLoads)
+
+		// Save goroutines - saving source registry
+		for i := 0; i < numSaves; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := source.Save(dir); err != nil {
+					errors <- err
+				}
+			}()
+		}
+
+		// Load goroutines - loading into new registries
+		for i := 0; i < numLoads; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				registry := NewSessionRegistry()
+				if err := registry.Load(dir); err != nil {
+					errors <- err
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errors)
+
+		for err := range errors {
+			t.Errorf("unexpected error during concurrent save/load: %v", err)
+		}
+	})
+
+	t.Run("stress test Save and Load", func(t *testing.T) {
+		const numSessions = 10
+		const numGoroutines = 50
+		var wg sync.WaitGroup
+
+		// Create shared registry with sessions
+		registry := NewSessionRegistry()
+		for i := 0; i < numSessions; i++ {
+			name := fmt.Sprintf("session-%d", i)
+			session := NewSession(name, fmt.Sprintf("description %d", i))
+			_ = registry.Register(name, session)
+		}
+
+		baseDir := t.TempDir()
+
+		// Mix of saves and loads
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				dir := filepath.Join(baseDir, fmt.Sprintf("dir-%d", idx%5))
+				if idx%2 == 0 {
+					_ = registry.Save(dir) // Some will succeed, some may fail
+				} else {
+					_ = registry.Load(dir) // Some will succeed, some may fail (dir may not exist)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		// No assertions - just checking for race conditions
+	})
+}

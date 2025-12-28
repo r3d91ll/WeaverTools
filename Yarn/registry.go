@@ -16,6 +16,14 @@ import (
 // ErrEmptySessionName is returned when a session name is empty or whitespace-only.
 var ErrEmptySessionName = errors.New("session name cannot be empty")
 
+// ErrRegistrySaveFailed is returned when the registry fails to save to disk.
+// The underlying error provides additional context about the specific failure.
+var ErrRegistrySaveFailed = errors.New("registry save failed")
+
+// ErrRegistryLoadFailed is returned when the registry fails to load from disk.
+// The underlying error provides additional context about the specific failure.
+var ErrRegistryLoadFailed = errors.New("registry load failed")
+
 // SessionRegistry manages multiple research sessions with thread-safe access.
 // It provides a registry pattern for storing, retrieving, and managing sessions
 // by name. All methods are safe for concurrent use by multiple goroutines.
@@ -291,7 +299,7 @@ func (r *SessionRegistry) Save(dir string) error {
 		data, err := json.MarshalIndent(session, "", "  ")
 		if err != nil {
 			r.mu.RUnlock()
-			return fmt.Errorf("failed to marshal session %q: %w", name, err)
+			return fmt.Errorf("%w: failed to marshal session %q: %v", ErrRegistrySaveFailed, name, err)
 		}
 
 		// Create sanitized filename with collision handling
@@ -304,24 +312,24 @@ func (r *SessionRegistry) Save(dir string) error {
 
 	// Perform I/O without holding the lock
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %q: %w", dir, err)
+		return fmt.Errorf("%w: failed to create directory %q: %v", ErrRegistrySaveFailed, dir, err)
 	}
 
 	// Save the manifest first
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal manifest: %w", err)
+		return fmt.Errorf("%w: failed to marshal manifest: %v", ErrRegistrySaveFailed, err)
 	}
 	manifestPath := filepath.Join(dir, manifestFilename)
 	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
-		return fmt.Errorf("failed to write manifest to %q: %w", manifestPath, err)
+		return fmt.Errorf("%w: failed to write manifest to %q: %v", ErrRegistrySaveFailed, manifestPath, err)
 	}
 
 	// Save each session
 	for filename, data := range toSave {
 		path := filepath.Join(dir, filename+".json")
 		if err := os.WriteFile(path, data, 0644); err != nil {
-			return fmt.Errorf("failed to write session to %q: %w", path, err)
+			return fmt.Errorf("%w: failed to write session to %q: %v", ErrRegistrySaveFailed, path, err)
 		}
 	}
 
@@ -350,7 +358,7 @@ func (r *SessionRegistry) Load(dir string) error {
 		if os.IsNotExist(err) {
 			return nil // No saved sessions - this is not an error
 		}
-		return fmt.Errorf("failed to read directory %q: %w", dir, err)
+		return fmt.Errorf("%w: failed to read directory %q: %v", ErrRegistryLoadFailed, dir, err)
 	}
 
 	// Try to load the manifest for name mappings
@@ -360,11 +368,11 @@ func (r *SessionRegistry) Load(dir string) error {
 	if err == nil {
 		// Manifest exists - parse it
 		if err := json.Unmarshal(manifestData, &manifest); err != nil {
-			return fmt.Errorf("failed to parse manifest %q: %w", manifestPath, err)
+			return fmt.Errorf("%w: failed to parse manifest %q: %v", ErrRegistryLoadFailed, manifestPath, err)
 		}
 	} else if !os.IsNotExist(err) {
 		// Manifest exists but couldn't be read - that's an error
-		return fmt.Errorf("failed to read manifest %q: %w", manifestPath, err)
+		return fmt.Errorf("%w: failed to read manifest %q: %v", ErrRegistryLoadFailed, manifestPath, err)
 	}
 	// If manifest doesn't exist, manifest.Sessions will be nil (fallback to filenames)
 
@@ -390,13 +398,13 @@ func (r *SessionRegistry) Load(dir string) error {
 		path := filepath.Join(dir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("failed to read session file %q: %w", path, err)
+			return fmt.Errorf("%w: failed to read session file %q: %v", ErrRegistryLoadFailed, path, err)
 		}
 
 		// Unmarshal the session
 		var session Session
 		if err := json.Unmarshal(data, &session); err != nil {
-			return fmt.Errorf("failed to parse session file %q: %w", path, err)
+			return fmt.Errorf("%w: failed to parse session file %q: %v", ErrRegistryLoadFailed, path, err)
 		}
 
 		// Determine the registry name

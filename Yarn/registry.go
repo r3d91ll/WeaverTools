@@ -300,7 +300,10 @@ func (r *SessionRegistry) Create(name, description string) (*Session, error) {
 	defer r.mu.Unlock()
 
 	if _, exists := r.sessions[name]; exists {
-		return nil, fmt.Errorf("session %q already registered", name)
+		return nil, &SessionAlreadyRegisteredError{
+			Name:               name,
+			RegisteredSessions: r.listSessionNamesLocked(),
+		}
 	}
 
 	session := NewSession(name, description)

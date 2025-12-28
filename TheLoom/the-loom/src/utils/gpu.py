@@ -361,7 +361,10 @@ class GPUManager:
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the GPUManager state and per-GPU information into a dictionary for API responses.
-        
+
+        Thread-safe method that acquires the config lock to ensure consistent reads
+        of runtime-configurable values during concurrent configuration changes.
+
         Returns:
             result (dict[str, Any]): Dictionary containing:
                 - has_gpu (bool): Whether any GPU is allowed/available.
@@ -376,14 +379,22 @@ class GPUManager:
                     - used_memory_gb (float): Used memory in gigabytes (rounded to 2 decimals).
                     - compute_capability (str): Compute capability formatted as "major.minor".
         """
-        gpu_list = self.get_gpu_info() if self.has_gpu else []
+        # Acquire lock for consistent read of runtime-configurable values
+        with self._config_lock:
+            # Capture current configuration under lock
+            current_allowed_devices = self.allowed_devices.copy()
+            current_default_device = self.default_device
+            current_has_gpu = self.has_gpu
+
+        # GPU info collection happens outside lock (read-only hardware queries)
+        gpu_list = self.get_gpu_info() if current_has_gpu else []
         if isinstance(gpu_list, GPUInfo):
             gpu_list = [gpu_list]
 
         return {
-            "has_gpu": self.has_gpu,
-            "default_device": self.default_device,
-            "allowed_devices": self.allowed_devices,
+            "has_gpu": current_has_gpu,
+            "default_device": current_default_device,
+            "allowed_devices": current_allowed_devices,
             "memory_fraction": self.memory_fraction,
             "gpus": [
                 {

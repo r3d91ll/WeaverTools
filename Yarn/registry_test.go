@@ -1972,6 +1972,427 @@ func TestConcurrentGetWithError(t *testing.T) {
 	})
 }
 
+// ============================================================================
+// Error Type Tests
+// ============================================================================
+
+// TestSessionNotFoundError_Error verifies the Error() method output.
+func TestSessionNotFoundError_Error(t *testing.T) {
+	t.Run("basic error message format", func(t *testing.T) {
+		err := &SessionNotFoundError{
+			Name:              "my-session",
+			AvailableSessions: []string{"session-1", "session-2"},
+			Suggestions:       nil,
+		}
+
+		msg := err.Error()
+
+		// Should contain session name
+		if !strings.Contains(msg, `"my-session"`) {
+			t.Errorf("expected session name in error, got %q", msg)
+		}
+
+		// Should contain 'not found'
+		if !strings.Contains(msg, "not found") {
+			t.Errorf("expected 'not found' in error, got %q", msg)
+		}
+
+		// Should list available sessions
+		if !strings.Contains(msg, "available:") {
+			t.Errorf("expected 'available:' in error, got %q", msg)
+		}
+		if !strings.Contains(msg, "session-1") || !strings.Contains(msg, "session-2") {
+			t.Errorf("expected available sessions listed, got %q", msg)
+		}
+	})
+
+	t.Run("empty available sessions", func(t *testing.T) {
+		err := &SessionNotFoundError{
+			Name:              "nonexistent",
+			AvailableSessions: []string{},
+			Suggestions:       nil,
+		}
+
+		msg := err.Error()
+
+		// Should indicate no sessions
+		if !strings.Contains(msg, "no sessions registered") {
+			t.Errorf("expected 'no sessions registered' in error, got %q", msg)
+		}
+	})
+
+	t.Run("with suggestions", func(t *testing.T) {
+		err := &SessionNotFoundError{
+			Name:              "mysession",
+			AvailableSessions: []string{"MySession"},
+			Suggestions:       []string{`Did you mean "MySession"? (case mismatch)`},
+		}
+
+		msg := err.Error()
+
+		// Should include suggestion
+		if !strings.Contains(msg, "Did you mean") {
+			t.Errorf("expected suggestion in error, got %q", msg)
+		}
+		if !strings.Contains(msg, "case mismatch") {
+			t.Errorf("expected 'case mismatch' in suggestion, got %q", msg)
+		}
+	})
+
+	t.Run("with multiple suggestions", func(t *testing.T) {
+		err := &SessionNotFoundError{
+			Name:              "test",
+			AvailableSessions: []string{"test-alpha", "test-beta"},
+			Suggestions: []string{
+				`Did you mean "test-alpha"?`,
+				`Did you mean "test-beta"?`,
+			},
+		}
+
+		msg := err.Error()
+
+		// Should include both suggestions
+		if !strings.Contains(msg, "test-alpha") {
+			t.Errorf("expected first suggestion in error, got %q", msg)
+		}
+		if !strings.Contains(msg, "test-beta") {
+			t.Errorf("expected second suggestion in error, got %q", msg)
+		}
+	})
+
+	t.Run("nil slices handled gracefully", func(t *testing.T) {
+		err := &SessionNotFoundError{
+			Name:              "test",
+			AvailableSessions: nil,
+			Suggestions:       nil,
+		}
+
+		// Should not panic
+		msg := err.Error()
+		if msg == "" {
+			t.Error("expected non-empty error message")
+		}
+		// Should indicate no sessions
+		if !strings.Contains(msg, "no sessions registered") {
+			t.Errorf("expected 'no sessions registered' for nil available, got %q", msg)
+		}
+	})
+}
+
+// TestSessionNotFoundError_Fields verifies the error contains expected fields.
+func TestSessionNotFoundError_Fields(t *testing.T) {
+	err := &SessionNotFoundError{
+		Name:              "requested-session",
+		AvailableSessions: []string{"a", "b", "c"},
+		Suggestions:       []string{"suggestion-1", "suggestion-2"},
+	}
+
+	if err.Name != "requested-session" {
+		t.Errorf("expected Name 'requested-session', got %q", err.Name)
+	}
+
+	if len(err.AvailableSessions) != 3 {
+		t.Errorf("expected 3 available sessions, got %d", len(err.AvailableSessions))
+	}
+
+	if len(err.Suggestions) != 2 {
+		t.Errorf("expected 2 suggestions, got %d", len(err.Suggestions))
+	}
+}
+
+// TestSessionNotFoundError_ImplementsError verifies the error implements the error interface.
+func TestSessionNotFoundError_ImplementsError(t *testing.T) {
+	err := &SessionNotFoundError{
+		Name: "test",
+	}
+
+	// Compile-time check: error interface implementation
+	var _ error = err
+
+	// Runtime check: Error() returns non-empty string
+	if err.Error() == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestSessionAlreadyRegisteredError_Error verifies the Error() method output.
+func TestSessionAlreadyRegisteredError_Error(t *testing.T) {
+	t.Run("basic error message format", func(t *testing.T) {
+		err := &SessionAlreadyRegisteredError{
+			Name:               "my-session",
+			RegisteredSessions: []string{"my-session", "other-session"},
+		}
+
+		msg := err.Error()
+
+		// Should contain session name
+		if !strings.Contains(msg, `"my-session"`) {
+			t.Errorf("expected session name in error, got %q", msg)
+		}
+
+		// Should contain 'already registered'
+		if !strings.Contains(msg, "already registered") {
+			t.Errorf("expected 'already registered' in error, got %q", msg)
+		}
+
+		// Should list registered sessions
+		if !strings.Contains(msg, "registered:") {
+			t.Errorf("expected 'registered:' in error, got %q", msg)
+		}
+		if !strings.Contains(msg, "my-session") || !strings.Contains(msg, "other-session") {
+			t.Errorf("expected registered sessions listed, got %q", msg)
+		}
+	})
+
+	t.Run("contains actionable suggestions", func(t *testing.T) {
+		err := &SessionAlreadyRegisteredError{
+			Name:               "duplicate",
+			RegisteredSessions: []string{"duplicate"},
+		}
+
+		msg := err.Error()
+
+		// Should suggest choosing different name
+		if !strings.Contains(msg, "choose a different name") {
+			t.Errorf("expected 'choose a different name' suggestion, got %q", msg)
+		}
+
+		// Should suggest using Get()
+		if !strings.Contains(msg, "Get()") {
+			t.Errorf("expected 'Get()' suggestion, got %q", msg)
+		}
+
+		// Should suggest using GetOrCreate()
+		if !strings.Contains(msg, "GetOrCreate()") {
+			t.Errorf("expected 'GetOrCreate()' suggestion, got %q", msg)
+		}
+	})
+
+	t.Run("empty registered sessions", func(t *testing.T) {
+		err := &SessionAlreadyRegisteredError{
+			Name:               "session",
+			RegisteredSessions: []string{},
+		}
+
+		// Should not panic
+		msg := err.Error()
+		if msg == "" {
+			t.Error("expected non-empty error message")
+		}
+
+		// Should still contain the duplicate name
+		if !strings.Contains(msg, `"session"`) {
+			t.Errorf("expected session name in error, got %q", msg)
+		}
+	})
+
+	t.Run("nil registered sessions handled gracefully", func(t *testing.T) {
+		err := &SessionAlreadyRegisteredError{
+			Name:               "test",
+			RegisteredSessions: nil,
+		}
+
+		// Should not panic
+		msg := err.Error()
+		if msg == "" {
+			t.Error("expected non-empty error message")
+		}
+	})
+
+	t.Run("multiple registered sessions listed", func(t *testing.T) {
+		err := &SessionAlreadyRegisteredError{
+			Name:               "conflict",
+			RegisteredSessions: []string{"session-a", "session-b", "session-c"},
+		}
+
+		msg := err.Error()
+
+		// All sessions should be listed
+		for _, name := range []string{"session-a", "session-b", "session-c"} {
+			if !strings.Contains(msg, name) {
+				t.Errorf("expected %q in registered sessions, got %q", name, msg)
+			}
+		}
+	})
+}
+
+// TestSessionAlreadyRegisteredError_Fields verifies the error contains expected fields.
+func TestSessionAlreadyRegisteredError_Fields(t *testing.T) {
+	err := &SessionAlreadyRegisteredError{
+		Name:               "duplicate-name",
+		RegisteredSessions: []string{"a", "b", "duplicate-name"},
+	}
+
+	if err.Name != "duplicate-name" {
+		t.Errorf("expected Name 'duplicate-name', got %q", err.Name)
+	}
+
+	if len(err.RegisteredSessions) != 3 {
+		t.Errorf("expected 3 registered sessions, got %d", len(err.RegisteredSessions))
+	}
+}
+
+// TestSessionAlreadyRegisteredError_ImplementsError verifies the error implements the error interface.
+func TestSessionAlreadyRegisteredError_ImplementsError(t *testing.T) {
+	err := &SessionAlreadyRegisteredError{
+		Name: "test",
+	}
+
+	// Compile-time check: error interface implementation
+	var _ error = err
+
+	// Runtime check: Error() returns non-empty string
+	if err.Error() == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestErrorTypeAssertions verifies error types can be type-asserted correctly.
+func TestErrorTypeAssertions(t *testing.T) {
+	t.Run("SessionNotFoundError from GetWithError", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		_, err := registry.GetWithError("nonexistent")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		// Type assertion should succeed
+		snfErr, ok := err.(*SessionNotFoundError)
+		if !ok {
+			t.Fatalf("expected *SessionNotFoundError, got %T", err)
+		}
+
+		// Fields should be populated
+		if snfErr.Name != "nonexistent" {
+			t.Errorf("expected Name 'nonexistent', got %q", snfErr.Name)
+		}
+	})
+
+	t.Run("SessionNotFoundError from Unregister", func(t *testing.T) {
+		registry := NewSessionRegistry()
+
+		err := registry.Unregister("nonexistent")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		// Type assertion should succeed
+		snfErr, ok := err.(*SessionNotFoundError)
+		if !ok {
+			t.Fatalf("expected *SessionNotFoundError, got %T", err)
+		}
+
+		if snfErr.Name != "nonexistent" {
+			t.Errorf("expected Name 'nonexistent', got %q", snfErr.Name)
+		}
+	})
+
+	t.Run("SessionAlreadyRegisteredError from Register", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		session := NewSession("test", "d")
+		_ = registry.Register("duplicate", session)
+
+		err := registry.Register("duplicate", session)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		// Type assertion should succeed
+		sarErr, ok := err.(*SessionAlreadyRegisteredError)
+		if !ok {
+			t.Fatalf("expected *SessionAlreadyRegisteredError, got %T", err)
+		}
+
+		// Fields should be populated
+		if sarErr.Name != "duplicate" {
+			t.Errorf("expected Name 'duplicate', got %q", sarErr.Name)
+		}
+		if len(sarErr.RegisteredSessions) == 0 {
+			t.Error("expected non-empty RegisteredSessions")
+		}
+	})
+
+	t.Run("SessionAlreadyRegisteredError from Create", func(t *testing.T) {
+		registry := NewSessionRegistry()
+		_, _ = registry.Create("duplicate", "first")
+
+		_, err := registry.Create("duplicate", "second")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		// Type assertion should succeed
+		sarErr, ok := err.(*SessionAlreadyRegisteredError)
+		if !ok {
+			t.Fatalf("expected *SessionAlreadyRegisteredError, got %T", err)
+		}
+
+		if sarErr.Name != "duplicate" {
+			t.Errorf("expected Name 'duplicate', got %q", sarErr.Name)
+		}
+	})
+}
+
+// TestErrorMessageHumanReadability verifies error messages are helpful for users.
+func TestErrorMessageHumanReadability(t *testing.T) {
+	t.Run("SessionNotFoundError is helpful", func(t *testing.T) {
+		err := &SessionNotFoundError{
+			Name:              "experment", // typo
+			AvailableSessions: []string{"experiment", "test-session"},
+			Suggestions:       []string{`Did you mean "experiment"?`},
+		}
+
+		msg := err.Error()
+
+		// Should clearly indicate the problem
+		if !strings.Contains(msg, "not found") {
+			t.Error("error should indicate session not found")
+		}
+
+		// Should show what was requested
+		if !strings.Contains(msg, "experment") {
+			t.Error("error should show requested session name")
+		}
+
+		// Should show what's available
+		if !strings.Contains(msg, "experiment") {
+			t.Error("error should show available sessions")
+		}
+
+		// Should provide suggestion
+		if !strings.Contains(msg, "Did you mean") {
+			t.Error("error should include suggestion")
+		}
+	})
+
+	t.Run("SessionAlreadyRegisteredError is actionable", func(t *testing.T) {
+		err := &SessionAlreadyRegisteredError{
+			Name:               "my-session",
+			RegisteredSessions: []string{"my-session", "other"},
+		}
+
+		msg := err.Error()
+
+		// Should clearly indicate the problem
+		if !strings.Contains(msg, "already registered") {
+			t.Error("error should indicate already registered")
+		}
+
+		// Should provide actionable suggestions
+		suggestions := []string{
+			"choose a different name",
+			"Get()",
+			"GetOrCreate()",
+		}
+		for _, suggestion := range suggestions {
+			if !strings.Contains(msg, suggestion) {
+				t.Errorf("error should include suggestion %q", suggestion)
+			}
+		}
+	})
+}
+
 // TestCount verifies the Count method functionality.
 func TestCount(t *testing.T) {
 	t.Run("empty registry returns zero", func(t *testing.T) {

@@ -103,6 +103,28 @@ func (r *SessionRegistry) Get(name string) (*Session, bool) {
 	return session, ok
 }
 
+// GetWithError retrieves a session by name, returning a structured error if not found.
+// Use this when you want detailed error information for user-facing error messages.
+// The returned error includes available session names and suggestions for similar names
+// (case mismatches, substring matches) to help users identify typos.
+//
+// This method is safe for concurrent use.
+func (r *SessionRegistry) GetWithError(name string) (*Session, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	session, ok := r.sessions[name]
+	if !ok {
+		available := r.listSessionNamesLocked()
+		return nil, &SessionNotFoundError{
+			Name:              name,
+			AvailableSessions: available,
+			Suggestions:       suggestSimilarSessions(name, available),
+		}
+	}
+	return session, nil
+}
+
 // List returns the names of all registered sessions.
 // The order of names in the returned slice is not guaranteed.
 // Returns an empty slice if no sessions are registered.

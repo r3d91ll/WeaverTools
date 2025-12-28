@@ -266,7 +266,7 @@ class LoomClient:
         temperature: float = 0.7,
         top_p: float = 0.9,
         return_hidden_states: bool = True,
-        hidden_state_layers: list[int] | None = None,
+        hidden_state_layers: list[int] | str | None = None,
         hidden_state_format: str = "list",
         return_full_sequence: bool = False,
         loader: str | None = None,
@@ -615,8 +615,9 @@ class LoomClient:
         result = response.json()
 
         # Extract layer data from response
+        # Hidden states are returned directly as {"-1": {...}, "-2": {...}}, not nested
         hidden_states_data = result.get("hidden_states", {})
-        layers_data = hidden_states_data.get("layers", {})
+        layers_data = hidden_states_data  # Direct dict mapping layer keys to data
 
         # Build response structure
         response_dict: dict[str, Any] = {

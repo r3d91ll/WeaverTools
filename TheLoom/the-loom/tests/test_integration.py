@@ -944,39 +944,14 @@ array = array.reshape(layer_data['shape'])
                 json.dump(example, f, indent=2)
 
 
-class TestLayerByLayerAnalysis:
-    """Test layer-by-layer hidden state analysis with D_eff computation.
-
-    These tests validate the layer-by-layer analysis capabilities including:
-    - D_eff computation per layer
-    - All layers extraction with D_eff metrics
-    - D_eff patterns across layers (information flow analysis)
-    """
-
-    @pytest.fixture(scope="class")
-    def loaded_analysis_model(self, app_client):
-        """Load model once for all layer analysis tests."""
-        model_id = TEST_MODELS["generative_small"]
-
-        print(f"\n=== Loading Model for Layer Analysis: {model_id} ===")
-        start = time.time()
-
-        response = app_client.post("/models/load", json={
-            "model": model_id,
-            "dtype": "float16",
-        })
-
-        load_time = time.time() - start
-        assert response.status_code == 200, f"Failed to load model: {response.text}"
-
-        data = response.json()
-        print(f"Loaded in {load_time:.2f}s")
-        print(json.dumps(data, indent=2))
-
-        yield data
-
-        # Cleanup
-        app_client.delete(f"/models/{model_id.replace('/', '--')}")
+# =============================================================================
+# Layer-by-Layer Analysis Tests
+# =============================================================================
+# These tests validate layer-by-layer analysis capabilities including:
+# - D_eff computation per layer
+# - All layers extraction with D_eff metrics
+# - D_eff patterns across layers (information flow analysis)
+# =============================================================================
 
 
 def test_layer_deff_computation(app_client, examples_dir):

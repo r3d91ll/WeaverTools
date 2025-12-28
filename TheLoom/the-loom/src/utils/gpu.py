@@ -91,13 +91,57 @@ class GPUManager:
     def default_device(self) -> str:
         """
         Selects the default device used for computations.
-        
+
         Returns:
             str: `"cuda:<index>"` for the first allowed GPU, `"cpu"` if no GPUs are available.
         """
         if self.has_gpu:
             return f"cuda:{self.allowed_devices[0]}"
         return "cpu"
+
+    def set_allowed_devices(self, devices: list[int]) -> None:
+        """
+        Update the list of allowed GPU devices at runtime.
+
+        Thread-safe method to dynamically reconfigure which GPU devices are available
+        for use by the manager. All devices must exist in `available_devices`.
+
+        Parameters:
+            devices (list[int]): List of CUDA device indices to allow. Each index must
+                be present in `self.available_devices`.
+
+        Raises:
+            ValueError: If `devices` is empty when GPUs are available, or if any
+                device index is not in `available_devices`.
+
+        Example:
+            >>> gm = GPUManager()
+            >>> gm.set_allowed_devices([0, 1])  # Allow only GPUs 0 and 1
+            >>> gm.set_allowed_devices([0])     # Restrict to GPU 0 only
+        """
+        with self._config_lock:
+            # Validate that devices is not empty when GPUs are available
+            if len(self.available_devices) > 0 and len(devices) == 0:
+                raise ValueError(
+                    "Cannot set empty allowed_devices when GPUs are available. "
+                    f"Available devices: {self.available_devices}"
+                )
+
+            # Validate all requested devices exist in available_devices
+            invalid_devices = [d for d in devices if d not in self.available_devices]
+            if invalid_devices:
+                raise ValueError(
+                    f"Invalid device indices: {invalid_devices}. "
+                    f"Available devices: {self.available_devices}"
+                )
+
+            # Update allowed devices
+            old_devices = self.allowed_devices.copy()
+            self.allowed_devices = devices.copy()
+
+            logger.info(
+                f"Updated allowed_devices: {old_devices} -> {self.allowed_devices}"
+            )
 
     def get_device(self, device: str | int | None = None) -> torch.device:
         """

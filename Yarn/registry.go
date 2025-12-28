@@ -13,6 +13,47 @@ import (
 // ErrEmptySessionName is returned when a session name is empty or whitespace-only.
 var ErrEmptySessionName = errors.New("session name cannot be empty")
 
+// -----------------------------------------------------------------------------
+// Error Types
+// -----------------------------------------------------------------------------
+
+// SessionNotFoundError is returned when a session lookup fails.
+// It provides helpful context including the requested session name,
+// available sessions, and suggestions for similar names.
+// This follows the structured error pattern used by Yarn's ValidationError.
+type SessionNotFoundError struct {
+	// Name is the session name that was requested but not found.
+	Name string
+	// AvailableSessions lists all currently registered session names.
+	AvailableSessions []string
+	// Suggestions contains helpful hints like "Did you mean X?".
+	Suggestions []string
+}
+
+// Error implements the error interface.
+// It formats a helpful message that includes the session name, available sessions,
+// and suggestions for similar names when applicable.
+func (e *SessionNotFoundError) Error() string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("session %q not found", e.Name))
+
+	// Add available sessions context
+	if len(e.AvailableSessions) > 0 {
+		sb.WriteString(fmt.Sprintf("; available: [%s]", strings.Join(e.AvailableSessions, ", ")))
+	} else {
+		sb.WriteString("; no sessions registered")
+	}
+
+	// Add suggestions if any
+	for _, suggestion := range e.Suggestions {
+		sb.WriteString("; ")
+		sb.WriteString(suggestion)
+	}
+
+	return sb.String()
+}
+
 // SessionRegistry manages multiple research sessions with thread-safe access.
 // It provides a registry pattern for storing, retrieving, and managing sessions
 // by name. All methods are safe for concurrent use by multiple goroutines.

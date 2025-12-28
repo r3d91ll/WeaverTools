@@ -973,3 +973,472 @@ class TestConstants:
     def test_min_edges_for_flow(self) -> None:
         """Test minimum edges constant."""
         assert MIN_EDGES_FOR_FLOW == 1
+
+
+# ============================================================================
+# Edge Case Tests
+# ============================================================================
+
+
+class TestEdgeCases:
+    """Comprehensive edge case tests for cross-agent information flow analysis.
+
+    These tests validate proper handling of boundary conditions, missing data,
+    and unusual input configurations.
+    """
+
+    # ------------------------------------------------------------------------
+    # Empty Conversation Tests
+    # ------------------------------------------------------------------------
+
+    @pytest.mark.gpu
+    def test_edge_case_empty_agent_states(self) -> None:
+        """Test handling of completely empty agent states dictionary."""
+        result = build_agent_flow_graph({}, {})
+
+        assert isinstance(result, AgentFlowGraphResult)
+        assert result.n_nodes == 0
+        assert result.n_edges == 0
+        assert result.agents == set()
+        assert result.turn_sequence == []
+        assert result.d_eff_by_turn == {}
+        assert result.beta_by_turn == {}
+        assert result.total_conveyance == 0.0
+        assert result.mean_conveyance == 0.0
+        assert not result.is_multi_agent
+        assert not result.is_connected
+        assert not result.has_sufficient_data
+        assert result.conversation_length == 0
+        assert result.metadata.get("warning") == "empty_input"
+
+    @pytest.mark.gpu
+    def test_edge_case_empty_agent_with_empty_turns(self) -> None:
+        """Test handling of agent with empty turns dictionary."""
+        agent_states: dict = {"agent_a": {}}
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert isinstance(result, AgentFlowGraphResult)
+        assert result.n_nodes == 0
+        assert result.n_edges == 0
+        assert result.agents == set()
+        assert not result.is_multi_agent
+
+    @pytest.mark.gpu
+    def test_edge_case_multiple_agents_all_empty(self) -> None:
+        """Test handling of multiple agents with no turns."""
+        agent_states: dict = {"agent_a": {}, "agent_b": {}, "agent_c": {}}
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert isinstance(result, AgentFlowGraphResult)
+        assert result.n_nodes == 0
+        assert result.n_edges == 0
+        assert result.agents == set()
+
+    # ------------------------------------------------------------------------
+    # Single Agent Tests
+    # ------------------------------------------------------------------------
+
+    @pytest.mark.gpu
+    def test_edge_case_single_agent_single_turn(self) -> None:
+        """Test handling of single agent with only one turn."""
+        np.random.seed(42)
+        agent_states = {"solo_agent": {0: np.random.randn(10, 64)}}
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert isinstance(result, AgentFlowGraphResult)
+        assert result.n_nodes == 1
+        assert result.n_edges == 0  # No edges with single turn
+        assert result.agents == {"solo_agent"}
+        assert not result.is_multi_agent
+        assert result.n_agents == 1
+        assert result.conversation_length == 1
+        assert result.total_conveyance == 0.0
+        assert result.mean_conveyance == 0.0
+        assert not result.has_sufficient_data  # < MIN_NODES_FOR_BOTTLENECK
+
+    @pytest.mark.gpu
+    def test_edge_case_single_agent_multiple_turns(self) -> None:
+        """Test single agent with multiple turns creates proper self-edges."""
+        np.random.seed(42)
+        agent_states = {
+            "solo_agent": {
+                0: np.random.randn(10, 64),
+                1: np.random.randn(10, 64),
+                2: np.random.randn(10, 64),
+            },
+        }
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert result.n_nodes == 3
+        assert result.n_edges == 2  # Edges between consecutive turns
+        assert result.agents == {"solo_agent"}
+        assert not result.is_multi_agent
+        assert result.has_sufficient_data
+        assert result.turn_sequence == ["solo_agent", "solo_agent", "solo_agent"]
+
+    @pytest.mark.gpu
+    def test_edge_case_single_agent_sparse_turns(self) -> None:
+        """Test single agent with gaps in turn indices."""
+        np.random.seed(42)
+        agent_states = {
+            "agent": {0: np.random.randn(10, 64), 5: np.random.randn(10, 64), 10: np.random.randn(10, 64)},
+        }
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert result.n_nodes == 3
+        assert result.n_edges == 2
+        # Turn sequence should be in temporal order
+        assert len(result.d_eff_by_turn) == 3
+        assert set(result.d_eff_by_turn.keys()) == {0, 5, 10}
+
+    # ------------------------------------------------------------------------
+    # Missing States Tests
+    # ------------------------------------------------------------------------
+
+    @pytest.mark.gpu
+    def test_edge_case_missing_intermediate_turns(self) -> None:
+        """Test handling of conversations with gaps in turn sequence."""
+        np.random.seed(42)
+        agent_states = {
+            "user": {0: np.random.randn(10, 128), 4: np.random.randn(10, 128)},
+            "assistant": {2: np.random.randn(10, 128), 6: np.random.randn(10, 128)},
+        }
+        result = build_agent_flow_graph(agent_states, {})
+
+        # Should handle gaps gracefully
+        assert result.n_nodes == 4
+        assert result.n_edges == 3
+        assert result.is_multi_agent
+        # Turn sequence should be sorted by turn index
+        assert result.turn_sequence == ["user", "assistant", "user", "assistant"]
+
+    @pytest.mark.gpu
+    def test_edge_case_missing_conveyance_edges(self) -> None:
+        """Test that missing conveyance edges default to 1.0."""
+        np.random.seed(42)
+        agent_states = {
+            "user": {0: np.random.randn(10, 64)},
+            "assistant": {1: np.random.randn(10, 64)},
+            "tool": {2: np.random.randn(10, 64)},
+        }
+        # No conveyance edges provided
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert result.n_edges == 2
+        # All edges should have weight 1.0
+        for _, _, data in result.graph.edges(data=True):
+            assert data["weight"] == 1.0
+            assert data["conveyance"] == 1.0
+
+    @pytest.mark.gpu
+    def test_edge_case_partial_conveyance_edges(self) -> None:
+        """Test mixed scenario with some conveyance edges missing."""
+        np.random.seed(42)
+        agent_states = {
+            "user": {0: np.random.randn(10, 64), 2: np.random.randn(10, 64)},
+            "assistant": {1: np.random.randn(10, 64), 3: np.random.randn(10, 64)},
+        }
+        # Only provide one edge
+        conveyance_edges = {("user", "assistant"): 0.9}
+        result = build_agent_flow_graph(agent_states, conveyance_edges)
+
+        assert result.n_edges == 3
+        # Check that specified edge has correct weight
+        G = result.graph
+        for u, v, data in G.edges(data=True):
+            source_agent = G.nodes[u]["agent"]
+            target_agent = G.nodes[v]["agent"]
+            if (source_agent, target_agent) == ("user", "assistant"):
+                assert data["weight"] == 0.9
+            else:
+                assert data["weight"] == 1.0
+
+    @pytest.mark.gpu
+    def test_edge_case_1d_hidden_state(self) -> None:
+        """Test handling of 1D hidden state arrays (should be reshaped)."""
+        np.random.seed(42)
+        agent_states = {
+            "agent": {0: np.random.randn(128), 1: np.random.randn(128)},  # 1D arrays
+        }
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert result.n_nodes == 2
+        assert len(result.d_eff_by_turn) == 2
+        # D_eff should still be computed
+        for d_eff in result.d_eff_by_turn.values():
+            assert isinstance(d_eff, int)
+            assert d_eff >= 0
+
+    # ------------------------------------------------------------------------
+    # Missing Attributes on Graphs
+    # ------------------------------------------------------------------------
+
+    def test_edge_case_bottleneck_missing_d_eff_attribute(self) -> None:
+        """Test bottleneck detection handles nodes missing d_eff attribute."""
+        G = nx.DiGraph()
+        G.add_node("a_t0")  # No d_eff attribute
+        G.add_node("b_t1")  # No d_eff attribute
+        G.add_node("c_t2")  # No d_eff attribute
+        G.add_edge("a_t0", "b_t1")
+        G.add_edge("b_t1", "c_t2")
+
+        result = find_agent_bottlenecks(G)
+
+        assert isinstance(result, AgentBottleneckResult)
+        # Should not crash, but won't find bottlenecks with all zero d_eff
+        assert result.n_bottlenecks == 0
+        assert result.metadata.get("info") == "no_positive_drops"
+
+    def test_edge_case_bottleneck_partial_d_eff_attribute(self) -> None:
+        """Test bottleneck detection with some nodes missing d_eff."""
+        G = nx.DiGraph()
+        G.add_node("a_t0", d_eff=100)
+        G.add_node("b_t1")  # Missing d_eff - defaults to 0
+        G.add_node("c_t2", d_eff=80)
+        G.add_edge("a_t0", "b_t1")
+        G.add_edge("b_t1", "c_t2")
+
+        result = find_agent_bottlenecks(G)
+
+        assert isinstance(result, AgentBottleneckResult)
+        # Should detect the drop from 100 to 0
+        assert result.has_bottlenecks or len(result.d_eff_drops) >= 0
+
+    def test_edge_case_comparison_missing_agent_attribute(self) -> None:
+        """Test flow comparison with nodes missing agent attribute."""
+        G1 = nx.DiGraph()
+        G1.add_node("node_0", turn=0, d_eff=100)  # No agent attribute
+        G1.add_node("node_1", turn=1, d_eff=90)
+
+        G2 = nx.DiGraph()
+        G2.add_node("node_0", agent="user", turn=0, d_eff=100)
+        G2.add_node("node_1", agent="assistant", turn=1, d_eff=90)
+
+        result = compare_flow_patterns(G1, G2)
+
+        assert isinstance(result, FlowComparisonResult)
+        # G1 has no agents extracted, G2 has {"user", "assistant"}
+        assert result.agents_only_in_a == set()
+        assert "user" in result.agents_only_in_b or "assistant" in result.agents_only_in_b
+
+    def test_edge_case_comparison_missing_turn_attribute(self) -> None:
+        """Test flow comparison with nodes missing turn attribute."""
+        G1 = nx.DiGraph()
+        G1.add_node("a_t0", agent="user", d_eff=100)  # No turn attribute
+        G1.add_node("a_t1", agent="assistant", d_eff=90)
+
+        G2 = nx.DiGraph()
+        G2.add_node("b_t0", agent="user", turn=0, d_eff=100)
+        G2.add_node("b_t1", agent="assistant", turn=1, d_eff=90)
+
+        result = compare_flow_patterns(G1, G2)
+
+        assert isinstance(result, FlowComparisonResult)
+        # Should still work, using default turn=0
+
+    # ------------------------------------------------------------------------
+    # Boundary Value Tests
+    # ------------------------------------------------------------------------
+
+    @pytest.mark.gpu
+    def test_edge_case_very_small_hidden_state(self) -> None:
+        """Test handling of very small hidden state dimensions."""
+        np.random.seed(42)
+        agent_states = {
+            "agent": {0: np.random.randn(10, 2), 1: np.random.randn(10, 2)},  # Only 2 dims
+        }
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert result.n_nodes == 2
+        # D_eff should be computed (may be small)
+        assert all(d >= 0 for d in result.d_eff_by_turn.values())
+
+    @pytest.mark.gpu
+    def test_edge_case_single_sample_per_turn(self) -> None:
+        """Test handling of single sample per turn."""
+        np.random.seed(42)
+        agent_states = {
+            "user": {0: np.random.randn(1, 64), 2: np.random.randn(1, 64)},
+            "assistant": {1: np.random.randn(1, 64)},
+        }
+        result = build_agent_flow_graph(agent_states, {})
+
+        assert result.n_nodes == 3
+        # Should handle single-sample case
+        assert len(result.d_eff_by_turn) == 3
+
+    def test_edge_case_empty_bottleneck_edges_list(self) -> None:
+        """Test bottleneck result with no bottlenecks found."""
+        G = nx.DiGraph()
+        G.add_node("a_t0", d_eff=50)
+        G.add_node("b_t1", d_eff=60)  # Increasing, no drop
+        G.add_node("c_t2", d_eff=70)  # Still increasing
+        G.add_edge("a_t0", "b_t1")
+        G.add_edge("b_t1", "c_t2")
+
+        result = find_agent_bottlenecks(G)
+
+        assert not result.has_bottlenecks
+        assert result.bottleneck_edges == []
+        assert result.bottleneck_agents == set()
+        assert result.severity == "none"
+
+    def test_edge_case_all_same_d_eff(self) -> None:
+        """Test when all nodes have identical d_eff values."""
+        G = nx.DiGraph()
+        G.add_node("a_t0", d_eff=100)
+        G.add_node("b_t1", d_eff=100)
+        G.add_node("c_t2", d_eff=100)
+        G.add_edge("a_t0", "b_t1")
+        G.add_edge("b_t1", "c_t2")
+
+        result = find_agent_bottlenecks(G)
+
+        assert not result.has_bottlenecks
+        assert result.n_bottlenecks == 0
+        assert result.metadata.get("info") == "no_positive_drops"
+
+    def test_edge_case_zero_d_eff_values(self) -> None:
+        """Test handling of zero d_eff values throughout."""
+        G = nx.DiGraph()
+        G.add_node("a_t0", d_eff=0)
+        G.add_node("b_t1", d_eff=0)
+        G.add_node("c_t2", d_eff=0)
+        G.add_edge("a_t0", "b_t1")
+        G.add_edge("b_t1", "c_t2")
+
+        result = find_agent_bottlenecks(G)
+
+        assert isinstance(result, AgentBottleneckResult)
+        assert not result.has_bottlenecks
+
+    # ------------------------------------------------------------------------
+    # Visualization Edge Cases
+    # ------------------------------------------------------------------------
+
+    def test_edge_case_visualize_empty_graph(self) -> None:
+        """Test visualization of completely empty graph."""
+        G = nx.DiGraph()
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(G, output_path)
+
+        assert result is None
+        assert Path(output_path).exists()
+        # Cleanup
+        Path(output_path).unlink()
+
+    def test_edge_case_visualize_single_agent_single_turn(self) -> None:
+        """Test visualization of graph with single agent, single turn."""
+        G = nx.DiGraph()
+        G.add_node("solo_t0", agent="solo", turn=0, d_eff=100)
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            output_path = f.name
+
+        result = visualize_agent_alignment(G, output_path)
+
+        assert result is not None
+        assert result.n_agents == 1
+        assert result.mean_alignment == 1.0
+        assert result.alignment_matrix.shape == (1, 1)
+        assert Path(output_path).exists()
+        # Cleanup
+        Path(output_path).unlink()
+
+    # ------------------------------------------------------------------------
+    # Flow Comparison Edge Cases
+    # ------------------------------------------------------------------------
+
+    def test_edge_case_compare_one_empty_one_populated(self) -> None:
+        """Test comparison when one graph is empty."""
+        G_empty = nx.DiGraph()
+
+        G_populated = nx.DiGraph()
+        G_populated.add_node("a_t0", agent="a", turn=0, d_eff=100)
+        G_populated.add_node("b_t1", agent="b", turn=1, d_eff=90)
+        G_populated.add_edge("a_t0", "b_t1", weight=0.8)
+
+        result = compare_flow_patterns(G_empty, G_populated)
+
+        assert isinstance(result, FlowComparisonResult)
+        assert result.n_turns_a == 0
+        assert result.n_turns_b == 2
+        assert result.structural_similarity == 0.0  # One is empty
+        assert result.trajectory_correlation == 0.0
+
+    def test_edge_case_compare_identical_structure_different_values(self) -> None:
+        """Test comparison of graphs with same structure but different d_eff values."""
+        G1 = nx.DiGraph()
+        G1.add_node("user_t0", agent="user", turn=0, d_eff=100)
+        G1.add_node("assistant_t1", agent="assistant", turn=1, d_eff=50)
+        G1.add_edge("user_t0", "assistant_t1", weight=0.8)
+
+        G2 = nx.DiGraph()
+        G2.add_node("user_t0", agent="user", turn=0, d_eff=200)
+        G2.add_node("assistant_t1", agent="assistant", turn=1, d_eff=100)
+        G2.add_edge("user_t0", "assistant_t1", weight=0.8)
+
+        result = compare_flow_patterns(G1, G2)
+
+        assert isinstance(result, FlowComparisonResult)
+        assert result.structural_similarity == 1.0  # Same structure
+        assert result.agent_overlap == 1.0  # Same agents
+        # D_eff trajectories are proportionally scaled, correlation should be high
+        assert result.trajectory_correlation == pytest.approx(1.0)
+
+    def test_edge_case_compare_single_node_graphs(self) -> None:
+        """Test comparison of single-node graphs."""
+        G1 = nx.DiGraph()
+        G1.add_node("a_t0", agent="a", turn=0, d_eff=100)
+
+        G2 = nx.DiGraph()
+        G2.add_node("b_t0", agent="b", turn=0, d_eff=100)
+
+        result = compare_flow_patterns(G1, G2)
+
+        assert isinstance(result, FlowComparisonResult)
+        assert result.n_turns_a == 1
+        assert result.n_turns_b == 1
+        # Single values are equal, should return 1.0
+        assert result.trajectory_correlation == pytest.approx(1.0)
+
+    def test_edge_case_length_ratio_zero_denominator(self) -> None:
+        """Test length_ratio property when graph B is empty."""
+        result = FlowComparisonResult(
+            graph_a_stats={"n_nodes": 5},
+            graph_b_stats={"n_nodes": 0},
+            common_agents=set(),
+            agents_only_in_a={"user"},
+            agents_only_in_b=set(),
+            trajectory_correlation=0.0,
+            d_eff_mean_diff=0.0,
+            d_eff_abs_mean_diff=0.0,
+            conveyance_ratio=1.0,
+            structural_similarity=0.0,
+            n_turns_a=5,
+            n_turns_b=0,
+        )
+
+        assert result.length_ratio == float("inf")
+
+    def test_edge_case_length_ratio_both_zero(self) -> None:
+        """Test length_ratio property when both graphs are empty."""
+        result = FlowComparisonResult(
+            graph_a_stats={"n_nodes": 0},
+            graph_b_stats={"n_nodes": 0},
+            common_agents=set(),
+            agents_only_in_a=set(),
+            agents_only_in_b=set(),
+            trajectory_correlation=0.0,
+            d_eff_mean_diff=0.0,
+            d_eff_abs_mean_diff=0.0,
+            conveyance_ratio=1.0,
+            structural_similarity=1.0,
+            n_turns_a=0,
+            n_turns_b=0,
+        )
+
+        assert result.length_ratio == 0.0

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/r3d91ll/weaver/pkg/analysis"
@@ -370,6 +371,13 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 	// Create extractor and run
 	extractor := concepts.NewExtractor(extractAgent.Backend, s.conceptStore)
 	cfg := concepts.DefaultExtractionConfig(concept, count)
+
+	// Wire progress callback to update the progress bar.
+	// The callback is called at the start of each iteration with the current sample index (0-indexed).
+	// progressBar.Set() is thread-safe (uses mutex internally).
+	cfg.OnProgress = func(current, total int, elapsed time.Duration) {
+		progressBar.Set(current)
+	}
 
 	result, err := extractor.Extract(ctx, cfg)
 	if err != nil {

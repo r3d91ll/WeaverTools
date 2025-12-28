@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -198,7 +199,7 @@ func (c *Concept) Models() []string {
 	for model := range modelSet {
 		models = append(models, model)
 	}
-	sortStrings(models)
+	sort.Strings(models)
 
 	return models
 }
@@ -262,7 +263,7 @@ func (c *Concept) Stats() ConceptStats {
 			models = append(models, model)
 		}
 		// Sort for consistent ordering
-		sortStrings(models)
+		sort.Strings(models)
 		stats.Models = models
 	}
 
@@ -273,20 +274,6 @@ func (c *Concept) Stats() ConceptStats {
 	}
 
 	return stats
-}
-
-// sortStrings sorts a slice of strings in place using simple insertion sort.
-// Used for small slices where importing "sort" package is not desired.
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		key := s[i]
-		j := i - 1
-		for j >= 0 && s[j] > key {
-			s[j+1] = s[j]
-			j--
-		}
-		s[j+1] = key
-	}
 }
 
 // Store manages concepts in memory with optional persistence.
@@ -385,40 +372,32 @@ func (s *Store) Count() int {
 }
 
 // Stats returns detailed statistics for all concepts in the store.
-// It follows the lock-copy-release pattern from SessionRegistry.Status():
-// (1) RLock and copy concepts map, (2) RUnlock, (3) iterate copies to compute
-// ConceptStats for each, (4) aggregate into StoreStats.
-// This approach minimizes lock contention by releasing the lock before
-// computing statistics.
+// It holds the read lock for the entire computation to prevent data races
+// with concurrent Add() operations that modify concept samples.
 //
 // This method is safe for concurrent use.
 func (s *Store) Stats() StoreStats {
-	// Step 1: RLock and copy concepts map references
 	s.mu.RLock()
-	concepts := make(map[string]*Concept, len(s.concepts))
-	for name, c := range s.concepts {
-		concepts[name] = c
-	}
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 
-	// Step 2: Initialize aggregate stats
+	// Initialize aggregate stats
 	stats := StoreStats{
-		ConceptCount: len(concepts),
+		ConceptCount: len(s.concepts),
 		Dimensions:   make(map[int]int),
 		Models:       make(map[string]int),
 		Concepts:     make(map[string]ConceptStats),
 	}
 
 	// Handle empty store case
-	if len(concepts) == 0 {
+	if len(s.concepts) == 0 {
 		return stats
 	}
 
-	// Step 3: Iterate copies to compute stats for each concept
+	// Iterate concepts to compute stats for each
 	var oldestExtraction, newestExtraction time.Time
 	firstTime := true
 
-	for name, concept := range concepts {
+	for name, concept := range s.concepts {
 		if concept == nil {
 			continue
 		}

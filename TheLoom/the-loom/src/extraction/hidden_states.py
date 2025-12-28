@@ -56,6 +56,62 @@ class HiddenStateResult:
         )
 
 
+# Mapping of precision string names to torch dtypes
+PRECISION_DTYPE_MAP: dict[str, torch.dtype] = {
+    "fp16": torch.float16,
+    "fp32": torch.float32,
+    "bf16": torch.bfloat16,
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+}
+
+
+def extract_with_precision(
+    hidden_states_dict: dict[int, torch.Tensor],
+    precision: str = "fp32",
+) -> dict[int, torch.Tensor]:
+    """
+    Convert hidden state tensors to the specified precision.
+
+    This function enables memory-efficient storage and computation by converting
+    hidden states to lower precision formats when full precision is not required.
+
+    Parameters:
+        hidden_states_dict (dict[int, torch.Tensor]): Mapping from layer index to
+            hidden state tensors.
+        precision (str): Target precision format. Supported values:
+            - "fp32" / "float32": 32-bit floating point (default)
+            - "fp16" / "float16": 16-bit floating point
+            - "bf16" / "bfloat16": Brain floating point 16
+
+    Returns:
+        dict[int, torch.Tensor]: Mapping from layer index to tensors converted
+            to the specified precision.
+
+    Raises:
+        ValueError: If an unsupported precision format is specified.
+    """
+    if precision not in PRECISION_DTYPE_MAP:
+        valid_precisions = ", ".join(sorted(PRECISION_DTYPE_MAP.keys()))
+        raise ValueError(
+            f"Unsupported precision '{precision}'. Valid options: {valid_precisions}"
+        )
+
+    target_dtype = PRECISION_DTYPE_MAP[precision]
+    results: dict[int, torch.Tensor] = {}
+
+    for layer_idx, tensor in hidden_states_dict.items():
+        if isinstance(tensor, torch.Tensor):
+            # Convert to target precision
+            results[layer_idx] = tensor.to(dtype=target_dtype)
+        else:
+            # Convert array-like to tensor first, then to target precision
+            results[layer_idx] = torch.tensor(tensor, dtype=target_dtype)
+
+    return results
+
+
 def extract_hidden_states(
     hidden_states_dict: dict[int, torch.Tensor],
     normalize: bool = False,

@@ -162,16 +162,27 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 			return nil
 		}
 
-		// Prompt for confirmation
-		message := fmt.Sprintf("This will clear %d message(s). Are you sure?", messageCount)
-		confirmed, err := s.Prompter.Confirm(message)
-		if err != nil {
-			return fmt.Errorf("failed to get confirmation: %w", err)
+		// Check for --force or -f flag to skip confirmation
+		forceFlag := false
+		for _, arg := range parts[1:] {
+			if arg == "--force" || arg == "-f" {
+				forceFlag = true
+				break
+			}
 		}
 
-		if !confirmed {
-			fmt.Println("Operation cancelled.")
-			return nil
+		// Prompt for confirmation unless --force is specified
+		if !forceFlag {
+			message := fmt.Sprintf("This will clear %d message(s). Are you sure?", messageCount)
+			confirmed, err := s.Prompter.Confirm(message)
+			if err != nil {
+				return fmt.Errorf("failed to get confirmation: %w", err)
+			}
+
+			if !confirmed {
+				fmt.Println("Operation cancelled.")
+				return nil
+			}
 		}
 
 		s.conv = yarn.NewConversation(s.session.Name + "-conv")

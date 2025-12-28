@@ -45,6 +45,7 @@ from ..utils.metrics import (
     set_models_loaded,
 )
 from ..utils.serialization import serialize_hidden_states, tensor_to_base64, tensor_to_list
+from ..persistence import ExperimentPersistence
 
 logger = logging.getLogger(__name__)
 
@@ -944,6 +945,21 @@ def create_http_app(config: Config | None = None) -> FastAPI:
         auto_unload_minutes=config.models.auto_unload_minutes,
     )
 
+    # Initialize persistence layer if enabled
+    persistence: ExperimentPersistence | None = None
+    if config.persistence.enabled:
+        persistence = ExperimentPersistence(
+            db_path=config.persistence.db_path,
+            storage_dir=config.persistence.hidden_states_dir,
+            compression=config.persistence.compression,
+            compression_level=config.persistence.compression_level,
+            chunk_size=config.persistence.chunk_size,
+        )
+        logger.info(
+            f"Persistence enabled: db={config.persistence.db_path}, "
+            f"storage={config.persistence.hidden_states_dir}"
+        )
+
     # Background task state
     auto_unload_task: asyncio.Task[None] | None = None
 
@@ -981,6 +997,10 @@ def create_http_app(config: Config | None = None) -> FastAPI:
                 await auto_unload_task
             except asyncio.CancelledError:
                 pass
+        # Close persistence layer if enabled
+        if persistence is not None:
+            persistence.close()
+            logger.info("Persistence layer closed")
 
     app = FastAPI(
         title="The Loom",
@@ -1009,6 +1029,7 @@ def create_http_app(config: Config | None = None) -> FastAPI:
     app.state.gpu_manager = gpu_manager
     app.state.model_manager = model_manager
     app.state.registry = registry
+    app.state.persistence = persistence
 
     # ========================================================================
     # Streaming Chat Completions Helper

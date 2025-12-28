@@ -152,6 +152,48 @@ class PersistenceConfig(BaseModel):
     )
 
 
+class MemoryConfig(BaseModel):
+    """Memory optimization configuration for GPU memory management.
+
+    This configuration controls memory-efficient inference and training options
+    including precision modes, gradient checkpointing, streaming extraction,
+    and TransformerLens selective activation caching.
+    """
+
+    precision_mode: str = Field(
+        default="auto",
+        description="Precision mode for inference: auto, fp32, fp16, bf16. "
+        "Auto detects GPU capability and selects optimal precision. "
+        "BF16 requires Ampere+ GPU (compute capability 8.0+).",
+    )
+    enable_gradient_checkpointing: bool = Field(
+        default=False,
+        description="Enable gradient checkpointing for training scenarios. "
+        "Only beneficial when backward passes are performed (training). "
+        "Disabled by default for inference-only workloads.",
+    )
+    streaming_chunk_size: int = Field(
+        default=512,
+        ge=1,
+        description="Chunk size for streaming hidden state extraction. "
+        "Smaller values reduce peak memory but increase latency.",
+    )
+    memory_warning_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="GPU memory utilization threshold for proactive warnings. "
+        "Default 85% triggers warning before OOM conditions.",
+    )
+    activation_cache_filter: list[str] = Field(
+        default=[],
+        description="List of TransformerLens hook names to cache. "
+        "Empty list caches all activations (default behavior, high memory). "
+        "Example: ['blocks.0.hook_resid_post', 'blocks.0.attn.hook_pattern']. "
+        "Use selective caching to reduce memory from 2-3x overhead to <20%.",
+    )
+
+
 class Config(BaseSettings):
     """Main configuration for The Loom."""
 
@@ -162,6 +204,7 @@ class Config(BaseSettings):
     loaders: LoadersConfig = Field(default_factory=LoadersConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
     # Model-specific overrides (loader, dtype, device, etc.)
     model_overrides: dict[str, dict[str, Any]] = Field(

@@ -268,6 +268,13 @@ func (p *ProgressBar) buildOutput() string {
 		parts = append(parts, p.formatElapsed(elapsed))
 	}
 
+	// Add ETA if enabled and we have enough samples
+	if p.config.ShowETA && p.current >= p.config.MinSamplesForETA {
+		if eta := p.calculateETA(); eta > 0 {
+			parts = append(parts, p.formatETA(eta))
+		}
+	}
+
 	return strings.Join(parts, " ")
 }
 
@@ -317,6 +324,60 @@ func (p *ProgressBar) formatElapsed(d time.Duration) string {
 	minutes := int(d.Minutes())
 	seconds := int(d.Seconds()) % 60
 	return fmt.Sprintf("(%dm %ds)", minutes, seconds)
+}
+
+// calculateETA estimates the remaining time based on average time per item.
+// Uses simple division: avgTimePerItem = elapsed / current, then ETA = avgTimePerItem * remaining.
+// Returns 0 if ETA cannot be calculated (no progress or already complete).
+// Caller must hold the mutex.
+func (p *ProgressBar) calculateETA() time.Duration {
+	// Cannot calculate ETA without progress or elapsed time
+	if p.current <= 0 || p.startTime.IsZero() {
+		return 0
+	}
+
+	// No remaining work
+	remaining := p.config.Total - p.current
+	if remaining <= 0 {
+		return 0
+	}
+
+	elapsed := time.Since(p.startTime)
+
+	// Calculate average time per item and estimate remaining time
+	avgTimePerItem := elapsed / time.Duration(p.current)
+	eta := avgTimePerItem * time.Duration(remaining)
+
+	return eta
+}
+
+// formatETA formats estimated time remaining for display.
+// Short durations show as "ETA: 30s", longer as "ETA: 1m 15s", very long as "ETA: 2h 30m".
+// Caller must hold the mutex.
+func (p *ProgressBar) formatETA(d time.Duration) string {
+	if d < time.Minute {
+		// Round to nearest second for cleaner display
+		seconds := int(d.Seconds() + 0.5)
+		if seconds < 1 {
+			seconds = 1
+		}
+		return fmt.Sprintf("ETA: %ds", seconds)
+	}
+	if d < time.Hour {
+		minutes := int(d.Minutes())
+		seconds := int(d.Seconds()) % 60
+		if seconds > 0 {
+			return fmt.Sprintf("ETA: %dm %ds", minutes, seconds)
+		}
+		return fmt.Sprintf("ETA: %dm", minutes)
+	}
+	// For durations >= 1 hour
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	if minutes > 0 {
+		return fmt.Sprintf("ETA: %dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("ETA: %dh", hours)
 }
 
 // clearAndWrite clears the current line and writes new content.

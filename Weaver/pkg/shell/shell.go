@@ -31,6 +31,7 @@ type Shell struct {
 	defaultAgent   string // Default agent to route messages to
 	conceptStore   *concepts.Store
 	analysisClient *analysis.Client
+	Prompter       Prompter // Prompter for confirmation prompts (exported for testing)
 }
 
 // Config holds shell configuration.
@@ -70,6 +71,7 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		defaultAgent:   defaultAgent,
 		conceptStore:   concepts.NewStore(),
 		analysisClient: analysis.NewClient(cfg.LoomURL), // NewClient defaults to localhost:8080
+		Prompter:       NewInteractivePrompter(),        // Default to interactive prompts
 	}, nil
 }
 

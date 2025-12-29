@@ -13,7 +13,7 @@ import { AlignmentChart } from '@/components/visualizations/AlignmentChart';
 import { CPairChart } from '@/components/visualizations/CPairChart';
 import { MetricsDashboard } from '@/components/visualizations/MetricsDashboard';
 import { MetricSummaryGrid } from '@/components/visualizations/MetricSummary';
-import { computeBetaStatus, type MeasurementData, type MeasurementEvent } from '@/types';
+import type { MeasurementData, MeasurementEvent } from '@/types';
 
 /** Convert MeasurementEvent to MeasurementData for charts */
 function toMeasurementData(event: MeasurementEvent): MeasurementData {
@@ -27,123 +27,6 @@ function toMeasurementData(event: MeasurementEvent): MeasurementData {
     receiver: event.receiverName,
   };
 }
-
-/** Calculate summary statistics from measurements */
-function calculateSummary(measurements: MeasurementEvent[]): {
-  latestDeff: number | null;
-  latestBeta: number | null;
-  latestAlignment: number | null;
-  latestCpair: number | null;
-  avgDeff: number | null;
-  avgBeta: number | null;
-  avgAlignment: number | null;
-  avgCpair: number | null;
-  count: number;
-} {
-  if (measurements.length === 0) {
-    return {
-      latestDeff: null,
-      latestBeta: null,
-      latestAlignment: null,
-      latestCpair: null,
-      avgDeff: null,
-      avgBeta: null,
-      avgAlignment: null,
-      avgCpair: null,
-      count: 0,
-    };
-  }
-
-  const latest = measurements[measurements.length - 1];
-  const count = measurements.length;
-
-  const sum = measurements.reduce(
-    (acc, m) => ({
-      deff: acc.deff + m.deff,
-      beta: acc.beta + m.beta,
-      alignment: acc.alignment + m.alignment,
-      cpair: acc.cpair + m.cpair,
-    }),
-    { deff: 0, beta: 0, alignment: 0, cpair: 0 }
-  );
-
-  return {
-    latestDeff: latest.deff,
-    latestBeta: latest.beta,
-    latestAlignment: latest.alignment,
-    latestCpair: latest.cpair,
-    avgDeff: sum.deff / count,
-    avgBeta: sum.beta / count,
-    avgAlignment: sum.alignment / count,
-    avgCpair: sum.cpair / count,
-    count,
-  };
-}
-
-/** Get the status color for beta value */
-function getBetaStatusColor(beta: number | null): string {
-  if (beta === null) return 'text-gray-400';
-  const status = computeBetaStatus(beta);
-  switch (status) {
-    case 'optimal':
-      return 'text-green-600';
-    case 'monitor':
-      return 'text-yellow-600';
-    case 'concerning':
-      return 'text-orange-600';
-    case 'critical':
-      return 'text-red-600';
-    default:
-      return 'text-gray-500';
-  }
-}
-
-/**
- * MetricsSummaryCard displays a summary of a single metric.
- */
-interface MetricsSummaryCardProps {
-  title: string;
-  value: number | null;
-  avgValue: number | null;
-  count: number;
-  colorClass?: string;
-  loading?: boolean;
-  format?: (v: number) => string;
-}
-
-const MetricsSummaryCard: React.FC<MetricsSummaryCardProps> = ({
-  title,
-  value,
-  avgValue,
-  count,
-  colorClass = 'text-weaver-600',
-  loading = false,
-  format = (v) => v.toFixed(4),
-}) => {
-  if (loading) {
-    return (
-      <div className="card animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-1/2 mb-2" />
-        <div className="h-8 bg-gray-200 rounded w-1/3 mb-2" />
-        <div className="h-3 bg-gray-200 rounded w-1/4" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="card">
-      <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-      <p className={`text-2xl font-bold ${colorClass}`}>
-        {value !== null ? format(value) : '--'}
-      </p>
-      <p className="text-xs text-gray-400 mt-1">
-        {count > 0
-          ? `Avg: ${avgValue !== null ? format(avgValue) : '--'} (${count} pts)`
-          : 'No data'}
-      </p>
-    </div>
-  );
-};
 
 /**
  * ConnectionStatus shows the WebSocket connection state.
@@ -187,9 +70,6 @@ export const Metrics: React.FC = () => {
     [measurements]
   );
 
-  // Calculate summary statistics
-  const summary = useMemo(() => calculateSummary(measurements), [measurements]);
-
   // Handle session selection (for future session-specific data loading)
   const handleSessionChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedSession(e.target.value);
@@ -207,9 +87,6 @@ export const Metrics: React.FC = () => {
     // TODO: Implement session-specific metrics loading via API
     setTimeout(() => setIsLoading(false), 1000);
   }, [selectedSession]);
-
-  // Get beta status color
-  const betaColor = getBetaStatusColor(summary.latestBeta);
 
   return (
     <div className="space-y-6">

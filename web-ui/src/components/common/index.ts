@@ -94,14 +94,20 @@ export type {
 
 // Connection status components
 export {
-  ConnectionStatus,
-  ConnectionStatusBanner,
-  ConnectionIndicator,
+  ConnectionStatusDot,
+  ConnectionStatusBadge,
+  ConnectionStatusBar,
+  ConnectionStatusPanel,
+  ConnectionBanner,
+  OfflineIndicator,
 } from './ConnectionStatus';
 export type {
-  ConnectionStatusProps,
-  ConnectionStatusVariant,
-  ConnectionStatusSize,
-  ConnectionStatusBannerProps,
-  ConnectionIndicatorProps,
+  ConnectionStatusType,
+  DotSize,
+  ConnectionStatusDotProps,
+  ConnectionStatusBadgeProps,
+  ConnectionStatusBarProps,
+  ConnectionStatusPanelProps,
+  ConnectionBannerProps,
+  OfflineIndicatorProps,
 } from './ConnectionStatus';

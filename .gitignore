@@ -64,7 +64,8 @@ logs/
 *.pt
 *.pth
 *.ckpt
-models/
+# Top-level models directory (not in src/components)
+/models/
 checkpoints/
 
 # Experiments output (but not source code)

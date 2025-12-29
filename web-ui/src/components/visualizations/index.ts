@@ -31,3 +31,11 @@ export type { AlignmentChartProps } from './AlignmentChart';
 
 export { CPairChart } from './CPairChart';
 export type { CPairChartProps } from './CPairChart';
+
+// Metric summary components
+export { MetricSummary, MetricSummaryGrid } from './MetricSummary';
+export type { MetricSummaryProps, MetricSummaryGridProps, SummaryMetricType } from './MetricSummary';
+
+// Multi-metric dashboard
+export { MetricsDashboard } from './MetricsDashboard';
+export type { MetricsDashboardProps, DashboardViewMode } from './MetricsDashboard';

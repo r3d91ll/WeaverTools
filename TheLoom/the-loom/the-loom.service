@@ -1,0 +1,50 @@
+# TheLoom - Hidden State Extraction Server
+# Part of the Weaver Ecosystem
+#
+# Installation:
+#   sudo cp the-loom.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable the-loom
+#   sudo systemctl start the-loom
+#
+# View logs:
+#   journalctl -u the-loom -f
+#
+# Check status:
+#   systemctl status the-loom
+
+[Unit]
+Description=TheLoom Hidden State Extraction Server
+Documentation=https://github.com/r3d91ll/WeaverTools
+After=network.target
+
+[Service]
+Type=simple
+User=todd
+Group=todd
+
+# Working directory and command
+WorkingDirectory=/home/todd/olympus/git-repos/WeaverTools/TheLoom/the-loom
+ExecStart=/home/todd/.local/bin/poetry run loom --port 8080
+
+# Restart behavior
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Environment
+Environment=LOOM_LOGGING__LEVEL=INFO
+
+# Resource limits (adjust as needed)
+# MemoryMax=32G
+# CPUQuota=400%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

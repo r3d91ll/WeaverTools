@@ -64,13 +64,11 @@ type ClaudeCodeResponse struct {
 }
 
 // LoomResponse is the JSON representation of The Loom backend config.
+// TheLoom is expected to run as a systemd service.
 type LoomResponse struct {
-	Enabled   bool   `json:"enabled"`
-	URL       string `json:"url"`
-	Path      string `json:"path"`
-	AutoStart bool   `json:"autoStart"`
-	Port      int    `json:"port"`
-	GPUs      []int  `json:"gpus,omitempty"`
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url"`
+	Port    int    `json:"port"`
 }
 
 // AgentResponse is the JSON representation of agent configuration.
@@ -117,13 +115,11 @@ type ClaudeCodeRequest struct {
 }
 
 // LoomRequest is the JSON input for The Loom backend config.
+// TheLoom is expected to run as a systemd service.
 type LoomRequest struct {
-	Enabled   bool   `json:"enabled"`
-	URL       string `json:"url"`
-	Path      string `json:"path"`
-	AutoStart bool   `json:"autoStart"`
-	Port      int    `json:"port"`
-	GPUs      []int  `json:"gpus,omitempty"`
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url"`
+	Port    int    `json:"port"`
 }
 
 // AgentRequest is the JSON input for agent configuration.
@@ -265,12 +261,9 @@ func configToResponse(cfg *config.Config) *ConfigResponse {
 				Enabled: cfg.Backends.ClaudeCode.Enabled,
 			},
 			Loom: LoomResponse{
-				Enabled:   cfg.Backends.Loom.Enabled,
-				URL:       cfg.Backends.Loom.URL,
-				Path:      cfg.Backends.Loom.Path,
-				AutoStart: cfg.Backends.Loom.AutoStart,
-				Port:      cfg.Backends.Loom.Port,
-				GPUs:      cfg.Backends.Loom.GPUs,
+				Enabled: cfg.Backends.Loom.Enabled,
+				URL:     cfg.Backends.Loom.URL,
+				Port:    cfg.Backends.Loom.Port,
 			},
 		},
 		Agents: agents,
@@ -309,12 +302,9 @@ func requestToConfig(req *ConfigRequest) *config.Config {
 				Enabled: req.Backends.ClaudeCode.Enabled,
 			},
 			Loom: config.LoomConfig{
-				Enabled:   req.Backends.Loom.Enabled,
-				URL:       req.Backends.Loom.URL,
-				Path:      req.Backends.Loom.Path,
-				AutoStart: req.Backends.Loom.AutoStart,
-				Port:      req.Backends.Loom.Port,
-				GPUs:      req.Backends.Loom.GPUs,
+				Enabled: req.Backends.Loom.Enabled,
+				URL:     req.Backends.Loom.URL,
+				Port:    req.Backends.Loom.Port,
 			},
 		},
 		Agents: agents,

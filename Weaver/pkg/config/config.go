@@ -35,13 +35,11 @@ type ClaudeCodeConfig struct {
 }
 
 // LoomConfig holds The Loom backend settings.
+// TheLoom is expected to run as a systemd service: `systemctl start the-loom`
 type LoomConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	URL       string `yaml:"url"`
-	Path      string `yaml:"path"`       // Path to TheLoom directory (for auto-start)
-	AutoStart bool   `yaml:"auto_start"` // Start TheLoom if not running
-	Port      int    `yaml:"port"`       // Port for TheLoom server
-	GPUs      []int  `yaml:"gpus"`       // GPU device IDs to use (e.g., [0, 1]). Empty = auto-detect all
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"`  // URL of TheLoom server (e.g., "http://localhost:8080")
+	Port    int    `yaml:"port"` // Port for TheLoom server (used if URL is empty)
 }
 
 // AgentConfig holds agent settings.
@@ -100,11 +98,9 @@ func Default() *Config {
 				Enabled:   true,
 			},
 			Loom: LoomConfig{
-				Enabled:   true,
-				URL:       "http://localhost:8080",
-				Path:      "../TheLoom/the-loom",
-				AutoStart: true,
-				Port:      8080,
+				Enabled: true,
+				URL:     "http://localhost:8080",
+				Port:    8080,
 			},
 		},
 		Agents: map[string]AgentConfig{

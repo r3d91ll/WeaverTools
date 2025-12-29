@@ -9,7 +9,7 @@ from typing import Any
 import torch
 import yaml
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 # Valid precision modes for MemoryConfig
@@ -365,9 +365,10 @@ class Config(BaseSettings):
         description="Per-model configuration overrides. Keys are model IDs, values are dicts with: loader, dtype, device, etc.",
     )
 
-    class Config:
-        env_prefix = "LOOM_"
-        env_nested_delimiter = "__"
+    model_config = SettingsConfigDict(
+        env_prefix="LOOM_",
+        env_nested_delimiter="__",
+    )
 
 
 def find_config_file() -> Path | None:

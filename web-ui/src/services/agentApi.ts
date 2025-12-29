@@ -4,7 +4,10 @@
  */
 
 import { get, post, ApiError } from './api';
-import type { AgentConfig, ChatMessage, ChatResponse } from '@/types';
+import type { AgentInfo, AgentListResponse, ChatMessage, ChatResponse } from '@/types';
+
+// Re-export AgentInfo for consumers
+export type { AgentInfo } from '@/types';
 
 /** API endpoints for agent operations */
 const ENDPOINTS = {
@@ -12,18 +15,6 @@ const ENDPOINTS = {
   agent: (name: string) => `/api/agents/${encodeURIComponent(name)}`,
   chat: (name: string) => `/api/agents/${encodeURIComponent(name)}/chat`,
 } as const;
-
-/** Agent info returned from API */
-export interface AgentInfo {
-  name: string;
-  config: AgentConfig;
-  available: boolean;
-}
-
-/** Agent list response */
-interface AgentsResponse {
-  agents: AgentInfo[];
-}
 
 /** Single agent response */
 interface AgentResponse {
@@ -61,7 +52,7 @@ export interface ChatStreamEvent {
  * @throws ApiError on failure
  */
 export async function listAgents(): Promise<AgentInfo[]> {
-  const response = await get<AgentsResponse>(ENDPOINTS.agents);
+  const response = await get<AgentListResponse>(ENDPOINTS.agents);
   return response.data.agents;
 }
 
@@ -77,14 +68,14 @@ export async function getAgent(name: string): Promise<AgentInfo> {
 }
 
 /**
- * Check if an agent is available.
+ * Check if an agent is available (ready).
  * @param name - Agent name
  * @returns Promise resolving to availability status
  */
 export async function isAgentAvailable(name: string): Promise<boolean> {
   try {
     const agent = await getAgent(name);
-    return agent.available;
+    return agent.ready;
   } catch (error) {
     if (error instanceof ApiError && error.isNotFound()) {
       return false;

@@ -3,8 +3,8 @@
  * Handles backend status and model operations.
  */
 
-import { get, post, ApiError } from './api';
-import type { Capabilities, BackendType } from '@/types';
+import { get, ApiError } from './api';
+import type { BackendCapabilities, BackendTypeName } from '@/types';
 
 /** API endpoints for backend operations */
 const ENDPOINTS = {
@@ -15,9 +15,9 @@ const ENDPOINTS = {
 /** Backend status information */
 export interface BackendStatus {
   name: string;
-  type: BackendType;
+  type: BackendTypeName | string;
   available: boolean;
-  capabilities: Capabilities;
+  capabilities: BackendCapabilities;
   error?: string;
 }
 
@@ -72,10 +72,10 @@ export async function isBackendAvailable(name: string): Promise<boolean> {
 /**
  * Get capabilities of a backend.
  * @param name - Backend name
- * @returns Promise resolving to Capabilities
+ * @returns Promise resolving to BackendCapabilities
  * @throws ApiError on failure
  */
-export async function getBackendCapabilities(name: string): Promise<Capabilities> {
+export async function getBackendCapabilities(name: string): Promise<BackendCapabilities> {
   const backend = await getBackend(name);
   return backend.capabilities;
 }

@@ -15,24 +15,13 @@ const ENDPOINTS = {
 /** Config validation result */
 export interface ConfigValidationResult {
   valid: boolean;
-  errors: ConfigValidationError[];
-}
-
-/** Single validation error */
-export interface ConfigValidationError {
-  field: string;
-  message: string;
-}
-
-/** Config API response structure */
-interface ConfigResponse {
-  config: Config;
+  errors: string[];
 }
 
 /** Config validation API response structure */
 interface ValidationResponse {
   valid: boolean;
-  errors?: Array<{ field: string; message: string }>;
+  errors?: string[];
 }
 
 /**
@@ -41,8 +30,8 @@ interface ValidationResponse {
  * @throws ApiError on failure
  */
 export async function getConfig(): Promise<Config> {
-  const response = await get<ConfigResponse>(ENDPOINTS.config);
-  return response.data.config;
+  const response = await get<Config>(ENDPOINTS.config);
+  return response.data;
 }
 
 /**
@@ -52,8 +41,8 @@ export async function getConfig(): Promise<Config> {
  * @throws ApiError on failure (including validation errors)
  */
 export async function updateConfig(config: Config): Promise<Config> {
-  const response = await put<ConfigResponse>(ENDPOINTS.config, { config });
-  return response.data.config;
+  const response = await put<Config>(ENDPOINTS.config, config);
+  return response.data;
 }
 
 /**
@@ -63,7 +52,7 @@ export async function updateConfig(config: Config): Promise<Config> {
  */
 export async function validateConfig(config: Config): Promise<ConfigValidationResult> {
   try {
-    const response = await post<ValidationResponse>(ENDPOINTS.validate, { config });
+    const response = await post<ValidationResponse>(ENDPOINTS.validate, config);
     return {
       valid: response.data.valid,
       errors: response.data.errors ?? [],
@@ -74,9 +63,7 @@ export async function validateConfig(config: Config): Promise<ConfigValidationRe
       const body = error.body as ValidationResponse | undefined;
       return {
         valid: false,
-        errors: body?.errors ?? [
-          { field: 'config', message: error.message },
-        ],
+        errors: body?.errors ?? [error.message],
       };
     }
     throw error;

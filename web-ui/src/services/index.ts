@@ -33,7 +33,6 @@ export {
   getActiveAgents,
   configApi,
   type ConfigValidationResult,
-  type ConfigValidationError,
 } from './configApi';
 
 // Agent API
@@ -65,8 +64,6 @@ export {
   isSessionActive,
   getSessionDuration,
   formatDuration,
-  getConversations,
-  getLatestConversation,
   sessionApi,
   type SessionListOptions,
   type SessionSummary,
@@ -129,3 +126,16 @@ export {
   type ModelInfo,
   type ModelLoadOptions,
 } from './modelApi';
+
+// WebSocket API
+export {
+  WebSocketService,
+  getWebSocketService,
+  createWebSocketService,
+  disposeWebSocketService,
+  type ConnectionState,
+  type WebSocketEventType,
+  type WebSocketEventListener,
+  type WebSocketServiceOptions,
+  type ChatMessageData,
+} from './websocket';

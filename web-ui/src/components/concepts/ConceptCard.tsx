@@ -101,7 +101,7 @@ export const ConceptCard: React.FC<ConceptCardProps> = ({
 
   return (
     <div
-      className={`card ${isLoading ? 'opacity-75' : ''} transition-all ${className}`}
+      className={`card ${isDeleting ? 'opacity-75' : ''} transition-all ${className}`}
     >
       {/* Header with name and status */}
       <div className={`flex items-start justify-between ${compact ? 'mb-2' : 'mb-3'}`}>
@@ -112,9 +112,9 @@ export const ConceptCard: React.FC<ConceptCardProps> = ({
               {sampleCount} {sampleCount === 1 ? 'sample' : 'samples'}
             </span>
           </div>
-          {updatedAt && !compact && (
+          {concept.updatedAt && !compact && (
             <p className="text-sm text-gray-500 mt-0.5">
-              Updated {formatRelativeTime(updatedAt)}
+              Updated {formatRelativeTime(concept.updatedAt)}
             </p>
           )}
         </div>
@@ -205,29 +205,51 @@ export const ConceptCard: React.FC<ConceptCardProps> = ({
       {/* Action buttons */}
       <div className="flex items-center justify-between pt-3 border-t border-gray-100">
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          {createdAt && (
-            <span>Created {formatRelativeTime(createdAt)}</span>
+          {concept.createdAt && (
+            <span>Created {formatRelativeTime(concept.createdAt)}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          {onDelete && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={isLoading}
-              className="btn-secondary text-sm py-1.5 px-3 text-red-600 hover:text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Delete
-            </button>
-          )}
           {onViewDetails && (
             <button
               type="button"
               onClick={handleViewDetails}
-              disabled={isLoading}
-              className="btn-primary text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isDeleting}
+              className="btn-secondary text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               View Details
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="text-sm py-1.5 px-3 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isDeleting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                      fill="none"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  Deleting...
+                </span>
+              ) : (
+                'Delete'
+              )}
             </button>
           )}
         </div>

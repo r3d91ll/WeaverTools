@@ -140,3 +140,13 @@ export {
   type ChatMessageData,
   type ResourceUpdateData,
 } from './websocket';
+
+// Concept API
+export {
+  listConcepts,
+  getConcept,
+  deleteConcept,
+  getConceptStoreStats,
+  conceptExists,
+  conceptApi,
+} from './conceptApi';

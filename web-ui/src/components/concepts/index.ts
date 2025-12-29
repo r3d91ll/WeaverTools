@@ -7,7 +7,6 @@ export type { ConceptCardProps, ConceptStatusType } from './ConceptCard';
 export { ConceptList } from './ConceptList';
 export type {
   ConceptListProps,
-  ConceptStats,
   ConceptFilter,
   ConceptSortBy,
   ConceptSortOrder,

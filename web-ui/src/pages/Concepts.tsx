@@ -5,7 +5,7 @@
  * Used for validating geometric signatures in the Kakeya framework.
  */
 import { useState, useCallback } from 'react';
-import type { ConceptStats } from '@/components/concepts';
+import type { ConceptStats } from '@/types/concept';
 import { ConceptList } from '@/components/concepts';
 
 /**

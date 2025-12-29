@@ -90,6 +90,23 @@ export type {
   GPUStatus,
 } from './backend';
 
+// Concept types
+export type {
+  ConceptSample,
+  Concept,
+  ConceptStats,
+  ConceptStoreStats,
+  ConceptListResponse,
+  ConceptDetailResponse,
+  ConceptStoreStatsResponse,
+} from './concept';
+
+export {
+  formatDimension,
+  getConceptHealth,
+  formatRelativeTime,
+} from './concept';
+
 // WebSocket message types
 export type WebSocketMessageType =
   | 'measurement'

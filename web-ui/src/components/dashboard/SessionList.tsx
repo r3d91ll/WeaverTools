@@ -6,8 +6,11 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionSummary, SessionListOptions } from '@/services/sessionApi';
-import { listSessions, deleteSession, endSession } from '@/services/sessionApi';
+import { listSessions, endSession } from '@/services/sessionApi';
+import type { Session } from '@/types';
 import { SessionCard } from './SessionCard';
+import { CreateSessionModal } from './CreateSessionModal';
+import { DeleteSessionModal } from './DeleteSessionModal';
 
 /**
  * Filter type for session list.
@@ -30,7 +33,9 @@ export interface SessionListProps {
   limit?: number;
   /** Whether to show the header with filters */
   showHeader?: boolean;
-  /** Callback when a session is created */
+  /** Callback when a session is created (receives the new session) */
+  onSessionCreated?: (session: Session) => void;
+  /** Legacy callback when create button is clicked (deprecated, use onSessionCreated) */
   onCreateSession?: () => void;
   /** Callback when session list changes */
   onSessionsChange?: (sessions: SessionSummary[]) => void;
@@ -38,6 +43,8 @@ export interface SessionListProps {
   compact?: boolean;
   /** Title for the section */
   title?: string;
+  /** Whether to show the create session button */
+  showCreateButton?: boolean;
 }
 
 /**
@@ -52,10 +59,12 @@ export const SessionList: React.FC<SessionListProps> = ({
   initialFilter = 'all',
   limit = 0,
   showHeader = true,
+  onSessionCreated,
   onCreateSession,
   onSessionsChange,
   compact = false,
   title = 'Recent Sessions',
+  showCreateButton = true,
 }) => {
   // State
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -65,6 +74,11 @@ export const SessionList: React.FC<SessionListProps> = ({
   const [loadingState, setLoadingState] = useState<LoadingState>('loading');
   const [error, setError] = useState<string | null>(null);
   const [actionSessionId, setActionSessionId] = useState<string | null>(null);
+
+  // Modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<SessionSummary | null>(null);
 
   /** Build query options from current state */
   const buildQueryOptions = useCallback((): SessionListOptions => {
@@ -112,23 +126,65 @@ export const SessionList: React.FC<SessionListProps> = ({
     loadSessions();
   }, [filter, sortBy, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Handle delete session */
-  const handleDeleteSession = useCallback(async (id: string) => {
-    setLoadingState('deleting');
-    setActionSessionId(id);
-    setError(null);
-
-    try {
-      await deleteSession(id);
-      // Remove from local state
-      setSessions((prev) => prev.filter((s) => s.id !== id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete session');
-    } finally {
-      setLoadingState('idle');
-      setActionSessionId(null);
+  /** Handle delete session - opens confirmation modal */
+  const handleDeleteSession = useCallback((id: string) => {
+    const session = sessions.find((s) => s.id === id);
+    if (session) {
+      setSessionToDelete(session);
+      setShowDeleteModal(true);
     }
-  }, []);
+  }, [sessions]);
+
+  /** Handle delete confirmation from modal */
+  const handleDeleteConfirmed = useCallback((sessionId: string) => {
+    // Remove from local state
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    // Close modal
+    setShowDeleteModal(false);
+    setSessionToDelete(null);
+    // Notify parent
+    onSessionsChange?.(sessions.filter((s) => s.id !== sessionId));
+  }, [sessions, onSessionsChange]);
+
+  /** Handle create button click */
+  const handleCreateClick = useCallback(() => {
+    // If legacy callback is provided, use it
+    if (onCreateSession) {
+      onCreateSession();
+    } else {
+      // Otherwise show the create modal
+      setShowCreateModal(true);
+    }
+  }, [onCreateSession]);
+
+  /** Handle session created from modal */
+  const handleSessionCreated = useCallback((session: Session) => {
+    // Convert Session to SessionSummary for the list
+    const summary: SessionSummary = {
+      id: session.id,
+      name: session.name,
+      description: session.description,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt ?? undefined,
+      isActive: !session.endedAt,
+      stats: session.stats ?? {
+        conversationCount: 0,
+        messageCount: 0,
+        measurementCount: 0,
+        bilateralCount: 0,
+        avgDEff: 0,
+        avgBeta: 0,
+        avgAlignment: 0,
+      },
+    };
+
+    // Add to beginning of list
+    setSessions((prev) => [summary, ...prev]);
+    // Close modal
+    setShowCreateModal(false);
+    // Notify parent
+    onSessionCreated?.(session);
+  }, [onSessionCreated]);
 
   /** Handle end session */
   const handleEndSession = useCallback(async (id: string) => {
@@ -256,10 +312,10 @@ export const SessionList: React.FC<SessionListProps> = ({
             </button>
 
             {/* New Session Button */}
-            {onCreateSession && (
+            {(showCreateButton || onCreateSession || onSessionCreated) && (
               <button
                 type="button"
-                onClick={onCreateSession}
+                onClick={handleCreateClick}
                 disabled={isLoading}
                 className="btn-primary flex items-center gap-2"
               >
@@ -359,10 +415,10 @@ export const SessionList: React.FC<SessionListProps> = ({
               ? 'No active sessions. Start a new session to begin.'
               : 'No ended sessions yet.'}
           </p>
-          {onCreateSession && filter !== 'ended' && (
+          {(showCreateButton || onCreateSession || onSessionCreated) && filter !== 'ended' && (
             <button
               type="button"
-              onClick={onCreateSession}
+              onClick={handleCreateClick}
               className="mt-4 btn-primary"
             >
               Start New Session
@@ -370,6 +426,24 @@ export const SessionList: React.FC<SessionListProps> = ({
           )}
         </div>
       )}
+
+      {/* Create Session Modal */}
+      <CreateSessionModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={handleSessionCreated}
+      />
+
+      {/* Delete Session Modal */}
+      <DeleteSessionModal
+        isOpen={showDeleteModal}
+        session={sessionToDelete}
+        onClose={() => {
+          setShowDeleteModal(false);
+          setSessionToDelete(null);
+        }}
+        onDeleted={handleDeleteConfirmed}
+      />
     </div>
   );
 };

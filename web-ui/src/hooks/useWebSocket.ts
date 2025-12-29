@@ -219,6 +219,19 @@ export function useWebSocketEvent<T>(
  * }
  * ```
  */
+/**
+ * Ensures a measurement event has an ID.
+ * Generates one from turn and timestamp if not provided.
+ */
+function ensureMeasurementId(data: MeasurementEvent): MeasurementEvent {
+  if (data.id) return data;
+  return {
+    ...data,
+    id: `measurement-${data.turn}-${Date.now()}`,
+    timestamp: data.timestamp || new Date().toISOString(),
+  };
+}
+
 export function useMeasurementEvents(maxMeasurements = 100): {
   latest: MeasurementEvent | null;
   measurements: MeasurementEvent[];
@@ -230,9 +243,10 @@ export function useMeasurementEvents(maxMeasurements = 100): {
   useWebSocketEvent<MeasurementEvent>(
     'measurement',
     (data) => {
-      setLatest(data);
+      const measurement = ensureMeasurementId(data);
+      setLatest(measurement);
       setMeasurements((prev) => {
-        const next = [...prev, data];
+        const next = [...prev, measurement];
         if (next.length > maxMeasurements) {
           return next.slice(-maxMeasurements);
         }
@@ -247,9 +261,10 @@ export function useMeasurementEvents(maxMeasurements = 100): {
     'measurement_batch',
     (data) => {
       if (data.measurements.length > 0) {
-        setLatest(data.measurements[data.measurements.length - 1]);
+        const withIds = data.measurements.map(ensureMeasurementId);
+        setLatest(withIds[withIds.length - 1]);
         setMeasurements((prev) => {
-          const next = [...prev, ...data.measurements];
+          const next = [...prev, ...withIds];
           if (next.length > maxMeasurements) {
             return next.slice(-maxMeasurements);
           }

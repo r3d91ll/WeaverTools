@@ -15,16 +15,22 @@ import { MetricsDashboard } from '@/components/visualizations/MetricsDashboard';
 import { MetricSummaryGrid } from '@/components/visualizations/MetricSummary';
 import type { MeasurementData, MeasurementEvent } from '@/types';
 
-/** Convert MeasurementEvent to MeasurementData for charts */
+/**
+ * Convert MeasurementEvent to MeasurementData for charts.
+ * Handles both rich MeasurementEvent (with senderName/receiverName)
+ * and simple MeasurementData (with sender/receiver) formats.
+ */
 function toMeasurementData(event: MeasurementEvent): MeasurementData {
+  // Handle both rich (senderName) and simple (sender) formats
+  const rawEvent = event as MeasurementEvent & { sender?: string; receiver?: string };
   return {
     turn: event.turn,
     deff: event.deff,
     beta: event.beta,
     alignment: event.alignment,
     cpair: event.cpair,
-    sender: event.senderName,
-    receiver: event.receiverName,
+    sender: event.senderName ?? rawEvent.sender,
+    receiver: event.receiverName ?? rawEvent.receiver,
   };
 }
 

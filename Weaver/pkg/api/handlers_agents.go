@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/r3d91ll/weaver/pkg/runtime"
+	"github.com/r3d91ll/wool"
 	"github.com/r3d91ll/yarn"
 )
 
@@ -340,9 +341,13 @@ func (m *MockAgentManager) Status(ctx context.Context) map[string]runtime.AgentS
 
 	result := make(map[string]runtime.AgentStatus)
 	for name, agent := range m.agents {
+		role := agent.role
+		if role == "" {
+			role = "junior" // Default to junior if not set
+		}
 		result[name] = runtime.AgentStatus{
 			Name:         name,
-			Role:         "junior", // Use a valid wool.Role string representation
+			Role:         wool.Role(role),
 			Backend:      agent.backend,
 			Model:        agent.model,
 			Ready:        agent.ready,

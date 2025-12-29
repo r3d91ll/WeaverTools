@@ -8,6 +8,7 @@ import { Metrics } from './pages/Metrics';
 import { Models } from './pages/Models';
 import { Concepts } from './pages/Concepts';
 import { Export } from './pages/Export';
+import { Resources } from './pages/Resources';
 
 /**
  * Main application component with routing.
@@ -34,6 +35,7 @@ function App() {
           <Route path="/models" element={<Models />} />
           <Route path="/concepts" element={<Concepts />} />
           <Route path="/export" element={<Export />} />
+          <Route path="/resources" element={<Resources />} />
         </Routes>
       </Layout>
     </BrowserRouter>

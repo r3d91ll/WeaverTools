@@ -2,9 +2,18 @@
  * ChatInput component - message input field with @agent targeting support.
  *
  * Parses @agent syntax from messages and provides autocomplete suggestions.
+ * Uses messageParser utility for consistent parsing following Weaver/pkg/shell/shell.go patterns.
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { AgentInfo } from '@/types';
+import {
+  parseMessage,
+  getAutocompleteContext,
+  suggestAgents,
+  isValidAgentName,
+  type ParsedMessage,
+  type AutocompleteContext,
+} from '@/utils/messageParser';
 
 /**
  * ChatInput component props.
@@ -16,6 +25,8 @@ export interface ChatInputProps {
   onChange: (value: string) => void;
   /** Callback when message is submitted */
   onSubmit: (message: string, targetAgent: string | null) => void;
+  /** Callback when message is submitted with full parsed info */
+  onSubmitParsed?: (parsed: ParsedMessage) => void;
   /** Currently selected agent (from selector) */
   selectedAgent: string | null;
   /** Available agents for autocomplete */
@@ -31,36 +42,13 @@ export interface ChatInputProps {
 }
 
 /**
- * Parse @agent mention from start of message.
- */
-function parseAgentMention(message: string): { agent: string | null; content: string } {
-  const match = message.match(/^@(\w+)\s+(.*)$/s);
-  if (match) {
-    return { agent: match[1], content: match[2].trim() };
-  }
-  return { agent: null, content: message };
-}
-
-/**
- * Check if cursor is in @mention position.
- */
-function getAtMentionPrefix(value: string, cursorPosition: number): string | null {
-  // Look backwards from cursor for @ symbol
-  const textBeforeCursor = value.slice(0, cursorPosition);
-  const match = textBeforeCursor.match(/@(\w*)$/);
-  if (match) {
-    return match[1];
-  }
-  return null;
-}
-
-/**
  * ChatInput component for entering chat messages.
  */
 export const ChatInput: React.FC<ChatInputProps> = ({
   value,
   onChange,
   onSubmit,
+  onSubmitParsed,
   selectedAgent,
   agents = [],
   placeholder = 'Type your message... (use @agent to target)',
@@ -69,27 +57,35 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onStopStreaming,
 }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestionFilter, setSuggestionFilter] = useState('');
+  const [autocompleteCtx, setAutocompleteCtx] = useState<AutocompleteContext | null>(null);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Filter agents based on current mention prefix
-  const filteredAgents = agents.filter((agent) =>
-    agent.name.toLowerCase().startsWith(suggestionFilter.toLowerCase())
-  );
+  // Get available agent names for autocomplete
+  const agentNames = agents.filter((a) => a.ready).map((a) => a.name);
 
-  // Handle input change
+  // Get filtered agent suggestions using messageParser utility
+  const filteredAgentNames = autocompleteCtx
+    ? suggestAgents(autocompleteCtx.partial, agentNames, 8)
+    : [];
+
+  // Map back to agent info objects for display
+  const filteredAgents = filteredAgentNames
+    .map((name) => agents.find((a) => a.name === name))
+    .filter((a): a is AgentInfo => a !== undefined);
+
+  // Handle input change - uses messageParser for autocomplete context
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newValue = e.target.value;
       onChange(newValue);
 
-      // Check for @mention
+      // Check for @mention using messageParser utility
       const cursorPosition = e.target.selectionStart ?? 0;
-      const mentionPrefix = getAtMentionPrefix(newValue, cursorPosition);
+      const ctx = getAutocompleteContext(newValue, cursorPosition);
 
-      if (mentionPrefix !== null) {
-        setSuggestionFilter(mentionPrefix);
+      setAutocompleteCtx(ctx);
+      if (ctx !== null) {
         setShowSuggestions(true);
         setSelectedSuggestionIndex(0);
       } else {
@@ -99,35 +95,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     [onChange]
   );
 
-  // Handle suggestion selection
+  // Handle suggestion selection - uses autocomplete context for proper insertion
   const selectSuggestion = useCallback(
     (agentName: string) => {
-      if (!inputRef.current) return;
+      if (!inputRef.current || !autocompleteCtx) return;
 
+      // Validate agent name before inserting
+      if (!isValidAgentName(agentName)) return;
+
+      const { startPosition } = autocompleteCtx;
       const cursorPosition = inputRef.current.selectionStart ?? 0;
-      const textBeforeCursor = value.slice(0, cursorPosition);
+      const textBeforeMention = value.slice(0, startPosition);
       const textAfterCursor = value.slice(cursorPosition);
 
-      // Find the @ symbol position
-      const atIndex = textBeforeCursor.lastIndexOf('@');
-      if (atIndex >= 0) {
-        const newValue =
-          textBeforeCursor.slice(0, atIndex) + `@${agentName} ` + textAfterCursor;
-        onChange(newValue);
+      // Build new value with the complete agent mention
+      const newValue = `${textBeforeMention}@${agentName} ${textAfterCursor}`;
+      onChange(newValue);
 
-        // Move cursor after the inserted mention
-        setTimeout(() => {
-          if (inputRef.current) {
-            const newPosition = atIndex + agentName.length + 2;
-            inputRef.current.setSelectionRange(newPosition, newPosition);
-            inputRef.current.focus();
-          }
-        }, 0);
-      }
+      // Move cursor after the inserted mention
+      setTimeout(() => {
+        if (inputRef.current) {
+          const newPosition = startPosition + agentName.length + 2; // @ + name + space
+          inputRef.current.setSelectionRange(newPosition, newPosition);
+          inputRef.current.focus();
+        }
+      }, 0);
 
       setShowSuggestions(false);
+      setAutocompleteCtx(null);
     },
-    [value, onChange]
+    [value, onChange, autocompleteCtx]
   );
 
   // Handle keyboard navigation in suggestions
@@ -169,20 +166,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     [showSuggestions, filteredAgents, selectedSuggestionIndex, selectSuggestion]
   );
 
-  // Handle form submission
+  // Handle form submission - uses parseMessage for consistent parsing
   const handleSubmit = useCallback(() => {
     const trimmedValue = value.trim();
     if (!trimmedValue || disabled || isStreaming) return;
 
-    // Parse @agent mention from message
-    const { agent: mentionedAgent, content } = parseAgentMention(trimmedValue);
+    // Parse message using messageParser utility (follows shell.go patterns)
+    const parsed = parseMessage(trimmedValue);
+
+    // Ignore command messages (starting with /)
+    if (parsed.isCommand) {
+      // Commands should be handled separately in the future
+      return;
+    }
 
     // Determine target agent: mentioned > selected > null
-    const targetAgent = mentionedAgent || selectedAgent;
+    const targetAgent = parsed.targetAgent || selectedAgent;
 
-    // Submit the clean message content
-    onSubmit(mentionedAgent ? content : trimmedValue, targetAgent);
-  }, [value, disabled, isStreaming, selectedAgent, onSubmit]);
+    // If full parsed info is needed, call the new callback
+    if (onSubmitParsed) {
+      // Enrich parsed message with fallback agent
+      const enrichedParsed: ParsedMessage = {
+        ...parsed,
+        targetAgent: targetAgent,
+      };
+      onSubmitParsed(enrichedParsed);
+    }
+
+    // Submit the clean message content (backwards compatible)
+    onSubmit(parsed.content, targetAgent);
+  }, [value, disabled, isStreaming, selectedAgent, onSubmit, onSubmitParsed]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -261,12 +274,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             style={{ minHeight: '48px' }}
           />
 
-          {/* Character indicator for @mention */}
-          {selectedAgent && !value.startsWith('@') && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-              @{selectedAgent}
-            </div>
-          )}
+          {/* Target indicator - shows current @agent target from parsing */}
+          {(() => {
+            const parsed = parseMessage(value);
+            const effectiveTarget = parsed.targetAgent || selectedAgent;
+            if (!effectiveTarget || !value.trim()) return null;
+            return (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs">
+                <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                </svg>
+                <span className={parsed.isTargeted ? 'text-weaver-600 font-medium' : 'text-gray-400'}>
+                  @{effectiveTarget}
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Send/Stop button */}

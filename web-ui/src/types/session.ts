@@ -1,144 +1,175 @@
 /**
- * Session types matching Yarn/session.go and Yarn/conversation.go
- * Research session management types.
+ * Session types matching Weaver/pkg/api/handlers_sessions.go
+ * and Yarn/session.go
+ *
+ * Note: Field names use camelCase to match the API JSON responses.
  */
 
-import type { Measurement } from './measurement';
-import type { HiddenState } from './backend';
+import type { MeasurementMode } from './config';
 
-/** MessageRole represents the sender type. */
-export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
-
-/** Check if a role is valid. */
-export function isValidMessageRole(role: string): role is MessageRole {
-  return ['system', 'user', 'assistant', 'tool'].includes(role);
+/**
+ * SessionAPIConfig holds session configuration for the API.
+ * Maps to SessionAPIConfig in handlers_sessions.go.
+ */
+export interface SessionAPIConfig {
+  measurementMode: MeasurementMode | string;
+  autoExport: boolean;
+  exportPath: string;
 }
 
-/** Message is the atomic unit of communication between agents. */
-export interface Message {
-  id: string;
-  role: MessageRole;
-  content: string;
-  timestamp: string; // ISO 8601 date string
-  agent_id?: string;
-  agent_name?: string;
-  hidden_state?: HiddenState;
-  metadata?: Record<string, unknown>;
-
-  // Tool-related fields
-  tool_call_id?: string;
-  tool_name?: string;
+/**
+ * SessionStats holds session statistics for the API.
+ * Maps to SessionAPIStats in handlers_sessions.go.
+ */
+export interface SessionStats {
+  conversationCount: number;
+  messageCount: number;
+  measurementCount: number;
+  bilateralCount: number;
+  avgDEff: number;
+  avgBeta: number;
+  avgAlignment: number;
 }
 
-/** Participant tracks an agent's involvement in the conversation. */
-export interface Participant {
-  agent_id: string;
-  agent_name: string;
-  role: string;
-  joined_at: string; // ISO 8601 date string
-  message_count: number;
-}
-
-/** Conversation is an ordered sequence of messages with participant tracking. */
-export interface Conversation {
-  id: string;
-  name: string;
-  messages: Message[];
-  participants: Record<string, Participant>;
-  created_at: string; // ISO 8601 date string
-  updated_at: string; // ISO 8601 date string
-  metadata?: Record<string, unknown>;
-}
-
-/** MeasurementMode determines when measurements are captured. */
-export type MeasurementMode = 'passive' | 'active' | 'triggered';
-
-/** Check if a measurement mode is valid. */
-export function isValidMeasurementMode(mode: string): mode is MeasurementMode {
-  return ['passive', 'active', 'triggered'].includes(mode);
-}
-
-/** SessionConfig holds session configuration (runtime). */
-export interface SessionConfig {
-  measurement_mode: MeasurementMode;
-  auto_export: boolean;
-  export_path: string;
-}
-
-/** Session is a named research session grouping conversations and measurements. */
+/**
+ * Session represents a research session for the API.
+ * Maps to Session in handlers_sessions.go.
+ */
 export interface Session {
   id: string;
   name: string;
   description: string;
-  started_at: string; // ISO 8601 date string
-  ended_at?: string; // ISO 8601 date string
-  config: SessionConfig;
+  startedAt: string;
+  endedAt?: string | null;
+  config: SessionAPIConfig;
   metadata?: Record<string, unknown>;
-  conversations: Conversation[];
-  measurements: Measurement[];
+  stats?: SessionStats | null;
 }
 
-/** SessionStats holds session statistics. */
-export interface SessionStats {
-  conversation_count: number;
-  message_count: number;
-  measurement_count: number;
-  bilateral_count: number;
-  avg_d_eff: number;
-  avg_beta: number;
-  avg_alignment: number;
+/**
+ * SessionListResponse is the JSON response for GET /api/sessions.
+ */
+export interface SessionListResponse {
+  sessions: Session[];
 }
 
-/** SessionStatus represents the current status of a session in the registry. */
+/**
+ * CreateSessionRequest is the expected JSON body for POST /api/sessions.
+ * Maps to CreateSessionRequest in handlers_sessions.go.
+ */
+export interface CreateSessionRequest {
+  name: string;
+  description?: string;
+  config?: SessionAPIConfig;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * UpdateSessionRequest is the expected JSON body for PUT /api/sessions/:id.
+ * Maps to UpdateSessionRequest in handlers_sessions.go.
+ */
+export interface UpdateSessionRequest {
+  name?: string;
+  description?: string;
+  config?: SessionAPIConfig;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * SessionMetricsSummary provides aggregate statistics for a session.
+ * Maps to SessionMetricsSummary in events.go.
+ */
+export interface SessionMetricsSummary {
+  totalMeasurements: number;
+  avgDeff: number;
+  avgBeta: number;
+  avgAlignment: number;
+  avgCpair: number;
+  minBeta: number;
+  maxBeta: number;
+  betaAlertCount: number;
+}
+
+/**
+ * SessionStartEvent is sent when a new measurement session begins.
+ * Maps to SessionStartEvent in events.go.
+ */
+export interface SessionStartEvent {
+  sessionId: string;
+  name?: string;
+  agentIds?: string[];
+  startedAt: string;
+  description?: string;
+}
+
+/**
+ * SessionEndEvent is sent when a measurement session ends.
+ * Maps to SessionEndEvent in events.go.
+ */
+export interface SessionEndEvent {
+  sessionId: string;
+  endedAt: string;
+  totalTurns: number;
+  finalMetrics?: SessionMetricsSummary;
+}
+
+/**
+ * SessionStatus represents the current status of a session.
+ */
 export interface SessionStatus {
   name: string;
   id: string;
-  is_active: boolean;
-  started_at: string; // ISO 8601 date string
-  ended_at?: string; // ISO 8601 date string
+  isActive: boolean;
+  startedAt: string;
+  endedAt?: string;
   stats: SessionStats;
 }
 
-/** Calculate session statistics from session data. */
-export function calculateSessionStats(session: Session): SessionStats {
+/**
+ * Check if a measurement mode is valid.
+ */
+export function isValidMeasurementMode(mode: string): mode is MeasurementMode {
+  return ['passive', 'active', 'triggered', 'disabled'].includes(mode);
+}
+
+/**
+ * Calculate session statistics from session data.
+ */
+export function calculateSessionStats(
+  conversationCount: number,
+  messageCount: number,
+  measurements: Array<{ dEff: number; beta: number; alignment: number; senderHidden?: unknown; receiverHidden?: unknown }>
+): SessionStats {
   const stats: SessionStats = {
-    conversation_count: session.conversations.length,
-    message_count: 0,
-    measurement_count: session.measurements.length,
-    bilateral_count: 0,
-    avg_d_eff: 0,
-    avg_beta: 0,
-    avg_alignment: 0,
+    conversationCount,
+    messageCount,
+    measurementCount: measurements.length,
+    bilateralCount: 0,
+    avgDEff: 0,
+    avgBeta: 0,
+    avgAlignment: 0,
   };
 
-  // Count messages across all conversations
-  for (const conv of session.conversations) {
-    stats.message_count += conv.messages.length;
-  }
-
-  // Calculate averages from measurements
-  if (session.measurements.length > 0) {
+  if (measurements.length > 0) {
     let totalDEff = 0;
     let totalBeta = 0;
     let totalAlignment = 0;
 
-    for (const m of session.measurements) {
-      totalDEff += m.d_eff;
+    for (const m of measurements) {
+      totalDEff += m.dEff;
       totalBeta += m.beta;
       totalAlignment += m.alignment;
 
       // Count bilateral measurements
-      const hasSender = m.sender_hidden && m.sender_hidden.vector.length > 0;
-      const hasReceiver = m.receiver_hidden && m.receiver_hidden.vector.length > 0;
-      if (hasSender && hasReceiver) {
-        stats.bilateral_count++;
+      if (m.senderHidden && m.receiverHidden) {
+        stats.bilateralCount++;
       }
     }
 
-    const n = session.measurements.length;
-    stats.avg_d_eff = totalDEff / n;
-    stats.avg_beta = totalBeta / n;
-    stats.avg_alignment = totalAlignment / n;
+    const n = measurements.length;
+    stats.avgDEff = totalDEff / n;
+    stats.avgBeta = totalBeta / n;
+    stats.avgAlignment = totalAlignment / n;
   }
 
   return stats;

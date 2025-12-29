@@ -4,7 +4,7 @@
  */
 
 import { get, post, ApiError } from './api';
-import type { AgentInfo, AgentListResponse, ChatMessage, ChatResponse } from '@/types';
+import type { AgentInfo, AgentListResponse, ChatAgentResponse, ChatHistoryMessage } from '@/types';
 
 // Re-export AgentInfo for consumers
 export type { AgentInfo } from '@/types';
@@ -21,10 +21,10 @@ interface AgentResponse {
   agent: AgentInfo;
 }
 
-/** Chat request payload */
+/** Chat request payload matching backend ChatAgentRequest */
 export interface ChatRequestPayload {
   message: string;
-  history?: ChatMessage[];
+  history?: ChatHistoryMessage[];
   options?: {
     max_tokens?: number;
     temperature?: number;
@@ -33,17 +33,26 @@ export interface ChatRequestPayload {
   };
 }
 
-/** Chat response from API */
-interface ChatApiResponse {
-  response: ChatResponse;
-}
-
 /** Streaming chat event types */
 export interface ChatStreamEvent {
   type: 'content' | 'done' | 'error';
   content?: string;
   finish_reason?: string;
   error?: string;
+}
+
+/**
+ * Normalized chat response for frontend use.
+ * Combines fields from ChatAgentResponse with additional frontend-needed fields.
+ */
+export interface ChatResponseNormalized {
+  content: string;
+  agent: string;
+  model: string;
+  latencyMs: number;
+  finishReason: string;
+  metadata?: Record<string, unknown>;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
 /**
@@ -85,18 +94,23 @@ export async function isAgentAvailable(name: string): Promise<boolean> {
 }
 
 /**
- * Send a chat message to an agent.
+ * Send a chat message to an agent (non-streaming).
  * @param name - Agent name
  * @param payload - Chat request payload
- * @returns Promise resolving to ChatResponse
+ * @returns Promise resolving to ChatAgentResponse
  * @throws ApiError on failure
  */
 export async function chat(
   name: string,
   payload: ChatRequestPayload
-): Promise<ChatResponse> {
-  const response = await post<ChatApiResponse>(ENDPOINTS.chat(name), payload);
-  return response.data.response;
+): Promise<ChatAgentResponse> {
+  // Send only the fields the backend expects (message and history)
+  const requestBody = {
+    message: payload.message,
+    history: payload.history,
+  };
+  const response = await post<ChatAgentResponse>(ENDPOINTS.chat(name), requestBody);
+  return response.data;
 }
 
 /**
@@ -104,21 +118,19 @@ export async function chat(
  * Convenience wrapper around chat() for basic messages.
  * @param name - Agent name
  * @param message - Message content
- * @param options - Optional chat parameters
  * @returns Promise resolving to response content
  */
 export async function sendMessage(
   name: string,
-  message: string,
-  options?: ChatRequestPayload['options']
+  message: string
 ): Promise<string> {
-  const response = await chat(name, { message, options });
+  const response = await chat(name, { message });
   return response.content;
 }
 
 /**
  * Send a chat message and stream the response.
- * Uses Server-Sent Events for real-time updates.
+ * Supports both SSE streaming and regular JSON responses (fallback).
  * @param name - Agent name
  * @param payload - Chat request payload
  * @param onChunk - Callback for each content chunk
@@ -130,17 +142,14 @@ export async function chatStream(
   name: string,
   payload: ChatRequestPayload,
   onChunk: (content: string) => void,
-  onComplete?: (response: ChatResponse) => void,
+  onComplete?: (response: ChatResponseNormalized) => void,
   onError?: (error: Error) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  // Ensure stream is requested
-  const streamPayload = {
-    ...payload,
-    options: {
-      ...payload.options,
-      stream: true,
-    },
+  // Send only the fields the backend expects (message and history)
+  const requestBody = {
+    message: payload.message,
+    history: payload.history,
   };
 
   try {
@@ -148,90 +157,139 @@ export async function chatStream(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
+        Accept: 'application/json, text/event-stream',
       },
-      body: JSON.stringify(streamPayload),
+      body: JSON.stringify(requestBody),
       signal,
     });
 
     if (!response.ok) {
+      // Try to parse error response
+      let errorMessage = `Chat failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody = await response.json();
+        // Handle wrapped error response
+        if (errorBody && typeof errorBody === 'object') {
+          if (errorBody.error?.message) {
+            errorMessage = errorBody.error.message;
+          } else if (errorBody.message) {
+            errorMessage = errorBody.message;
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
       throw new ApiError(
-        `Chat stream failed: ${response.status} ${response.statusText}`,
+        errorMessage,
         response.status,
         response.statusText
       );
     }
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('Response body is not readable');
-    }
+    const contentType = response.headers.get('content-type') || '';
 
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullContent = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
+    // Handle SSE streaming response
+    if (contentType.includes('text/event-stream')) {
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable');
       }
 
-      buffer += decoder.decode(value, { stream: true });
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullContent = '';
 
-      // Process complete SSE messages
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+      while (true) {
+        const { done, value } = await reader.read();
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
+        if (done) {
+          break;
+        }
 
-          if (data === '[DONE]') {
-            onComplete?.({
-              content: fullContent,
-              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-              latencyMs: 0,
-              model: '',
-              finishReason: 'stop',
-            });
-            return;
-          }
+        buffer += decoder.decode(value, { stream: true });
 
-          try {
-            const event = JSON.parse(data) as ChatStreamEvent;
+        // Process complete SSE messages
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
-            if (event.type === 'content' && event.content) {
-              fullContent += event.content;
-              onChunk(event.content);
-            } else if (event.type === 'done') {
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+
+            if (data === '[DONE]') {
               onComplete?.({
                 content: fullContent,
-                usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-                latencyMs: 0,
+                agent: name,
                 model: '',
-                finishReason: event.finish_reason ?? 'stop',
+                latencyMs: 0,
+                finishReason: 'stop',
               });
               return;
-            } else if (event.type === 'error') {
-              throw new Error(event.error ?? 'Unknown stream error');
             }
-          } catch (parseError) {
-            // Ignore parse errors for non-JSON lines
+
+            try {
+              const event = JSON.parse(data) as ChatStreamEvent;
+
+              if (event.type === 'content' && event.content) {
+                fullContent += event.content;
+                onChunk(event.content);
+              } else if (event.type === 'done') {
+                onComplete?.({
+                  content: fullContent,
+                  agent: name,
+                  model: '',
+                  latencyMs: 0,
+                  finishReason: event.finish_reason ?? 'stop',
+                });
+                return;
+              } else if (event.type === 'error') {
+                throw new Error(event.error ?? 'Unknown stream error');
+              }
+            } catch (parseError) {
+              // Ignore parse errors for non-JSON lines
+            }
           }
         }
       }
-    }
 
-    // Stream ended without explicit done event
-    onComplete?.({
-      content: fullContent,
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      latencyMs: 0,
-      model: '',
-      finishReason: 'stop',
-    });
+      // Stream ended without explicit done event
+      onComplete?.({
+        content: fullContent,
+        agent: name,
+        model: '',
+        latencyMs: 0,
+        finishReason: 'stop',
+      });
+    } else {
+      // Handle regular JSON response (non-streaming fallback)
+      const rawJson = await response.json();
+
+      // Handle wrapped API response: {success: boolean, data: ChatAgentResponse}
+      let chatResponse: ChatAgentResponse;
+      if (rawJson && typeof rawJson === 'object' && 'success' in rawJson) {
+        if (!rawJson.success) {
+          throw new Error(rawJson.error?.message || 'Chat request failed');
+        }
+        chatResponse = rawJson.data as ChatAgentResponse;
+      } else {
+        chatResponse = rawJson as ChatAgentResponse;
+      }
+
+      // Deliver full content as a single chunk
+      if (chatResponse.content) {
+        onChunk(chatResponse.content);
+      }
+
+      // Complete with the response
+      onComplete?.({
+        content: chatResponse.content,
+        agent: chatResponse.agent || name,
+        model: chatResponse.model || '',
+        latencyMs: chatResponse.latencyMs || 0,
+        finishReason: 'stop',
+        metadata: chatResponse.metadata,
+      });
+    }
   } catch (error) {
     if (signal?.aborted) {
       return;

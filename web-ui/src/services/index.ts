@@ -49,6 +49,7 @@ export {
   type AgentInfo,
   type ChatRequestPayload,
   type ChatStreamEvent,
+  type ChatResponseNormalized,
 } from './agentApi';
 
 // Session API

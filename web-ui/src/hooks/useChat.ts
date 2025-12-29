@@ -9,8 +9,8 @@
  */
 
 import { useState, useCallback, useRef } from 'react';
-import type { Message, ChatResponse } from '@/types';
-import { chatStream, type ChatRequestPayload } from '@/services/agentApi';
+import type { Message } from '@/types';
+import { chatStream, type ChatRequestPayload, type ChatResponseNormalized } from '@/services/agentApi';
 
 /**
  * Options for the useChat hook.
@@ -183,7 +183,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             );
           },
           // onComplete - finalize the message with metadata
-          (response: ChatResponse) => {
+          (response: ChatResponseNormalized) => {
             const finalMessage: Message = {
               id: assistantMessageId,
               role: 'assistant',
@@ -195,6 +195,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 latencyMs: response.latencyMs,
                 finishReason: response.finishReason,
                 usage: response.usage,
+                agent: response.agent,
               },
             };
 

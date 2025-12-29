@@ -91,6 +91,15 @@ func (c *ShellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 		return c.completeAgent(currentWord)
 	}
 
+	// Handle flag completion (starts with -)
+	if strings.HasPrefix(currentWord, "-") {
+		// Check if we're after /clear or /clear_concepts commands
+		lineLower := strings.ToLower(lineStr)
+		if strings.HasPrefix(lineLower, "/clear ") || strings.HasPrefix(lineLower, "/clear_concepts ") {
+			return c.completeFlags(currentWord)
+		}
+	}
+
 	return nil, 0
 }
 
@@ -156,5 +165,24 @@ func (c *ShellCompleter) completeAgent(prefix string) ([][]rune, int) {
 	}
 
 	// Return the length of the prefix (including "@") that we're completing
+	return matches, len(prefix)
+}
+
+// completeFlags returns completions for command flags starting with the given prefix.
+// Currently supports --force/-f flags for /clear and /clear_concepts commands.
+func (c *ShellCompleter) completeFlags(prefix string) ([][]rune, int) {
+	// Define flags available for commands that support them
+	flags := []string{"--force", "-f"}
+
+	var matches [][]rune
+	for _, flag := range flags {
+		if strings.HasPrefix(flag, prefix) {
+			// Return the suffix that completes the flag (add space after)
+			suffix := flag[len(prefix):] + " "
+			matches = append(matches, []rune(suffix))
+		}
+	}
+
+	// Return the length of the prefix that we're completing
 	return matches, len(prefix)
 }

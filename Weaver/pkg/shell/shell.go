@@ -31,6 +31,7 @@ type Shell struct {
 	defaultAgent   string // Default agent to route messages to
 	conceptStore   *concepts.Store
 	analysisClient *analysis.Client
+	Prompter       Prompter // Prompter for confirmation prompts (exported for testing)
 }
 
 // Config holds shell configuration.
@@ -70,6 +71,7 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		defaultAgent:   defaultAgent,
 		conceptStore:   concepts.NewStore(),
 		analysisClient: analysis.NewClient(cfg.LoomURL), // NewClient defaults to localhost:8080
+		Prompter:       NewInteractivePrompter(),        // Default to interactive prompts
 	}, nil
 }
 
@@ -154,9 +156,38 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		s.printHistory()
 
 	case "/clear":
+		messageCount := len(s.conv.History(-1))
+		if messageCount == 0 {
+			fmt.Println("No messages to clear.")
+			return nil
+		}
+
+		// Check for --force or -f flag to skip confirmation
+		forceFlag := false
+		for _, arg := range parts[1:] {
+			if arg == "--force" || arg == "-f" {
+				forceFlag = true
+				break
+			}
+		}
+
+		// Prompt for confirmation unless --force is specified
+		if !forceFlag {
+			message := fmt.Sprintf("This will clear %d message(s). Are you sure?", messageCount)
+			confirmed, err := s.Prompter.Confirm(message)
+			if err != nil {
+				return fmt.Errorf("failed to get confirmation: %w", err)
+			}
+
+			if !confirmed {
+				fmt.Println("Operation cancelled.")
+				return nil
+			}
+		}
+
 		s.conv = yarn.NewConversation(s.session.Name + "-conv")
 		s.session.AddConversation(s.conv)
-		fmt.Println("Conversation cleared.")
+		fmt.Printf("Cleared %d message(s).\n", messageCount)
 
 	case "/default":
 		if len(parts) > 1 {
@@ -186,8 +217,37 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		return s.handleMetrics(ctx, parts[1:])
 
 	case "/clear_concepts":
-		count := s.conceptStore.ClearAll()
-		fmt.Printf("Cleared %d concepts.\n", count)
+		count := s.conceptStore.Count()
+		if count == 0 {
+			fmt.Println("No concepts to clear.")
+			return nil
+		}
+
+		// Check for --force or -f flag to skip confirmation
+		forceFlag := false
+		for _, arg := range parts[1:] {
+			if arg == "--force" || arg == "-f" {
+				forceFlag = true
+				break
+			}
+		}
+
+		// Prompt for confirmation unless --force is specified
+		if !forceFlag {
+			message := fmt.Sprintf("This will delete %d concept(s). Are you sure?", count)
+			confirmed, err := s.Prompter.Confirm(message)
+			if err != nil {
+				return fmt.Errorf("failed to get confirmation: %w", err)
+			}
+
+			if !confirmed {
+				fmt.Println("Operation cancelled.")
+				return nil
+			}
+		}
+
+		cleared := s.conceptStore.ClearAll()
+		fmt.Printf("Cleared %d concepts.\n", cleared)
 
 	// Academic export commands
 	case "/export_latex":

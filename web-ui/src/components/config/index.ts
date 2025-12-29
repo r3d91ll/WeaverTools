@@ -12,3 +12,6 @@ export type { BackendFormProps } from './BackendForm';
 
 export { SessionForm } from './SessionForm';
 export type { SessionFormProps } from './SessionForm';
+
+export { YamlEditor } from './YamlEditor';
+export type { YamlEditorProps } from './YamlEditor';

@@ -11,6 +11,7 @@ import { getConfig, updateConfig, validateConfig } from '@/services/configApi';
 import { AgentForm } from './AgentForm';
 import { BackendForm } from './BackendForm';
 import { SessionForm } from './SessionForm';
+import { YamlEditor } from './YamlEditor';
 
 /**
  * Editor mode type.
@@ -51,6 +52,7 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'agents' | 'backends' | 'session'>('agents');
+  const [yamlParseError, setYamlParseError] = useState<string | null>(null);
 
   // Check if config has been modified
   const isDirty = JSON.stringify(config) !== JSON.stringify(originalConfig);
@@ -186,6 +188,16 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
   /** Update session config */
   const handleSessionChange = useCallback((session: Config['session']) => {
     setConfig((prev) => ({ ...prev, session }));
+  }, []);
+
+  /** Update config from YAML editor */
+  const handleYamlChange = useCallback((newConfig: Config) => {
+    setConfig(newConfig);
+  }, []);
+
+  /** Handle YAML parse error */
+  const handleYamlParseError = useCallback((error: string | null) => {
+    setYamlParseError(error);
   }, []);
 
   const isLoading = loadingState !== 'idle';
@@ -418,18 +430,21 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
         </div>
       )}
 
-      {/* YAML View Mode - Placeholder */}
+      {/* YAML View Mode */}
       {mode === 'yaml' && loadingState !== 'loading' && (
         <div className="card">
           <div className="mb-4">
             <h2 className="text-lg font-semibold text-gray-900">YAML Configuration</h2>
             <p className="text-sm text-gray-500">
-              View and edit the raw YAML configuration.
+              View and edit the raw YAML configuration. Changes are applied in real-time.
             </p>
           </div>
-          <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center">
-            <p className="text-gray-400">YAML editor coming in next subtask</p>
-          </div>
+          <YamlEditor
+            config={config}
+            onChange={handleYamlChange}
+            onParseError={handleYamlParseError}
+            disabled={isLoading}
+          />
         </div>
       )}
 
@@ -465,16 +480,18 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
             <button
               type="button"
               onClick={handleValidate}
-              disabled={isLoading}
+              disabled={isLoading || yamlParseError !== null}
               className="btn-secondary"
+              title={yamlParseError ? 'Fix YAML errors before validating' : undefined}
             >
               {loadingState === 'validating' ? 'Validating...' : 'Validate'}
             </button>
             <button
               type="button"
               onClick={handleSave}
-              disabled={isLoading || !isDirty}
+              disabled={isLoading || !isDirty || yamlParseError !== null}
               className="btn-primary"
+              title={yamlParseError ? 'Fix YAML errors before saving' : undefined}
             >
               {isSaving ? 'Saving...' : 'Save Configuration'}
             </button>

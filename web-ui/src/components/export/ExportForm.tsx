@@ -8,9 +8,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { FormatSelector } from './FormatSelector';
 import {
   exportMeasurements,
-  downloadExport,
   getFormatDisplayName,
-  generateFilename,
   MEASUREMENT_COLUMNS,
   DEFAULT_COLUMNS,
   type ExportFormat,
@@ -23,6 +21,13 @@ import {
   type CsvDialect,
 } from '@/services/exportApi';
 import { listSessions, type SessionSummary } from '@/services/sessionApi';
+import {
+  downloadByFormat,
+  copyToClipboard,
+  formatFileSize,
+  estimateContentSize,
+  type DownloadResult,
+} from '@/utils/download';
 
 /**
  * ExportForm component props.
@@ -111,9 +116,13 @@ export const ExportForm: React.FC<ExportFormProps> = ({
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ExportResponse | null>(null);
   const [showPreview, setShowPreview] = useState(initialShowPreview);
+  const [lastDownloadResult, setLastDownloadResult] = useState<DownloadResult | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // Load sessions on mount
   useEffect(() => {
@@ -204,21 +213,77 @@ export const ExportForm: React.FC<ExportFormProps> = ({
   /** Export and download */
   const handleExport = useCallback(async () => {
     setIsExporting(true);
+    setIsDownloading(false);
     setError(null);
+    setLastDownloadResult(null);
 
     try {
       const options = buildExportOptions();
       const result = await exportMeasurements(formState.format, options);
-      downloadExport(result);
       setPreview(result);
-      onExportComplete?.(result);
+      setShowPreview(true);
+
+      // Download using the new download utilities
+      setIsDownloading(true);
+      const downloadResult = downloadByFormat(result, {
+        onStart: () => setIsDownloading(true),
+        onComplete: () => setIsDownloading(false),
+        onError: (err) => {
+          setError(`Download failed: ${err.message}`);
+          setIsDownloading(false);
+        },
+      });
+
+      setLastDownloadResult(downloadResult);
+      setIsDownloading(false);
+
+      if (downloadResult.success) {
+        onExportComplete?.(result);
+      } else {
+        onExportError?.(new Error(downloadResult.error ?? 'Download failed'));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to export');
       onExportError?.(err instanceof Error ? err : new Error('Export failed'));
     } finally {
       setIsExporting(false);
+      setIsDownloading(false);
     }
   }, [buildExportOptions, formState.format, onExportComplete, onExportError]);
+
+  /** Copy preview content to clipboard */
+  const handleCopyToClipboard = useCallback(async () => {
+    if (!preview?.content) return;
+
+    setIsCopying(true);
+    setCopySuccess(false);
+
+    try {
+      await copyToClipboard(preview.content);
+      setCopySuccess(true);
+      // Reset success message after 2 seconds
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      setError('Failed to copy to clipboard');
+    } finally {
+      setIsCopying(false);
+    }
+  }, [preview?.content]);
+
+  /** Download preview content only */
+  const handleDownloadOnly = useCallback(() => {
+    if (!preview) return;
+
+    setIsDownloading(true);
+    const downloadResult = downloadByFormat(preview, {
+      onError: (err) => {
+        setError(`Download failed: ${err.message}`);
+      },
+    });
+
+    setLastDownloadResult(downloadResult);
+    setIsDownloading(false);
+  }, [preview]);
 
   /** Update form field */
   const updateField = useCallback(
@@ -244,7 +309,10 @@ export const ExportForm: React.FC<ExportFormProps> = ({
   /** Get selected session name */
   const selectedSession = sessions.find((s) => s.id === formState.sessionId);
 
-  const isLoading = isExporting || isPreviewing;
+  const isLoading = isExporting || isPreviewing || isDownloading;
+
+  /** Get estimated file size for preview */
+  const previewSize = preview ? estimateContentSize(preview.content) : 0;
 
   return (
     <div className={`space-y-6 ${className}`}>
@@ -550,32 +618,116 @@ export const ExportForm: React.FC<ExportFormProps> = ({
       {showPreview && preview && (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
-            <span className="text-sm font-medium text-gray-700">
-              Preview: {preview.filename}
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowPreview(false)}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-gray-700">
+                Preview: {preview.filename}
+              </span>
+              <span className="text-xs text-gray-500">
+                ({formatFileSize(previewSize)})
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Copy to Clipboard Button */}
+              <button
+                type="button"
+                onClick={handleCopyToClipboard}
+                disabled={isCopying}
+                className="flex items-center gap-1 px-2 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                title="Copy to clipboard"
+              >
+                {copySuccess ? (
+                  <>
+                    <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-green-600">Copied!</span>
+                  </>
+                ) : isCopying ? (
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+              {/* Download Button */}
+              <button
+                type="button"
+                onClick={handleDownloadOnly}
+                disabled={isDownloading}
+                className="flex items-center gap-1 px-2 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                title="Download file"
+              >
+                {isDownloading ? (
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                )}
+                <span>Download</span>
+              </button>
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+                title="Close preview"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
           <pre className="p-4 text-sm text-gray-800 bg-gray-900 overflow-auto max-h-64">
             <code className="text-green-400">{preview.content}</code>
           </pre>
-          {preview.stats && (
-            <div className="px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
-              {preview.stats.measurementCount} measurements, {preview.stats.rowCount} rows
+          <div className="px-4 py-2 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+            <div className="text-xs text-gray-500">
+              {preview.stats && (
+                <span>{preview.stats.measurementCount} measurements, {preview.stats.rowCount} rows</span>
+              )}
             </div>
-          )}
+            {/* Download Success Message */}
+            {lastDownloadResult && (
+              <div className={`text-xs flex items-center gap-1 ${
+                lastDownloadResult.success ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {lastDownloadResult.success ? (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>
+                      Downloaded {lastDownloadResult.filename} ({formatFileSize(lastDownloadResult.size)})
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Download failed: {lastDownloadResult.error}</span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

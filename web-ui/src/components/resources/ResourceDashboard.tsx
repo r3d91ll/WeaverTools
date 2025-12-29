@@ -7,17 +7,17 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ResponsiveContainer,
-  AreaChart,
-  Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  LineChart,
-  Line,
 } from 'recharts';
 import type { GPUStatus, ResourceStatus } from '@/types/backend';
 import { useResourceStatus, useWebSocket, type ResourceUpdateData } from '@/hooks/useWebSocket';
+import { GPUChart } from './GPUChart';
+import { MemoryChart } from './MemoryChart';
 
 /**
  * Historical data point for resource charts.
@@ -426,55 +426,13 @@ export const ResourceDashboard: React.FC<ResourceDashboardProps> = ({
             <h2 className="text-lg font-semibold text-gray-900">GPU Memory</h2>
             <ConnectionStatus isConnected={isConnected} state={state} />
           </div>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={chartHeight}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="time"
-                  tick={{ fill: '#6b7280', fontSize: 12 }}
-                  axisLine={{ stroke: '#e5e7eb' }}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fill: '#6b7280', fontSize: 12 }}
-                  axisLine={{ stroke: '#e5e7eb' }}
-                  tickFormatter={(value) => `${value}%`}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload;
-                      return (
-                        <div className="bg-white p-2 shadow-lg rounded border text-sm">
-                          <p className="text-gray-600">{data.timeLabel}</p>
-                          <p className="text-weaver-600 font-medium">
-                            Memory: {formatPercent(data.gpuMemory)}
-                          </p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="gpuMemory"
-                  stroke="#4f46e5"
-                  fill="#4f46e5"
-                  fillOpacity={0.2}
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div
-              className="flex items-center justify-center text-gray-500"
-              style={{ height: chartHeight }}
-            >
-              {isConnected ? 'Waiting for data...' : 'Connect to see GPU memory usage'}
-            </div>
-          )}
+          <GPUChart
+            data={history}
+            height={chartHeight}
+            mode="memory"
+            showThresholds
+            loading={isConnected && history.length === 0}
+          />
         </div>
 
         {/* GPU Utilization Chart */}
@@ -491,57 +449,28 @@ export const ResourceDashboard: React.FC<ResourceDashboardProps> = ({
               </button>
             )}
           </div>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={chartHeight}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="time"
-                  tick={{ fill: '#6b7280', fontSize: 12 }}
-                  axisLine={{ stroke: '#e5e7eb' }}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fill: '#6b7280', fontSize: 12 }}
-                  axisLine={{ stroke: '#e5e7eb' }}
-                  tickFormatter={(value) => `${value}%`}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload;
-                      return (
-                        <div className="bg-white p-2 shadow-lg rounded border text-sm">
-                          <p className="text-gray-600">{data.timeLabel}</p>
-                          <p className="text-green-600 font-medium">
-                            Utilization: {formatPercent(data.gpuUtil)}
-                          </p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="gpuUtil"
-                  stroke="#22c55e"
-                  fill="#22c55e"
-                  fillOpacity={0.2}
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div
-              className="flex items-center justify-center text-gray-500"
-              style={{ height: chartHeight }}
-            >
-              {isConnected ? 'Waiting for data...' : 'Connect to see GPU utilization'}
-            </div>
-          )}
+          <GPUChart
+            data={history}
+            height={chartHeight}
+            mode="utilization"
+            showThresholds
+            loading={isConnected && history.length === 0}
+          />
         </div>
       </div>
+
+      {/* System Memory Chart (if data available) */}
+      {history.some((d) => d.memoryPercent !== undefined || d.cpuPercent !== undefined) && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">System Resources</h2>
+          <MemoryChart
+            data={history}
+            height={chartHeight}
+            mode="combined"
+            showThresholds
+          />
+        </div>
+      )}
 
       {/* Queue Depth Chart */}
       {showQueueChart && (

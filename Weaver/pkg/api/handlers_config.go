@@ -333,7 +333,7 @@ func validateConfig(cfg *config.Config) []string {
 
 	// Valid options for validation
 	validBackends := []string{"claudecode", "loom"}
-	validRoles := []string{"senior", "junior", "analyst", "architect", "reviewer"}
+	validRoles := []string{"senior", "junior", "analyst", "architect", "reviewer", "conversant", "subject"}
 	validMeasurementModes := []string{"active", "passive", "disabled"}
 
 	// Validate agent configurations

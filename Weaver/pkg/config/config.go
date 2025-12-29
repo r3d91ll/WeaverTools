@@ -226,7 +226,7 @@ func InitConfig(path string) error {
 var validBackends = []string{"claudecode", "loom"}
 
 // validRoles is the list of supported agent roles.
-var validRoles = []string{"senior", "junior", "analyst", "architect", "reviewer"}
+var validRoles = []string{"senior", "junior", "analyst", "architect", "reviewer", "conversant", "subject"}
 
 // validMeasurementModes is the list of supported measurement modes.
 var validMeasurementModes = []string{"active", "passive", "disabled"}

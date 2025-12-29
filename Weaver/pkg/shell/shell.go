@@ -302,11 +302,19 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 	userMsg := yarn.NewAgentMessage(yarn.RoleUser, message, "user", "user")
 	s.conv.Add(userMsg)
 
-	// Show thinking indicator
-	fmt.Printf("\033[33m[%s]\033[0m thinking...\n", agent.Name())
+	// Show thinking spinner with elapsed time
+	thinkingMsg := fmt.Sprintf("\033[33m[%s]\033[0m thinking...", agent.Name())
+	spin := spinner.NewWithConfig(spinner.Config{
+		CharSet:     spinner.Braille,
+		Message:     thinkingMsg,
+		ShowElapsed: true,
+	})
+	spin.Start()
+	defer spin.Stop() // Ensure spinner stops even on error or panic
 
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
+	responseTime := spin.Elapsed() // Capture response time before spinner stops
 	if err != nil {
 		return createChatError(agent.Name(), agent.BackendName(), err)
 	}
@@ -322,6 +330,9 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 		dim := resp.HiddenState.Dimension()
 		fmt.Printf("\033[90m  └─ hidden state: %d dimensions\033[0m\n", dim)
 	}
+
+	// Show response time
+	fmt.Printf("\033[90m  └─ response time: %s\033[0m\n", spinner.FormatElapsedShort(responseTime))
 
 	fmt.Println()
 	return nil

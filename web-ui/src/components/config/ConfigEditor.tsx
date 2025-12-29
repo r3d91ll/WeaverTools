@@ -12,6 +12,7 @@ import { AgentForm } from './AgentForm';
 import { BackendForm } from './BackendForm';
 import { SessionForm } from './SessionForm';
 import { YamlEditor } from './YamlEditor';
+import { ValidationError, type ValidationMessage } from '@/components/common/ValidationError';
 
 /**
  * Editor mode type.
@@ -49,7 +50,7 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
   const [mode, setMode] = useState<EditorMode>(initialMode);
   const [loadingState, setLoadingState] = useState<LoadingState>('loading');
   const [error, setError] = useState<string | null>(null);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [validationErrors, setValidationErrors] = useState<ValidationMessage[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'agents' | 'backends' | 'session'>('agents');
   const [yamlParseError, setYamlParseError] = useState<string | null>(null);
@@ -99,6 +100,38 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
     }
   }, [config, onSave]);
 
+  /**
+   * Parse validation error string to extract field path if present.
+   * Errors from the API may have format: "field.path: error message" or just "error message"
+   */
+  const parseValidationError = useCallback((errorStr: string): ValidationMessage => {
+    // Try to extract field path from error message (common formats)
+    const colonMatch = errorStr.match(/^([a-zA-Z0-9_.]+):\s*(.+)$/);
+    if (colonMatch) {
+      return {
+        field: colonMatch[1],
+        message: colonMatch[2],
+        severity: 'error',
+      };
+    }
+
+    // Check for "in field" pattern
+    const inFieldMatch = errorStr.match(/(.+)\s+in\s+([a-zA-Z0-9_.]+)$/i);
+    if (inFieldMatch) {
+      return {
+        field: inFieldMatch[2],
+        message: inFieldMatch[1],
+        severity: 'error',
+      };
+    }
+
+    // No field path detected
+    return {
+      message: errorStr,
+      severity: 'error',
+    };
+  }, []);
+
   /** Validate configuration */
   const handleValidate = useCallback(async () => {
     setLoadingState('validating');
@@ -112,15 +145,16 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
         setSuccessMessage('Configuration is valid');
         setTimeout(() => setSuccessMessage(null), 3000);
       } else {
-        setValidationErrors(result.errors);
-        onValidationError?.(result.errors);
+        const parsedErrors = (result.errors ?? []).map(parseValidationError);
+        setValidationErrors(parsedErrors);
+        onValidationError?.(result.errors ?? []);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to validate configuration');
     } finally {
       setLoadingState('idle');
     }
-  }, [config, onValidationError]);
+  }, [config, onValidationError, parseValidationError]);
 
   /** Reset to original config */
   const handleReset = useCallback(() => {
@@ -233,46 +267,34 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({
         </nav>
       </div>
 
-      {/* Error Display */}
+      {/* API Error Display */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="flex">
-            <svg className="w-5 h-5 text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">Error</h3>
-              <p className="mt-1 text-sm text-red-700">{error}</p>
-            </div>
-          </div>
-        </div>
+        <ValidationError
+          errors={error}
+          title="Error"
+          severity="error"
+          onDismiss={() => setError(null)}
+        />
       )}
 
       {/* Validation Errors Display */}
       {validationErrors.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex">
-            <svg className="w-5 h-5 text-yellow-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-yellow-800">Validation Errors</h3>
-              <ul className="mt-2 text-sm text-yellow-700 list-disc list-inside">
-                {validationErrors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
+        <ValidationError
+          errors={validationErrors}
+          title="Validation Errors"
+          severity="error"
+          showFieldPaths={true}
+          onDismiss={() => setValidationErrors([])}
+        />
+      )}
+
+      {/* YAML Parse Error Display */}
+      {yamlParseError && mode === 'yaml' && (
+        <ValidationError
+          errors={yamlParseError}
+          title="YAML Syntax Error"
+          severity="warning"
+        />
       )}
 
       {/* Success Message */}

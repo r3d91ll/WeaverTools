@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/r3d91ll/weaver/pkg/analysis"
@@ -19,6 +20,7 @@ import (
 	"github.com/r3d91ll/weaver/pkg/export"
 	"github.com/r3d91ll/weaver/pkg/help"
 	"github.com/r3d91ll/weaver/pkg/runtime"
+	"github.com/r3d91ll/weaver/pkg/spinner"
 	"github.com/r3d91ll/yarn"
 )
 
@@ -412,19 +414,46 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 		return createNoHiddenStateAgentError(s.agents.List())
 	}
 
-	fmt.Printf("\033[33mExtracting %d samples for '%s' using %s...\033[0m\n", count, concept, extractAgent.Name())
+	// Create and start progress bar with all display options enabled
+	progressBar := spinner.NewProgressWithConfig(spinner.ProgressConfig{
+		Total:            count,
+		Message:          fmt.Sprintf("Extracting '%s' using %s", concept, extractAgent.Name()),
+		Width:            20,
+		ShowPercentage:   true,
+		ShowCount:        true,
+		ShowElapsed:      true,
+		ShowETA:          true,
+		MinSamplesForETA: 2,
+		Writer:           os.Stderr,
+	})
+	progressBar.Start()
 
 	// Create extractor and run
 	extractor := concepts.NewExtractor(extractAgent.Backend, s.conceptStore)
 	cfg := concepts.DefaultExtractionConfig(concept, count)
 
+	// Wire progress callback to update the progress bar.
+	// The callback is called at the start of each iteration with the current sample index (0-indexed).
+	// progressBar.Set() is thread-safe (uses mutex internally).
+	cfg.OnProgress = func(current, total int, elapsed time.Duration) {
+		progressBar.Set(current)
+	}
+
 	result, err := extractor.Extract(ctx, cfg)
 	if err != nil {
+		progressBar.Fail("Extraction failed")
 		return createExtractionError(concept, count, extractAgent.Name(), err)
 	}
 
-	// Display results
-	fmt.Printf("\033[32m✓ Extracted %d samples\033[0m\n", result.SamplesAdded)
+	// Complete the progress bar before displaying detailed results
+	// Call Fail() if all samples failed, otherwise Complete() with success count
+	if result.SamplesAdded == 0 && len(result.Errors) > 0 {
+		progressBar.Fail(fmt.Sprintf("All %d extractions failed", count))
+	} else {
+		progressBar.Complete(fmt.Sprintf("Extracted %d samples", result.SamplesAdded))
+	}
+
+	// Display detailed results
 	fmt.Printf("  Concept: %s\n", result.Concept)
 	fmt.Printf("  Total samples: %d\n", result.TotalSamples)
 	fmt.Printf("  Dimension: %d\n", result.Dimension)

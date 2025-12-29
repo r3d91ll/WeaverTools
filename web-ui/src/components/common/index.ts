@@ -56,3 +56,52 @@ export type {
   ValidationSeverity,
   FieldErrorProps,
 } from './ValidationError';
+
+// Error boundary components
+export {
+  ErrorBoundary,
+  PageErrorBoundary,
+  ComponentErrorBoundary,
+  withErrorBoundary,
+  useErrorHandler,
+} from './ErrorBoundary';
+export type {
+  ErrorBoundaryProps,
+  ErrorBoundaryState,
+  ErrorDisplayInfo,
+  PageErrorBoundaryProps,
+  ComponentErrorBoundaryProps,
+} from './ErrorBoundary';
+
+// Loading state components
+export {
+  LoadingState,
+  PageLoadingState,
+  DataFetchState,
+  AsyncBoundary,
+  RetryableLoadingState,
+  SkeletonState,
+} from './LoadingState';
+export type {
+  LoadingStateProps,
+  DataState,
+  PageLoadingStateProps,
+  DataFetchStateProps,
+  AsyncBoundaryProps,
+  RetryableLoadingStateProps,
+  SkeletonStateProps,
+} from './LoadingState';
+
+// Connection status components
+export {
+  ConnectionStatus,
+  ConnectionStatusBanner,
+  ConnectionIndicator,
+} from './ConnectionStatus';
+export type {
+  ConnectionStatusProps,
+  ConnectionStatusVariant,
+  ConnectionStatusSize,
+  ConnectionStatusBannerProps,
+  ConnectionIndicatorProps,
+} from './ConnectionStatus';

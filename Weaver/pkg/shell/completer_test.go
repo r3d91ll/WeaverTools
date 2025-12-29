@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/r3d91ll/weaver/pkg/backend"
+	"github.com/r3d91ll/weaver/pkg/concepts"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 	"github.com/r3d91ll/wool"
 )
@@ -50,10 +52,25 @@ func newTestManager(agentNames ...string) *runtime.Manager {
 	return manager
 }
 
+// newTestConceptStore creates a concept store with test concepts.
+// Each concept is created with a single sample for testing purposes.
+func newTestConceptStore(conceptNames ...string) *concepts.Store {
+	store := concepts.NewStore()
+	for i, name := range conceptNames {
+		sample := concepts.Sample{
+			ID:          name + "-sample-" + string(rune('0'+i)),
+			Content:     "test content for " + name,
+			ExtractedAt: time.Now(),
+		}
+		store.Add(name, sample)
+	}
+	return store
+}
+
 // TestNewShellCompleter tests completer creation.
 func TestNewShellCompleter(t *testing.T) {
 	t.Run("with nil manager", func(t *testing.T) {
-		c := NewShellCompleter(nil)
+		c := NewShellCompleter(nil, nil)
 		if c == nil {
 			t.Fatal("expected non-nil completer")
 		}
@@ -64,7 +81,7 @@ func TestNewShellCompleter(t *testing.T) {
 
 	t.Run("with manager", func(t *testing.T) {
 		m := newTestManager()
-		c := NewShellCompleter(m)
+		c := NewShellCompleter(m, nil)
 		if c == nil {
 			t.Fatal("expected non-nil completer")
 		}
@@ -72,11 +89,37 @@ func TestNewShellCompleter(t *testing.T) {
 			t.Error("expected agents field to match provided manager")
 		}
 	})
+
+	t.Run("with concept store", func(t *testing.T) {
+		cs := newTestConceptStore("honor", "integrity")
+		c := NewShellCompleter(nil, cs)
+		if c == nil {
+			t.Fatal("expected non-nil completer")
+		}
+		if c.concepts != cs {
+			t.Error("expected concepts field to match provided store")
+		}
+	})
+
+	t.Run("with both manager and concept store", func(t *testing.T) {
+		m := newTestManager("agent1")
+		cs := newTestConceptStore("honor")
+		c := NewShellCompleter(m, cs)
+		if c == nil {
+			t.Fatal("expected non-nil completer")
+		}
+		if c.agents != m {
+			t.Error("expected agents field to match provided manager")
+		}
+		if c.concepts != cs {
+			t.Error("expected concepts field to match provided store")
+		}
+	})
 }
 
 // TestDoCommandCompletion tests command completion functionality.
 func TestDoCommandCompletion(t *testing.T) {
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	tests := []struct {
 		name     string
@@ -191,7 +234,7 @@ func TestDoCommandCompletion(t *testing.T) {
 // TestDoAgentCompletion tests agent name completion functionality.
 func TestDoAgentCompletion(t *testing.T) {
 	manager := newTestManager("senior", "junior", "specialist", "supervisor")
-	c := NewShellCompleter(manager)
+	c := NewShellCompleter(manager, nil)
 
 	tests := []struct {
 		name     string
@@ -291,7 +334,7 @@ func TestDoAgentCompletion(t *testing.T) {
 
 // TestDoNilAgentManager tests agent completion with nil manager.
 func TestDoNilAgentManager(t *testing.T) {
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	results, length := c.Do([]rune("@se"), 3)
 	if len(results) != 0 {
@@ -304,7 +347,7 @@ func TestDoNilAgentManager(t *testing.T) {
 
 // TestDoEdgeCases tests edge cases and boundary conditions.
 func TestDoEdgeCases(t *testing.T) {
-	c := NewShellCompleter(newTestManager("agent1", "agent2"))
+	c := NewShellCompleter(newTestManager("agent1", "agent2"), nil)
 
 	tests := []struct {
 		name       string
@@ -404,7 +447,7 @@ func TestDoEdgeCases(t *testing.T) {
 
 // TestDoMixedContent tests completion with mixed command and agent content.
 func TestDoMixedContent(t *testing.T) {
-	c := NewShellCompleter(newTestManager("senior", "junior"))
+	c := NewShellCompleter(newTestManager("senior", "junior"), nil)
 
 	tests := []struct {
 		name     string
@@ -547,7 +590,7 @@ func TestDynamicAgentList(t *testing.T) {
 	registry.Register("mock", &mockBackend{name: "mock"})
 	manager := runtime.NewManager(registry)
 
-	c := NewShellCompleter(manager)
+	c := NewShellCompleter(manager, nil)
 
 	// Initially no agents
 	results, _ := c.Do([]rune("@"), 1)
@@ -586,7 +629,7 @@ func TestDynamicAgentList(t *testing.T) {
 
 // TestCompletionSuffix verifies completions include trailing space.
 func TestCompletionSuffix(t *testing.T) {
-	c := NewShellCompleter(newTestManager("agent"))
+	c := NewShellCompleter(newTestManager("agent"), nil)
 
 	// Test command completion includes space
 	results, _ := c.Do([]rune("/help"), 5)
@@ -611,7 +654,7 @@ func TestCompletionSuffix(t *testing.T) {
 func TestReadlineAutoCompleterInterface(t *testing.T) {
 	// This is a compile-time check that exists in completer.go,
 	// but we include a runtime check here for documentation purposes.
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	// Test that Do method exists and has correct signature
 	results, length := c.Do([]rune("/h"), 2)
@@ -625,7 +668,7 @@ func TestReadlineAutoCompleterInterface(t *testing.T) {
 
 // TestCaseSensitivity verifies completion is case-sensitive.
 func TestCaseSensitivity(t *testing.T) {
-	c := NewShellCompleter(newTestManager("Senior", "junior"))
+	c := NewShellCompleter(newTestManager("Senior", "junior"), nil)
 
 	// Lowercase prefix should match lowercase agent
 	results, _ := c.Do([]rune("@j"), 2)
@@ -654,11 +697,373 @@ func TestCaseSensitivity(t *testing.T) {
 	}
 }
 
+// TestDoConceptCompletion tests concept name completion functionality.
+func TestDoConceptCompletion(t *testing.T) {
+	store := newTestConceptStore("honor", "integrity", "honesty", "courage")
+	c := NewShellCompleter(nil, store)
+
+	tests := []struct {
+		name     string
+		line     string
+		pos      int
+		wantLen  int
+		contains []string
+	}{
+		// Test completing concept names after /analyze
+		{
+			name:     "analyze with empty arg shows all concepts",
+			line:     "/analyze ",
+			pos:      9,
+			wantLen:  0,
+			contains: []string{"honor ", "integrity ", "honesty ", "courage "},
+		},
+		{
+			name:     "analyze with partial hon shows matching concepts",
+			line:     "/analyze hon",
+			pos:      12,
+			wantLen:  3,
+			contains: []string{"or ", "esty "},
+		},
+		{
+			name:     "analyze with full concept name",
+			line:     "/analyze honor",
+			pos:      14,
+			wantLen:  5,
+			contains: []string{" "},
+		},
+		// Test completing concept names after /compare
+		{
+			name:     "compare with empty first arg shows all concepts",
+			line:     "/compare ",
+			pos:      9,
+			wantLen:  0,
+			contains: []string{"honor ", "integrity ", "honesty ", "courage "},
+		},
+		{
+			name:     "compare with partial first arg",
+			line:     "/compare int",
+			pos:      12,
+			wantLen:  3,
+			contains: []string{"egrity "},
+		},
+		// Test completing second concept in /compare
+		{
+			name:     "compare second arg after first concept",
+			line:     "/compare honor ",
+			pos:      15,
+			wantLen:  0,
+			contains: []string{"honor ", "integrity ", "honesty ", "courage "},
+		},
+		{
+			name:     "compare second arg with partial",
+			line:     "/compare honor cour",
+			pos:      19,
+			wantLen:  4,
+			contains: []string{"age "},
+		},
+		// Test completing concept names after /validate
+		{
+			name:     "validate with empty arg shows all concepts",
+			line:     "/validate ",
+			pos:      10,
+			wantLen:  0,
+			contains: []string{"honor ", "integrity ", "honesty ", "courage "},
+		},
+		{
+			name:     "validate with partial",
+			line:     "/validate cou",
+			pos:      13,
+			wantLen:  3,
+			contains: []string{"rage "},
+		},
+		// Test completing concept names after /metrics
+		{
+			name:     "metrics with empty arg shows all concepts",
+			line:     "/metrics ",
+			pos:      9,
+			wantLen:  0,
+			contains: []string{"honor ", "integrity ", "honesty ", "courage "},
+		},
+		{
+			name:     "metrics with partial",
+			line:     "/metrics hon",
+			pos:      12,
+			wantLen:  3,
+			contains: []string{"or ", "esty "},
+		},
+		// Test no match
+		{
+			name:     "no matching concepts",
+			line:     "/analyze xyz",
+			pos:      12,
+			wantLen:  0,
+			contains: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, length := c.Do([]rune(tt.line), tt.pos)
+
+			if tt.contains == nil {
+				if len(results) != 0 {
+					t.Errorf("expected no results, got %d", len(results))
+				}
+				return
+			}
+
+			if tt.wantLen > 0 && length != tt.wantLen {
+				t.Errorf("length = %d, want %d", length, tt.wantLen)
+			}
+
+			// Convert results to strings for comparison
+			gotStrings := make([]string, len(results))
+			for i, r := range results {
+				gotStrings[i] = string(r)
+			}
+
+			// Check that all expected completions are present
+			for _, want := range tt.contains {
+				found := false
+				for _, got := range gotStrings {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("missing expected completion %q in %v", want, gotStrings)
+				}
+			}
+		})
+	}
+}
+
+// TestDoConceptCompletionNoConcepts tests concept completion with no concepts stored.
+func TestDoConceptCompletionNoConcepts(t *testing.T) {
+	// Test with empty concept store
+	t.Run("empty concept store", func(t *testing.T) {
+		store := concepts.NewStore()
+		c := NewShellCompleter(nil, store)
+
+		results, length := c.Do([]rune("/analyze "), 9)
+		if len(results) != 0 {
+			t.Errorf("expected no results with empty store, got %d", len(results))
+		}
+		if length != 0 {
+			t.Errorf("expected length 0 with empty store, got %d", length)
+		}
+	})
+
+	// Test with nil concept store
+	t.Run("nil concept store", func(t *testing.T) {
+		c := NewShellCompleter(nil, nil)
+
+		results, length := c.Do([]rune("/analyze hon"), 12)
+		if len(results) != 0 {
+			t.Errorf("expected no results with nil store, got %d", len(results))
+		}
+		if length != 0 {
+			t.Errorf("expected length 0 with nil store, got %d", length)
+		}
+	})
+}
+
+// TestDoConceptCompletionNonConceptCommands tests that concept completion is not triggered
+// for commands that don't expect concept arguments.
+func TestDoConceptCompletionNonConceptCommands(t *testing.T) {
+	store := newTestConceptStore("honor", "integrity")
+	c := NewShellCompleter(nil, store)
+
+	nonConceptCommands := []struct {
+		name string
+		line string
+		pos  int
+	}{
+		{"help command", "/help ", 6},
+		{"help with arg", "/help ho", 8},
+		{"agents command", "/agents ", 8},
+		{"agents with arg", "/agents ho", 10},
+		{"session command", "/session ", 9},
+		{"history command", "/history ", 9},
+		{"clear command", "/clear ", 7},
+		{"concepts command", "/concepts ", 10},
+		{"clear_concepts command", "/clear_concepts ", 16},
+		{"default command", "/default ", 9},
+		{"extract command", "/extract ", 9},
+		{"extract with arg", "/extract ho", 11},
+		{"quit command", "/quit ", 6},
+		{"exit command", "/exit ", 6},
+	}
+
+	for _, tt := range nonConceptCommands {
+		t.Run(tt.name, func(t *testing.T) {
+			results, _ := c.Do([]rune(tt.line), tt.pos)
+			// Should not complete to concept names
+			for _, r := range results {
+				completion := string(r)
+				if completion == "onor " || completion == "ntegrity " ||
+					completion == "honor " || completion == "integrity " {
+					t.Errorf("unexpected concept completion %q for non-concept command", completion)
+				}
+			}
+		})
+	}
+}
+
+// TestDoConceptCompletionWithAgentPrefix tests concept completion works
+// when the line also contains an agent prefix.
+func TestDoConceptCompletionWithAgentPrefix(t *testing.T) {
+	manager := newTestManager("senior")
+	store := newTestConceptStore("honor", "integrity")
+	c := NewShellCompleter(manager, store)
+
+	tests := []struct {
+		name     string
+		line     string
+		pos      int
+		wantLen  int
+		contains []string
+	}{
+		{
+			name:     "agent then analyze with partial concept",
+			line:     "@senior /analyze hon",
+			pos:      20,
+			wantLen:  3,
+			contains: []string{"or "},
+		},
+		{
+			name:     "agent then analyze with empty arg",
+			line:     "@senior /analyze ",
+			pos:      17,
+			wantLen:  0,
+			contains: []string{"honor ", "integrity "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, length := c.Do([]rune(tt.line), tt.pos)
+
+			if tt.wantLen > 0 && length != tt.wantLen {
+				t.Errorf("length = %d, want %d", length, tt.wantLen)
+			}
+
+			gotStrings := make([]string, len(results))
+			for i, r := range results {
+				gotStrings[i] = string(r)
+			}
+
+			for _, want := range tt.contains {
+				found := false
+				for _, got := range gotStrings {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("missing expected completion %q in %v", want, gotStrings)
+				}
+			}
+		})
+	}
+}
+
+// TestDynamicConceptList verifies concepts are fetched dynamically.
+func TestDynamicConceptList(t *testing.T) {
+	store := concepts.NewStore()
+	c := NewShellCompleter(nil, store)
+
+	// Initially no concepts
+	results, _ := c.Do([]rune("/analyze "), 9)
+	if len(results) != 0 {
+		t.Errorf("expected no completions with empty store, got %d", len(results))
+	}
+
+	// Add a concept
+	store.Add("honor", concepts.Sample{
+		ID:          "sample1",
+		Content:     "test",
+		ExtractedAt: time.Now(),
+	})
+
+	// Should now see the concept
+	results, _ = c.Do([]rune("/analyze "), 9)
+	if len(results) != 1 {
+		t.Errorf("expected 1 completion after adding concept, got %d", len(results))
+	}
+
+	// Add another concept
+	store.Add("integrity", concepts.Sample{
+		ID:          "sample2",
+		Content:     "test",
+		ExtractedAt: time.Now(),
+	})
+
+	// Should see both concepts
+	results, _ = c.Do([]rune("/analyze "), 9)
+	if len(results) != 2 {
+		t.Errorf("expected 2 completions after adding second concept, got %d", len(results))
+	}
+}
+
+// TestConceptCompletionSuffix verifies concept completions include trailing space.
+func TestConceptCompletionSuffix(t *testing.T) {
+	store := newTestConceptStore("honor")
+	c := NewShellCompleter(nil, store)
+
+	// Test concept completion includes space
+	results, _ := c.Do([]rune("/analyze honor"), 14)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0]) != " " {
+		t.Errorf("expected completion to be ' ' (just space), got %q", string(results[0]))
+	}
+}
+
+// TestIsConceptCommandContext tests the context detection helper.
+func TestIsConceptCommandContext(t *testing.T) {
+	c := NewShellCompleter(nil, nil)
+
+	tests := []struct {
+		line      string
+		wordStart int
+		want      bool
+	}{
+		// Positive cases
+		{"/analyze ", 9, true},
+		{"/analyze hon", 9, true},
+		{"/compare ", 9, true},
+		{"/compare concept1 ", 18, true},
+		{"/validate ", 10, true},
+		{"/metrics ", 9, true},
+		// Negative cases
+		{"/help ", 6, false},
+		{"/agents ", 8, false},
+		{"text ", 5, false},
+		{"", 0, false},
+		{"/unknown ", 9, false},
+		{"/session ", 9, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.line, func(t *testing.T) {
+			got := c.isConceptCommandContext(tt.line, tt.wordStart)
+			if got != tt.want {
+				t.Errorf("isConceptCommandContext(%q, %d) = %v, want %v",
+					tt.line, tt.wordStart, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestSortedCompletions tests that results are returned in a consistent order.
 func TestSortedCompletions(t *testing.T) {
 	// Note: The current implementation doesn't guarantee sorted order.
 	// This test documents the behavior and can be updated if sorting is added.
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	results1, _ := c.Do([]rune("/c"), 2)
 	results2, _ := c.Do([]rune("/c"), 2)
@@ -684,7 +1089,7 @@ func TestSortedCompletions(t *testing.T) {
 
 // TestDoFlagCompletion tests flag completion for /clear and /clear_concepts commands.
 func TestDoFlagCompletion(t *testing.T) {
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	tests := []struct {
 		name     string
@@ -791,7 +1196,7 @@ func TestDoFlagCompletion(t *testing.T) {
 
 // TestDoFlagCompletionNotForOtherCommands tests that flags don't complete for other commands.
 func TestDoFlagCompletionNotForOtherCommands(t *testing.T) {
-	c := NewShellCompleter(nil)
+	c := NewShellCompleter(nil, nil)
 
 	tests := []struct {
 		name string

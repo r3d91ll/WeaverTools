@@ -50,11 +50,16 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		return []byte("\033[32mweaver>\033[0m ")
 	}
 
+	// Create concept store and completer for tab completion
+	conceptStore := concepts.NewStore()
+	completer := NewShellCompleter(agents, conceptStore)
+
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          string(prompt()),
 		HistoryFile:     cfg.HistoryFile,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
+		AutoComplete:    completer,
 	})
 	if err != nil {
 		return nil, err
@@ -71,7 +76,7 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		conv:           session.ActiveConversation(),
 		rl:             rl,
 		defaultAgent:   defaultAgent,
-		conceptStore:   concepts.NewStore(),
+		conceptStore:   conceptStore,
 		analysisClient: analysis.NewClient(cfg.LoomURL), // NewClient defaults to localhost:8080
 		Prompter:       NewInteractivePrompter(),        // Default to interactive prompts
 	}, nil

@@ -755,7 +755,7 @@ func TestClearConcepts_ForceWithEmptyStore(t *testing.T) {
 // newTestShellForClearWithMessages creates a Shell for testing /clear with a real conversation.
 func newTestShellForClearWithMessages(prompter Prompter, messageCount int) *Shell {
 	// Create real yarn session and conversation
-	session := yarn.NewSession("test-session")
+	session := yarn.NewSession("test-session", "Test session for clear command")
 	conv := session.ActiveConversation()
 
 	// Add test messages to the conversation

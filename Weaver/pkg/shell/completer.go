@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
+	"github.com/r3d91ll/weaver/pkg/concepts"
 	"github.com/r3d91ll/weaver/pkg/runtime"
 )
 
@@ -29,16 +30,28 @@ var commands = []string{
 	"clear_concepts",
 }
 
+// conceptCommands is the list of commands that expect concept names as arguments.
+// These commands will trigger concept name tab completion for their arguments.
+var conceptCommands = []string{
+	"analyze",
+	"compare",
+	"validate",
+	"metrics",
+}
+
 // ShellCompleter provides tab completion for commands and agent names.
 // It implements the readline.AutoCompleter interface.
 type ShellCompleter struct {
-	agents *runtime.Manager
+	agents   *runtime.Manager
+	concepts *concepts.Store
 }
 
-// NewShellCompleter creates a new completer with access to the agent manager.
-func NewShellCompleter(agents *runtime.Manager) *ShellCompleter {
+// NewShellCompleter creates a new completer with access to the agent manager
+// and concept store for dynamic tab completion.
+func NewShellCompleter(agents *runtime.Manager, conceptStore *concepts.Store) *ShellCompleter {
 	return &ShellCompleter{
-		agents: agents,
+		agents:   agents,
+		concepts: conceptStore,
 	}
 }
 
@@ -76,11 +89,6 @@ func (c *ShellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 	wordStart := findWordStart(lineStr)
 	currentWord := lineStr[wordStart:]
 
-	// Edge case: empty word (e.g., trailing space)
-	if currentWord == "" {
-		return nil, 0
-	}
-
 	// Handle command completion (starts with /)
 	if strings.HasPrefix(currentWord, "/") {
 		return c.completeCommand(currentWord)
@@ -98,6 +106,21 @@ func (c *ShellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 		if strings.HasPrefix(lineLower, "/clear ") || strings.HasPrefix(lineLower, "/clear_concepts ") {
 			return c.completeFlags(currentWord)
 		}
+	}
+
+	// Handle concept completion for arguments to concept-expecting commands
+	// Check if the line contains a concept command before the current word
+	// Note: This must come BEFORE the empty word check because we want to
+	// show all concepts when the user types "/analyze " (with trailing space)
+	if c.isConceptCommandContext(lineStr, wordStart) {
+		return c.completeConcept(currentWord)
+	}
+
+	// Edge case: empty word with no special context (e.g., trailing space)
+	// For command/agent contexts, these are handled above by their prefix checks.
+	// For concept contexts, empty word is valid and handled above.
+	if currentWord == "" {
+		return nil, 0
 	}
 
 	return nil, 0
@@ -119,6 +142,53 @@ func findWordStart(s string) int {
 
 	// Return position after the whitespace, or 0 if none found
 	return wordStart + 1
+}
+
+// isConceptCommandContext checks if the line contains a concept-expecting command
+// before the current word position. This is used to trigger concept name completion
+// for arguments to commands like /analyze, /compare, /validate, /metrics.
+//
+// Parameters:
+//   - line: The input line up to the cursor position
+//   - wordStart: The starting position of the current word being typed
+//
+// Returns true if the line starts with a concept command followed by whitespace.
+func (c *ShellCompleter) isConceptCommandContext(line string, wordStart int) bool {
+	// Get the part of the line before the current word
+	beforeWord := line[:wordStart]
+
+	// Trim trailing whitespace to get the command portion
+	beforeWord = strings.TrimRight(beforeWord, " \t")
+
+	// Check if the line starts with / (command prefix)
+	if !strings.HasPrefix(beforeWord, "/") {
+		// No command on this line, might still have concept command earlier
+		// Look for the last command in the line
+		lastCmdIdx := strings.LastIndex(beforeWord, "/")
+		if lastCmdIdx == -1 {
+			return false
+		}
+		beforeWord = beforeWord[lastCmdIdx:]
+	}
+
+	// Extract the command name (first word after /)
+	cmdPart := strings.TrimPrefix(beforeWord, "/")
+
+	// The command is the first word (up to the first space/tab)
+	cmdName := cmdPart
+	spaceIdx := strings.IndexAny(cmdPart, " \t")
+	if spaceIdx != -1 {
+		cmdName = cmdPart[:spaceIdx]
+	}
+
+	// Check if this is a concept-expecting command
+	for _, conceptCmd := range conceptCommands {
+		if cmdName == conceptCmd {
+			return true
+		}
+	}
+
+	return false
 }
 
 // completeCommand returns completions for commands starting with the given prefix.
@@ -179,6 +249,31 @@ func (c *ShellCompleter) completeFlags(prefix string) ([][]rune, int) {
 		if strings.HasPrefix(flag, prefix) {
 			// Return the suffix that completes the flag (add space after)
 			suffix := flag[len(prefix):] + " "
+			matches = append(matches, []rune(suffix))
+		}
+	}
+
+	// Return the length of the prefix that we're completing
+	return matches, len(prefix)
+}
+
+// completeConcept returns completions for concept names starting with the given prefix.
+// Concept names are fetched dynamically from the concept store.
+func (c *ShellCompleter) completeConcept(prefix string) ([][]rune, int) {
+	// If no concept store is available, return no completions
+	if c.concepts == nil {
+		return nil, 0
+	}
+
+	// Get the current list of concepts dynamically
+	// List() returns map[string]int with concept names and sample counts
+	conceptMap := c.concepts.List()
+
+	var matches [][]rune
+	for name := range conceptMap {
+		if strings.HasPrefix(name, prefix) {
+			// Return the suffix that completes the concept name (add space after)
+			suffix := name[len(prefix):] + " "
 			matches = append(matches, []rune(suffix))
 		}
 	}

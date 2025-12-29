@@ -257,7 +257,7 @@ func buildMessageHistory(history []ChatHistoryMessage, newMessage string) []*yar
 
 	// Add history messages
 	for _, h := range history {
-		role := yarn.Role(h.Role)
+		role := yarn.MessageRole(h.Role)
 		if role != yarn.RoleUser && role != yarn.RoleAssistant && role != yarn.RoleSystem {
 			role = yarn.RoleUser // Default to user for unknown roles
 		}

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -302,6 +303,13 @@ func (h *SessionsHandler) UpdateSession(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := store.Update(session); err != nil {
+		// Check if session was deleted between Get and Update (TOCTOU race)
+		var sessionErr *SessionError
+		if errors.As(err, &sessionErr) && sessionErr.Code == "not_found" {
+			WriteError(w, http.StatusNotFound, "session_not_found",
+				"Session '"+sessionID+"' not found")
+			return
+		}
 		WriteError(w, http.StatusInternalServerError, "update_error",
 			"Failed to update session: "+err.Error())
 		return
@@ -390,6 +398,13 @@ func (h *SessionsHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 	session.EndedAt = &now
 
 	if err := store.Update(session); err != nil {
+		// Check if session was deleted between Get and Update (TOCTOU race)
+		var sessionErr *SessionError
+		if errors.As(err, &sessionErr) && sessionErr.Code == "not_found" {
+			WriteError(w, http.StatusNotFound, "session_not_found",
+				"Session '"+sessionID+"' not found")
+			return
+		}
 		WriteError(w, http.StatusInternalServerError, "update_error",
 			"Failed to end session: "+err.Error())
 		return

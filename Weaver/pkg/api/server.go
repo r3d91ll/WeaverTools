@@ -123,6 +123,8 @@ func (s *Server) Start() error {
 	// Apply middleware in reverse order (last added is outermost)
 	if len(s.config.CORSOrigins) > 0 {
 		handler = CORSMiddleware(s.config.CORSOrigins)(handler)
+		// Configure WebSocket upgrader to use the same CORS origins
+		SetUpgraderCheckOrigin(makeOriginChecker(s.config.CORSOrigins))
 	}
 	if s.config.EnableLogging {
 		handler = LoggingMiddleware(handler)
@@ -139,14 +141,26 @@ func (s *Server) Start() error {
 
 	s.running = true
 
+	// Use error channel to detect binding failures
+	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("[api] Starting server on %s", s.Address())
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[api] Server error: %v", err)
+			errCh <- err
 		}
+		close(errCh)
 	}()
 
-	return nil
+	// Wait briefly to catch immediate binding errors (e.g., port in use)
+	select {
+	case err := <-errCh:
+		s.running = false
+		return fmt.Errorf("server failed to start: %w", err)
+	case <-time.After(100 * time.Millisecond):
+		// Server likely started successfully
+		return nil
+	}
 }
 
 // Shutdown gracefully shuts down the server with a timeout.
@@ -172,4 +186,29 @@ func (s *Server) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
+}
+
+// makeOriginChecker creates a function that validates WebSocket origins
+// against the configured CORS origins list.
+func makeOriginChecker(allowedOrigins []string) func(*http.Request) bool {
+	// Build a set for O(1) lookup
+	allowed := make(map[string]bool)
+	for _, origin := range allowedOrigins {
+		allowed[origin] = true
+		// Also allow wildcard
+		if origin == "*" {
+			return func(r *http.Request) bool {
+				return true
+			}
+		}
+	}
+
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// No origin header (same-origin request) - allow
+			return true
+		}
+		return allowed[origin]
+	}
 }

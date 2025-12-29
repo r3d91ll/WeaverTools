@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -511,7 +512,7 @@ func TestBackendsHandler_Concurrent(t *testing.T) {
 
 	// Run concurrent requests
 	const numRequests = 100
-	done := make(chan bool, numRequests)
+	errChan := make(chan error, numRequests)
 
 	for i := 0; i < numRequests; i++ {
 		go func() {
@@ -520,15 +521,18 @@ func TestBackendsHandler_Concurrent(t *testing.T) {
 			router.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusOK {
-				t.Errorf("Expected status 200, got %d", rec.Code)
+				errChan <- fmt.Errorf("expected status 200, got %d", rec.Code)
+				return
 			}
-			done <- true
+			errChan <- nil
 		}()
 	}
 
-	// Wait for all requests to complete
+	// Wait for all requests to complete and collect errors
 	for i := 0; i < numRequests; i++ {
-		<-done
+		if err := <-errChan; err != nil {
+			t.Error(err)
+		}
 	}
 }
 

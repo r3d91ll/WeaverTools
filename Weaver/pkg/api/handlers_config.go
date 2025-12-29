@@ -3,6 +3,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/r3d91ll/weaver/pkg/config"
@@ -400,12 +401,5 @@ func isValidOption(value string, validOptions []string) bool {
 
 // joinOptions joins a slice of options with commas.
 func joinOptions(options []string) string {
-	result := ""
-	for i, opt := range options {
-		if i > 0 {
-			result += ", "
-		}
-		result += opt
-	}
-	return result
+	return strings.Join(options, ", ")
 }

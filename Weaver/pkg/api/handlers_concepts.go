@@ -361,7 +361,7 @@ func (h *ConceptsHandler) AddSample(w http.ResponseWriter, r *http.Request) {
 		sample.HiddenState = &yarn.HiddenState{
 			Vector: req.HiddenState.Vector,
 			Layer:  req.HiddenState.Layer,
-			Dtype:  req.HiddenState.Dtype,
+			DType:  req.HiddenState.Dtype,
 		}
 	}
 

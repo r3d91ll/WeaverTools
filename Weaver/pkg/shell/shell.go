@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/r3d91ll/weaver/pkg/analysis"
@@ -19,6 +20,7 @@ import (
 	"github.com/r3d91ll/weaver/pkg/export"
 	"github.com/r3d91ll/weaver/pkg/help"
 	"github.com/r3d91ll/weaver/pkg/runtime"
+	"github.com/r3d91ll/weaver/pkg/spinner"
 	"github.com/r3d91ll/yarn"
 )
 
@@ -31,6 +33,7 @@ type Shell struct {
 	defaultAgent   string // Default agent to route messages to
 	conceptStore   *concepts.Store
 	analysisClient *analysis.Client
+	Prompter       Prompter // Prompter for confirmation prompts (exported for testing)
 }
 
 // Config holds shell configuration.
@@ -75,6 +78,7 @@ func New(agents *runtime.Manager, session *yarn.Session, cfg Config) (*Shell, er
 		defaultAgent:   defaultAgent,
 		conceptStore:   conceptStore,
 		analysisClient: analysis.NewClient(cfg.LoomURL), // NewClient defaults to localhost:8080
+		Prompter:       NewInteractivePrompter(),        // Default to interactive prompts
 	}, nil
 }
 
@@ -159,9 +163,38 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		s.printHistory()
 
 	case "/clear":
+		messageCount := len(s.conv.History(-1))
+		if messageCount == 0 {
+			fmt.Println("No messages to clear.")
+			return nil
+		}
+
+		// Check for --force or -f flag to skip confirmation
+		forceFlag := false
+		for _, arg := range parts[1:] {
+			if arg == "--force" || arg == "-f" {
+				forceFlag = true
+				break
+			}
+		}
+
+		// Prompt for confirmation unless --force is specified
+		if !forceFlag {
+			message := fmt.Sprintf("This will clear %d message(s). Are you sure?", messageCount)
+			confirmed, err := s.Prompter.Confirm(message)
+			if err != nil {
+				return fmt.Errorf("failed to get confirmation: %w", err)
+			}
+
+			if !confirmed {
+				fmt.Println("Operation cancelled.")
+				return nil
+			}
+		}
+
 		s.conv = yarn.NewConversation(s.session.Name + "-conv")
 		s.session.AddConversation(s.conv)
-		fmt.Println("Conversation cleared.")
+		fmt.Printf("Cleared %d message(s).\n", messageCount)
 
 	case "/default":
 		if len(parts) > 1 {
@@ -191,8 +224,37 @@ func (s *Shell) handleCommand(ctx context.Context, line string) error {
 		return s.handleMetrics(ctx, parts[1:])
 
 	case "/clear_concepts":
-		count := s.conceptStore.ClearAll()
-		fmt.Printf("Cleared %d concepts.\n", count)
+		count := s.conceptStore.Count()
+		if count == 0 {
+			fmt.Println("No concepts to clear.")
+			return nil
+		}
+
+		// Check for --force or -f flag to skip confirmation
+		forceFlag := false
+		for _, arg := range parts[1:] {
+			if arg == "--force" || arg == "-f" {
+				forceFlag = true
+				break
+			}
+		}
+
+		// Prompt for confirmation unless --force is specified
+		if !forceFlag {
+			message := fmt.Sprintf("This will delete %d concept(s). Are you sure?", count)
+			confirmed, err := s.Prompter.Confirm(message)
+			if err != nil {
+				return fmt.Errorf("failed to get confirmation: %w", err)
+			}
+
+			if !confirmed {
+				fmt.Println("Operation cancelled.")
+				return nil
+			}
+		}
+
+		cleared := s.conceptStore.ClearAll()
+		fmt.Printf("Cleared %d concepts.\n", cleared)
 
 	// Academic export commands
 	case "/export_latex":
@@ -245,11 +307,19 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 	userMsg := yarn.NewAgentMessage(yarn.RoleUser, message, "user", "user")
 	s.conv.Add(userMsg)
 
-	// Show thinking indicator
-	fmt.Printf("\033[33m[%s]\033[0m thinking...\n", agent.Name())
+	// Show thinking spinner with elapsed time
+	thinkingMsg := fmt.Sprintf("\033[33m[%s]\033[0m thinking...", agent.Name())
+	spin := spinner.NewWithConfig(spinner.Config{
+		CharSet:     spinner.Braille,
+		Message:     thinkingMsg,
+		ShowElapsed: true,
+	})
+	spin.Start()
+	defer spin.Stop() // Ensure spinner stops even on error or panic
 
 	// Get response
 	resp, err := agent.Chat(ctx, s.conv.History(-1))
+	responseTime := spin.Elapsed() // Capture response time before spinner stops
 	if err != nil {
 		return createChatError(agent.Name(), agent.BackendName(), err)
 	}
@@ -265,6 +335,9 @@ func (s *Shell) handleMessage(ctx context.Context, line string) error {
 		dim := resp.HiddenState.Dimension()
 		fmt.Printf("\033[90m  └─ hidden state: %d dimensions\033[0m\n", dim)
 	}
+
+	// Show response time
+	fmt.Printf("\033[90m  └─ response time: %s\033[0m\n", spinner.FormatElapsedShort(responseTime))
 
 	fmt.Println()
 	return nil
@@ -357,19 +430,46 @@ func (s *Shell) handleExtract(ctx context.Context, args []string) error {
 		return createNoHiddenStateAgentError(s.agents.List())
 	}
 
-	fmt.Printf("\033[33mExtracting %d samples for '%s' using %s...\033[0m\n", count, concept, extractAgent.Name())
+	// Create and start progress bar with all display options enabled
+	progressBar := spinner.NewProgressWithConfig(spinner.ProgressConfig{
+		Total:            count,
+		Message:          fmt.Sprintf("Extracting '%s' using %s", concept, extractAgent.Name()),
+		Width:            20,
+		ShowPercentage:   true,
+		ShowCount:        true,
+		ShowElapsed:      true,
+		ShowETA:          true,
+		MinSamplesForETA: 2,
+		Writer:           os.Stderr,
+	})
+	progressBar.Start()
 
 	// Create extractor and run
 	extractor := concepts.NewExtractor(extractAgent.Backend, s.conceptStore)
 	cfg := concepts.DefaultExtractionConfig(concept, count)
 
+	// Wire progress callback to update the progress bar.
+	// The callback is called at the start of each iteration with the current sample index (0-indexed).
+	// progressBar.Set() is thread-safe (uses mutex internally).
+	cfg.OnProgress = func(current, total int, elapsed time.Duration) {
+		progressBar.Set(current)
+	}
+
 	result, err := extractor.Extract(ctx, cfg)
 	if err != nil {
+		progressBar.Fail("Extraction failed")
 		return createExtractionError(concept, count, extractAgent.Name(), err)
 	}
 
-	// Display results
-	fmt.Printf("\033[32m✓ Extracted %d samples\033[0m\n", result.SamplesAdded)
+	// Complete the progress bar before displaying detailed results
+	// Call Fail() if all samples failed, otherwise Complete() with success count
+	if result.SamplesAdded == 0 && len(result.Errors) > 0 {
+		progressBar.Fail(fmt.Sprintf("All %d extractions failed", count))
+	} else {
+		progressBar.Complete(fmt.Sprintf("Extracted %d samples", result.SamplesAdded))
+	}
+
+	// Display detailed results
 	fmt.Printf("  Concept: %s\n", result.Concept)
 	fmt.Printf("  Total samples: %d\n", result.TotalSamples)
 	fmt.Printf("  Dimension: %d\n", result.Dimension)

@@ -263,15 +263,30 @@ func (s *Spinner) clearLine() {
 	}
 }
 
-// formatElapsed formats a duration for display.
-// Short durations show as "(1.2s)", longer as "(1m 30s)".
-func (s *Spinner) formatElapsed(d time.Duration) string {
+// FormatElapsedShort formats a duration for display without parentheses.
+// Short durations show as "1.2s", longer as "1m 30s".
+// This is useful when embedding elapsed time in other contexts where
+// parentheses are not desired.
+func FormatElapsedShort(d time.Duration) string {
 	if d < time.Minute {
-		return fmt.Sprintf("(%.1fs)", d.Seconds())
+		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
 	minutes := int(d.Minutes())
 	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("(%dm %ds)", minutes, seconds)
+	return fmt.Sprintf("%dm %ds", minutes, seconds)
+}
+
+// FormatElapsed formats a duration for display with parentheses.
+// Short durations show as "(1.2s)", longer as "(1m 30s)".
+// This is the standard format used by the spinner for elapsed time display.
+func FormatElapsed(d time.Duration) string {
+	return "(" + FormatElapsedShort(d) + ")"
+}
+
+// formatElapsed is an internal method that calls the exported FormatElapsed function.
+// Kept for backwards compatibility within the package.
+func (s *Spinner) formatElapsed(d time.Duration) string {
+	return FormatElapsed(d)
 }
 
 // hideCursorIfEnabled writes the hide cursor escape sequence if configured.

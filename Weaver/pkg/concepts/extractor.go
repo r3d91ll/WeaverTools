@@ -11,6 +11,11 @@ import (
 	"github.com/r3d91ll/weaver/pkg/backend"
 )
 
+// ProgressCallback is called during extraction to report progress.
+// It receives the current sample number (0-indexed), total samples,
+// and elapsed time since extraction started.
+type ProgressCallback func(current, total int, elapsed time.Duration)
+
 // Extractor generates concept examples and extracts hidden states.
 type Extractor struct {
 	backend backend.Backend
@@ -40,6 +45,7 @@ type ExtractionConfig struct {
 	NumSamples  int     // Number of samples to extract
 	Temperature float64 // Temperature for generation (higher = more variety)
 	MaxTokens   int     // Max tokens per response
+	OnProgress  ProgressCallback // Optional callback for progress updates (nil = no callback)
 }
 
 // DefaultExtractionConfig returns sensible defaults.
@@ -83,6 +89,11 @@ func (e *Extractor) Extract(ctx context.Context, cfg ExtractionConfig) (*Extract
 		default:
 		}
 
+		// Report progress if callback is set
+		if cfg.OnProgress != nil {
+			cfg.OnProgress(i, cfg.NumSamples, time.Since(start))
+		}
+
 		sample, err := e.extractSingle(ctx, prompt, cfg)
 		if err != nil {
 			// Store a user-friendly error message for display
@@ -90,7 +101,11 @@ func (e *Extractor) Extract(ctx context.Context, cfg ExtractionConfig) (*Extract
 			continue
 		}
 
-		e.store.Add(cfg.Concept, sample)
+		if err := e.store.Add(cfg.Concept, sample); err != nil {
+			// Store a user-friendly error message for display
+			result.Errors = append(result.Errors, formatSampleError(i+1, err))
+			continue
+		}
 		result.SamplesAdded++
 	}
 

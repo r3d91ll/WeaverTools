@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,75 @@ type Concept struct {
 	Samples   []Sample  `json:"samples"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ConceptStats holds detailed statistics for a single concept.
+type ConceptStats struct {
+	// Name is the concept name.
+	Name string `json:"name"`
+
+	// SampleCount is the number of samples for this concept.
+	SampleCount int `json:"sample_count"`
+
+	// Dimension is the hidden state dimension (0 if no samples with hidden states).
+	Dimension int `json:"dimension"`
+
+	// MismatchedIDs contains IDs of samples with dimensions different from the expected.
+	// Empty if all dimensions are consistent.
+	MismatchedIDs []string `json:"mismatched_ids,omitempty"`
+
+	// CreatedAt is when the concept was first created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the concept was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Models lists unique model identifiers used to extract samples.
+	Models []string `json:"models,omitempty"`
+
+	// OldestSampleAt is the timestamp of the oldest sample extraction.
+	// Zero time if no samples.
+	OldestSampleAt time.Time `json:"oldest_sample_at,omitempty"`
+
+	// NewestSampleAt is the timestamp of the newest sample extraction.
+	// Zero time if no samples.
+	NewestSampleAt time.Time `json:"newest_sample_at,omitempty"`
+}
+
+// StoreStats holds aggregate statistics for the entire concept store.
+// It provides a snapshot of store-wide metrics that is safe to use after
+// the store lock has been released.
+type StoreStats struct {
+	// ConceptCount is the total number of concepts in the store.
+	ConceptCount int `json:"concept_count"`
+
+	// TotalSamples is the total number of samples across all concepts.
+	TotalSamples int `json:"total_samples"`
+
+	// Dimensions maps hidden state dimensions to their frequency count.
+	// Key is the dimension, value is the number of concepts with that dimension.
+	Dimensions map[int]int `json:"dimensions"`
+
+	// Models maps model identifiers to their usage count across all samples.
+	// Key is the model name, value is the number of samples using that model.
+	Models map[string]int `json:"models"`
+
+	// HealthyConcepts is the count of concepts with consistent dimensions.
+	HealthyConcepts int `json:"healthy_concepts"`
+
+	// ConceptsWithIssues is the count of concepts with dimension mismatches.
+	ConceptsWithIssues int `json:"concepts_with_issues"`
+
+	// OldestExtraction is the timestamp of the oldest sample extraction
+	// across all concepts. Zero time if no samples exist.
+	OldestExtraction time.Time `json:"oldest_extraction,omitempty"`
+
+	// NewestExtraction is the timestamp of the newest sample extraction
+	// across all concepts. Zero time if no samples exist.
+	NewestExtraction time.Time `json:"newest_extraction,omitempty"`
+
+	// Concepts maps concept names to their detailed statistics.
+	Concepts map[string]ConceptStats `json:"concepts"`
 }
 
 // Dimension returns the hidden state dimension for this concept.
@@ -102,6 +172,110 @@ func (c *Concept) VectorsAsFloat64() [][]float64 {
 	return result
 }
 
+// Models returns a sorted slice of unique model names used for samples.
+// Iterates through samples, collects non-empty Model fields, deduplicates,
+// and returns them sorted for consistent ordering.
+// Returns nil if no models are found.
+func (c *Concept) Models() []string {
+	if len(c.Samples) == 0 {
+		return nil
+	}
+
+	// Collect unique model names using a map
+	modelSet := make(map[string]struct{})
+	for _, sample := range c.Samples {
+		if sample.Model != "" {
+			modelSet[sample.Model] = struct{}{}
+		}
+	}
+
+	// Return nil if no models found
+	if len(modelSet) == 0 {
+		return nil
+	}
+
+	// Convert to slice and sort for consistent ordering
+	models := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+
+	return models
+}
+
+// Stats returns detailed statistics for this concept.
+// It computes sample counts, dimension validation, unique models, and time ranges.
+// Handles nil HiddenState and empty samples gracefully.
+func (c *Concept) Stats() ConceptStats {
+	stats := ConceptStats{
+		Name:      c.Name,
+		CreatedAt: c.CreatedAt,
+		UpdatedAt: c.UpdatedAt,
+	}
+
+	// Handle empty samples case
+	if len(c.Samples) == 0 {
+		stats.SampleCount = 0
+		stats.Dimension = 0
+		return stats
+	}
+
+	stats.SampleCount = len(c.Samples)
+
+	// Use ValidateDimensions to get dimension and find mismatches
+	dim, mismatched := c.ValidateDimensions()
+	stats.Dimension = dim
+	stats.MismatchedIDs = mismatched
+
+	// Collect unique model names and find time ranges
+	modelSet := make(map[string]struct{})
+	var oldest, newest time.Time
+	firstTime := true
+
+	for _, sample := range c.Samples {
+		// Collect non-empty model names
+		if sample.Model != "" {
+			modelSet[sample.Model] = struct{}{}
+		}
+
+		// Track oldest and newest extraction times
+		if !sample.ExtractedAt.IsZero() {
+			if firstTime {
+				oldest = sample.ExtractedAt
+				newest = sample.ExtractedAt
+				firstTime = false
+			} else {
+				if sample.ExtractedAt.Before(oldest) {
+					oldest = sample.ExtractedAt
+				}
+				if sample.ExtractedAt.After(newest) {
+					newest = sample.ExtractedAt
+				}
+			}
+		}
+	}
+
+	// Convert model set to sorted slice for consistent output
+	if len(modelSet) > 0 {
+		models := make([]string, 0, len(modelSet))
+		for model := range modelSet {
+			models = append(models, model)
+		}
+		// Sort for consistent ordering
+		sort.Strings(models)
+		stats.Models = models
+	}
+
+	// Set time ranges if we found valid times
+	if !firstTime {
+		stats.OldestSampleAt = oldest
+		stats.NewestSampleAt = newest
+	}
+
+	return stats
+}
+
 // Store manages concepts in memory with optional persistence.
 type Store struct {
 	mu       sync.RWMutex
@@ -116,12 +290,40 @@ func NewStore() *Store {
 }
 
 // Add adds a sample to a concept, creating the concept if it doesn't exist.
-func (s *Store) Add(conceptName string, sample Sample) {
+// Returns an error if validation fails (empty name, empty sample ID, invalid hidden state,
+// or dimension mismatch with existing samples).
+func (s *Store) Add(conceptName string, sample Sample) error {
+	// Validation 1: Check for empty concept name
+	if conceptName == "" {
+		return createEmptyConceptNameError()
+	}
+
+	// Validation 2: Check for empty sample ID
+	if sample.ID == "" {
+		return createEmptySampleIDError(conceptName)
+	}
+
+	// Validation 3: Validate hidden state if present
+	if sample.HiddenState != nil {
+		if validationErr := sample.HiddenState.Validate(); validationErr != nil {
+			return createInvalidHiddenStateError(conceptName, sample.ID, validationErr)
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Validation 4: Check dimension mismatch against existing samples
 	concept, ok := s.concepts[conceptName]
-	if !ok {
+	if ok {
+		existingDim := concept.Dimension()
+		if existingDim > 0 && sample.HiddenState != nil {
+			sampleDim := sample.HiddenState.Dimension()
+			if sampleDim > 0 && sampleDim != existingDim {
+				return createDimensionMismatchError(conceptName, sample.ID, existingDim, sampleDim)
+			}
+		}
+	} else {
 		concept = &Concept{
 			Name:      conceptName,
 			Samples:   []Sample{},
@@ -132,6 +334,8 @@ func (s *Store) Add(conceptName string, sample Sample) {
 
 	concept.Samples = append(concept.Samples, sample)
 	concept.UpdatedAt = time.Now()
+
+	return nil
 }
 
 // Get retrieves a concept by name.
@@ -195,6 +399,89 @@ func (s *Store) Count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.concepts)
+}
+
+// Stats returns detailed statistics for all concepts in the store.
+// It holds the read lock for the entire computation to prevent data races
+// with concurrent Add() operations that modify concept samples.
+//
+// This method is safe for concurrent use.
+func (s *Store) Stats() StoreStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Initialize aggregate stats
+	stats := StoreStats{
+		ConceptCount: len(s.concepts),
+		Dimensions:   make(map[int]int),
+		Models:       make(map[string]int),
+		Concepts:     make(map[string]ConceptStats),
+	}
+
+	// Handle empty store case
+	if len(s.concepts) == 0 {
+		return stats
+	}
+
+	// Iterate concepts to compute stats for each
+	var oldestExtraction, newestExtraction time.Time
+	firstTime := true
+
+	for name, concept := range s.concepts {
+		if concept == nil {
+			continue
+		}
+
+		// Compute per-concept stats
+		cs := concept.Stats()
+		stats.Concepts[name] = cs
+
+		// Aggregate sample counts
+		stats.TotalSamples += cs.SampleCount
+
+		// Track dimension distribution
+		if cs.Dimension > 0 {
+			stats.Dimensions[cs.Dimension]++
+		}
+
+		// Track healthy vs unhealthy concepts
+		if len(cs.MismatchedIDs) > 0 {
+			stats.ConceptsWithIssues++
+		} else {
+			stats.HealthyConcepts++
+		}
+
+		// Count model usage across all samples
+		for _, sample := range concept.Samples {
+			if sample.Model != "" {
+				stats.Models[sample.Model]++
+			}
+		}
+
+		// Track overall time ranges from per-concept stats
+		if !cs.OldestSampleAt.IsZero() {
+			if firstTime {
+				oldestExtraction = cs.OldestSampleAt
+				newestExtraction = cs.NewestSampleAt
+				firstTime = false
+			} else {
+				if cs.OldestSampleAt.Before(oldestExtraction) {
+					oldestExtraction = cs.OldestSampleAt
+				}
+				if cs.NewestSampleAt.After(newestExtraction) {
+					newestExtraction = cs.NewestSampleAt
+				}
+			}
+		}
+	}
+
+	// Set time ranges if we found valid times
+	if !firstTime {
+		stats.OldestExtraction = oldestExtraction
+		stats.NewestExtraction = newestExtraction
+	}
+
+	return stats
 }
 
 // Save persists all concepts to a directory.
@@ -560,4 +847,63 @@ func formatSampleCount(n int) string {
 		n /= 10
 	}
 	return result
+}
+
+// -----------------------------------------------------------------------------
+// Add Operation Error Helpers
+// -----------------------------------------------------------------------------
+// These functions create structured WeaverErrors for Add operation validation
+// failures with appropriate context and suggestions.
+
+// createEmptyConceptNameError creates a structured error when concept name is empty.
+func createEmptyConceptNameError() *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsEmptyName,
+		"concept name cannot be empty").
+		WithContext("operation", "add").
+		WithSuggestion("Provide a descriptive name for the concept (e.g., 'recursion', 'sorting', 'authentication')").
+		WithSuggestion("Concept names should be lowercase with optional hyphens or underscores").
+		WithSuggestion("Use '/extract <concept-name> <count>' to specify a valid concept name")
+}
+
+// createEmptySampleIDError creates a structured error when sample ID is empty.
+func createEmptySampleIDError(conceptName string) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsEmptySampleID,
+		"sample ID cannot be empty").
+		WithContext("concept", conceptName).
+		WithContext("operation", "add").
+		WithSuggestion("Generate a unique sample ID using UUID (e.g., uuid.New().String())").
+		WithSuggestion("Sample IDs must be unique within a concept to allow proper tracking").
+		WithSuggestion("Consider using a combination of timestamp and random suffix if UUID is unavailable")
+}
+
+// createInvalidHiddenStateError creates a structured error when hidden state validation fails.
+// This wraps a yarn.ValidationError to provide context and suggestions for fixing the data.
+func createInvalidHiddenStateError(conceptName, sampleID string, validationErr *yarn.ValidationError) *werrors.WeaverError {
+	return werrors.ValidationWrap(validationErr, werrors.ErrConceptsSampleInvalid,
+		"hidden state validation failed").
+		WithContext("concept", conceptName).
+		WithContext("sample_id", sampleID).
+		WithContext("validation_field", validationErr.Field).
+		WithContext("validation_error", validationErr.Message).
+		WithContext("operation", "add").
+		WithSuggestion("Re-extract the sample with valid hidden state data using '/extract'").
+		WithSuggestion("Ensure the model supports hidden state extraction").
+		WithSuggestion("Check that the hidden state vector is not empty and has valid dimensions").
+		WithSuggestion("Verify the dtype is 'float32' or 'float16'")
+}
+
+// createDimensionMismatchError creates a structured error when a sample's dimension
+// doesn't match the existing concept dimension.
+func createDimensionMismatchError(conceptName, sampleID string, expectedDim, actualDim int) *werrors.WeaverError {
+	return werrors.Validation(werrors.ErrConceptsDimensionMismatch,
+		"sample dimension does not match existing concept dimension").
+		WithContext("concept", conceptName).
+		WithContext("sample_id", sampleID).
+		WithContext("expected_dimension", formatSampleCount(expectedDim)).
+		WithContext("actual_dimension", formatSampleCount(actualDim)).
+		WithContext("operation", "add").
+		WithSuggestion("All samples in a concept must have the same hidden state dimension").
+		WithSuggestion("Re-extract this sample using the same model as existing samples").
+		WithSuggestion("Use '/concepts list' to see existing concepts and their sample counts").
+		WithSuggestion("Consider creating a new concept if using a different model")
 }

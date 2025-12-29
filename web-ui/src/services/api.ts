@@ -144,22 +144,61 @@ async function request<T>(
     const contentType = response.headers.get('content-type');
 
     if (contentType?.includes('application/json')) {
-      data = (await response.json()) as T;
+      // Parse JSON response
+      const rawJson = await response.json();
+
+      // Handle wrapped API responses from backend: {success: boolean, data: T, error?: {...}}
+      // The backend wraps all responses in this envelope structure
+      if (rawJson && typeof rawJson === 'object' && 'success' in rawJson) {
+        // Handle error responses from wrapped format
+        if (!response.ok || !rawJson.success) {
+          const errorMessage = rawJson.error?.message ||
+            `API request failed: ${response.status} ${response.statusText}`;
+          throw new ApiError(
+            errorMessage,
+            response.status,
+            response.statusText,
+            rawJson
+          );
+        }
+        // Extract the actual data from the wrapper
+        data = rawJson.data as T;
+      } else {
+        // Response is not wrapped, use as-is
+        data = rawJson as T;
+        // Handle non-wrapped error responses
+        if (!response.ok) {
+          throw new ApiError(
+            `API request failed: ${response.status} ${response.statusText}`,
+            response.status,
+            response.statusText,
+            data
+          );
+        }
+      }
     } else if (contentType?.includes('text/')) {
       data = (await response.text()) as unknown as T;
+      // Handle error responses for text content
+      if (!response.ok) {
+        throw new ApiError(
+          `API request failed: ${response.status} ${response.statusText}`,
+          response.status,
+          response.statusText,
+          data
+        );
+      }
     } else {
       // For binary responses, return blob as data
       data = (await response.blob()) as unknown as T;
-    }
-
-    // Handle error responses
-    if (!response.ok) {
-      throw new ApiError(
-        `API request failed: ${response.status} ${response.statusText}`,
-        response.status,
-        response.statusText,
-        data
-      );
+      // Handle error responses for binary content
+      if (!response.ok) {
+        throw new ApiError(
+          `API request failed: ${response.status} ${response.statusText}`,
+          response.status,
+          response.statusText,
+          data
+        );
+      }
     }
 
     return {

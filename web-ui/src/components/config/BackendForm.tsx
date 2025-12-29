@@ -3,8 +3,9 @@
  *
  * Provides form controls for Claude Code and TheLoom backend settings.
  */
-import { useState } from 'react';
-import type { BackendsConfig, ClaudeCodeConfig, LoomConfig } from '@/types';
+import { useState, useEffect } from 'react';
+import type { BackendsConfig, ClaudeCodeConfig, LoomConfig, GPUInfo } from '@/types';
+import { getGPUs } from '@/services/resourceApi';
 
 /**
  * Props for the BackendForm component.
@@ -111,6 +112,149 @@ const FormInput: React.FC<FormInputProps> = ({
 );
 
 /**
+ * GPU selector component for selecting which GPUs to use.
+ */
+interface GPUSelectorProps {
+  gpus: GPUInfo[];
+  selectedGpus: number[];
+  onChange: (gpus: number[]) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+const GPUSelector: React.FC<GPUSelectorProps> = ({
+  gpus,
+  selectedGpus,
+  onChange,
+  disabled = false,
+  loading = false,
+}) => {
+  const toggleGpu = (index: number) => {
+    if (selectedGpus.includes(index)) {
+      onChange(selectedGpus.filter(i => i !== index));
+    } else {
+      onChange([...selectedGpus, index].sort((a, b) => a - b));
+    }
+  };
+
+  const selectAll = () => {
+    onChange(gpus.map(g => g.index));
+  };
+
+  const deselectAll = () => {
+    onChange([]);
+  };
+
+  if (loading) {
+    return (
+      <div className="text-sm text-gray-500 italic">
+        Detecting GPUs...
+      </div>
+    );
+  }
+
+  if (gpus.length === 0) {
+    return (
+      <div className="text-sm text-gray-500">
+        No GPUs detected. TheLoom will run on CPU.
+      </div>
+    );
+  }
+
+  const formatMemory = (mb: number) => {
+    if (mb >= 1024) {
+      return `${(mb / 1024).toFixed(1)} GB`;
+    }
+    return `${mb} MB`;
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="block text-sm font-medium text-gray-700">
+          GPU Selection
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={selectAll}
+            disabled={disabled}
+            className="text-xs text-weaver-600 hover:text-weaver-700 disabled:opacity-50"
+          >
+            Select All
+          </button>
+          <span className="text-gray-300">|</span>
+          <button
+            type="button"
+            onClick={deselectAll}
+            disabled={disabled}
+            className="text-xs text-gray-600 hover:text-gray-700 disabled:opacity-50"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-gray-500 mb-2">
+        Select which GPUs TheLoom can use. Leave empty to use all available GPUs.
+      </p>
+      <div className="space-y-2">
+        {gpus.map((gpu) => (
+          <label
+            key={gpu.index}
+            className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+              selectedGpus.includes(gpu.index)
+                ? 'border-weaver-500 bg-weaver-50'
+                : 'border-gray-200 hover:border-gray-300'
+            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <input
+              type="checkbox"
+              checked={selectedGpus.includes(gpu.index)}
+              onChange={() => toggleGpu(gpu.index)}
+              disabled={disabled}
+              className="mt-1 h-4 w-4 rounded border-gray-300 text-weaver-600 focus:ring-weaver-500"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-gray-900 text-sm">
+                  GPU {gpu.index}: {gpu.name}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                  gpu.available
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-yellow-100 text-yellow-700'
+                }`}>
+                  {gpu.available ? 'Available' : 'Busy'}
+                </span>
+              </div>
+              <div className="flex gap-4 mt-1 text-xs text-gray-500">
+                <span>Memory: {formatMemory(gpu.memoryFree)} / {formatMemory(gpu.memoryTotal)} free</span>
+                <span>Utilization: {gpu.utilization}%</span>
+              </div>
+              {/* Memory usage bar */}
+              {gpu.memoryTotal > 0 && (
+                <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${
+                      gpu.memoryUsed / gpu.memoryTotal > 0.8
+                        ? 'bg-red-500'
+                        : gpu.memoryUsed / gpu.memoryTotal > 0.5
+                        ? 'bg-yellow-500'
+                        : 'bg-green-500'
+                    }`}
+                    style={{ width: `${(gpu.memoryUsed / gpu.memoryTotal) * 100}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
  * BackendForm component for editing Claude Code and TheLoom settings.
  */
 export const BackendForm: React.FC<BackendFormProps> = ({
@@ -119,6 +263,26 @@ export const BackendForm: React.FC<BackendFormProps> = ({
   disabled = false,
 }) => {
   const [expandedSection, setExpandedSection] = useState<'claudecode' | 'loom' | null>('claudecode');
+  const [availableGpus, setAvailableGpus] = useState<GPUInfo[]>([]);
+  const [gpusLoading, setGpusLoading] = useState(false);
+
+  // Fetch available GPUs when TheLoom section is expanded
+  useEffect(() => {
+    if (expandedSection === 'loom') {
+      setGpusLoading(true);
+      getGPUs()
+        .then((response) => {
+          setAvailableGpus(response.gpus);
+        })
+        .catch((error) => {
+          console.warn('Failed to fetch GPUs:', error);
+          setAvailableGpus([]);
+        })
+        .finally(() => {
+          setGpusLoading(false);
+        });
+    }
+  }, [expandedSection]);
 
   const updateClaudeCode = (updates: Partial<ClaudeCodeConfig>) => {
     onChange({
@@ -246,6 +410,17 @@ export const BackendForm: React.FC<BackendFormProps> = ({
               onChange={(autoStart) => updateLoom({ autoStart })}
               disabled={disabled || !backends.loom.enabled}
             />
+
+            {/* GPU Selection */}
+            <div className="pt-4 border-t border-gray-200">
+              <GPUSelector
+                gpus={availableGpus}
+                selectedGpus={backends.loom.gpus ?? []}
+                onChange={(gpus) => updateLoom({ gpus })}
+                disabled={disabled || !backends.loom.enabled}
+                loading={gpusLoading}
+              />
+            </div>
           </div>
         )}
       </div>

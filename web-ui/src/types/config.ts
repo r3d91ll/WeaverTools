@@ -35,6 +35,22 @@ export interface LoomConfig {
   autoStart: boolean;
   /** Port for TheLoom server */
   port: number;
+  /** GPU device IDs to use (e.g., [0, 1]). Empty = auto-detect all */
+  gpus?: number[];
+}
+
+/**
+ * GPUInfo represents information about a single GPU.
+ * Maps to GPUInfo in handlers_resources.go.
+ */
+export interface GPUInfo {
+  index: number;
+  name: string;
+  memoryTotal: number;
+  memoryFree: number;
+  memoryUsed: number;
+  utilization: number;
+  available: boolean;
 }
 
 /**
@@ -124,6 +140,7 @@ export const DEFAULT_CONFIG: Config = {
       path: '../TheLoom/the-loom',
       autoStart: true,
       port: 8080,
+      gpus: [], // Empty = auto-detect all available GPUs
     },
   },
   agents: {

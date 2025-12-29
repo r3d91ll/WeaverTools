@@ -151,3 +151,10 @@ export {
   conceptExists,
   conceptApi,
 } from './conceptApi';
+
+// Resource API
+export {
+  getGPUs,
+  resourceApi,
+  type GPUListResponse,
+} from './resourceApi';

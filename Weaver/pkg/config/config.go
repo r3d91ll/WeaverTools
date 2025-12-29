@@ -41,6 +41,7 @@ type LoomConfig struct {
 	Path      string `yaml:"path"`       // Path to TheLoom directory (for auto-start)
 	AutoStart bool   `yaml:"auto_start"` // Start TheLoom if not running
 	Port      int    `yaml:"port"`       // Port for TheLoom server
+	GPUs      []int  `yaml:"gpus"`       // GPU device IDs to use (e.g., [0, 1]). Empty = auto-detect all
 }
 
 // AgentConfig holds agent settings.

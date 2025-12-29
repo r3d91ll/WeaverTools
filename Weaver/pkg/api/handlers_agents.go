@@ -80,6 +80,7 @@ func (a *runtimeManagerAdapter) List() []string {
 // RegisterRoutes registers the agent API routes on the router.
 func (h *AgentsHandler) RegisterRoutes(router *Router) {
 	router.GET("/api/agents", h.ListAgents)
+	router.GET("/api/agents/:name", h.GetAgent)
 	router.POST("/api/agents/:name/chat", h.ChatWithAgent)
 }
 
@@ -100,6 +101,11 @@ type AgentInfo struct {
 	Model        string `json:"model,omitempty"`
 	Ready        bool   `json:"ready"`
 	HiddenStates bool   `json:"hiddenStates"`
+}
+
+// SingleAgentResponse is the JSON response for GET /api/agents/:name.
+type SingleAgentResponse struct {
+	Agent AgentInfo `json:"agent"`
 }
 
 // ChatRequest is the expected JSON body for POST /api/agents/:name/chat.
@@ -164,6 +170,56 @@ func (h *AgentsHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, response)
+}
+
+// GetAgent handles GET /api/agents/:name.
+// It returns information about a specific agent.
+func (h *AgentsHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
+	// Get agent name from path
+	agentName := PathParam(r, "name")
+	if agentName == "" {
+		WriteError(w, http.StatusBadRequest, "missing_agent_name",
+			"Agent name is required in the URL path")
+		return
+	}
+
+	h.mu.RLock()
+	manager := h.manager
+	h.mu.RUnlock()
+
+	if manager == nil {
+		WriteError(w, http.StatusServiceUnavailable, "no_manager",
+			"Agent manager is not available")
+		return
+	}
+
+	// Get agent status from manager
+	ctx := r.Context()
+	statusMap := manager.Status(ctx)
+
+	// Find the requested agent
+	for _, status := range statusMap {
+		if status.Name == agentName {
+			agent := AgentInfo{
+				Name:         status.Name,
+				Role:         string(status.Role),
+				Backend:      status.Backend,
+				Model:        status.Model,
+				Ready:        status.Ready,
+				HiddenStates: status.HiddenStates,
+			}
+			response := SingleAgentResponse{
+				Agent: agent,
+			}
+			WriteJSON(w, http.StatusOK, response)
+			return
+		}
+	}
+
+	// Agent not found
+	availableAgents := manager.List()
+	WriteError(w, http.StatusNotFound, "agent_not_found",
+		"Agent '"+agentName+"' not found. Available agents: "+joinAgentNames(availableAgents))
 }
 
 // ChatWithAgent handles POST /api/agents/:name/chat.

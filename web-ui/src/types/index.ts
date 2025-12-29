@@ -15,6 +15,7 @@ export type {
   SessionConfig,
   Config,
   ValidationResult,
+  GPUInfo,
 } from './config';
 
 export { INFERENCE_DEFAULTS, DEFAULT_CONFIG } from './config';

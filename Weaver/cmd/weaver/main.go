@@ -124,6 +124,7 @@ func main() {
 			Path:      loomPath,
 			Port:      cfg.Backends.Loom.Port,
 			AutoStart: cfg.Backends.Loom.AutoStart,
+			GPUs:      cfg.Backends.Loom.GPUs,
 		})
 
 		// Ensure TheLoom is running (starts it if needed)
@@ -251,11 +252,35 @@ func main() {
 		serverConfig.Port = *servePort
 
 		server := api.NewServer(serverConfig)
+		router := server.Router()
 
-		// TODO: Register API handlers once they're implemented
-		// api.RegisterConfigHandlers(server.Router(), cfg)
-		// api.RegisterSessionHandlers(server.Router(), sessionStore)
-		// api.RegisterAgentHandlers(server.Router(), agentMgr)
+		// Create WebSocket hub for real-time updates
+		hub := api.NewHub()
+		go hub.Run()
+
+		// Register API handlers
+		configHandler := api.NewConfigHandler(cfgPath)
+		configHandler.RegisterRoutes(router)
+
+		sessionStore := api.NewMemorySessionStore()
+		sessionsHandler := api.NewSessionsHandler(sessionStore)
+		sessionsHandler.RegisterRoutes(router)
+
+		backendsHandler := api.NewBackendsHandlerWithRegistry(registry)
+		backendsHandler.RegisterRoutes(router)
+
+		agentsHandler := api.NewAgentsHandlerWithRuntime(agentMgr)
+		agentsHandler.RegisterRoutes(router)
+
+		exportHandler := api.NewExportHandler(sessionStore)
+		exportHandler.RegisterRoutes(router)
+
+		resourcesHandler := api.NewResourcesHandler()
+		resourcesHandler.RegisterRoutes(router)
+
+		// Register WebSocket handler
+		wsHandler := api.NewWebSocketHandler(hub)
+		router.GET("/ws", wsHandler.HandleFunc())
 
 		if err := server.Start(); err != nil {
 			fmt.Printf("Failed to start HTTP server: %v\n", err)

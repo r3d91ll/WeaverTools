@@ -70,6 +70,7 @@ type LoomResponse struct {
 	Path      string `json:"path"`
 	AutoStart bool   `json:"autoStart"`
 	Port      int    `json:"port"`
+	GPUs      []int  `json:"gpus,omitempty"`
 }
 
 // AgentResponse is the JSON representation of agent configuration.
@@ -122,6 +123,7 @@ type LoomRequest struct {
 	Path      string `json:"path"`
 	AutoStart bool   `json:"autoStart"`
 	Port      int    `json:"port"`
+	GPUs      []int  `json:"gpus,omitempty"`
 }
 
 // AgentRequest is the JSON input for agent configuration.
@@ -268,6 +270,7 @@ func configToResponse(cfg *config.Config) *ConfigResponse {
 				Path:      cfg.Backends.Loom.Path,
 				AutoStart: cfg.Backends.Loom.AutoStart,
 				Port:      cfg.Backends.Loom.Port,
+				GPUs:      cfg.Backends.Loom.GPUs,
 			},
 		},
 		Agents: agents,
@@ -311,6 +314,7 @@ func requestToConfig(req *ConfigRequest) *config.Config {
 				Path:      req.Backends.Loom.Path,
 				AutoStart: req.Backends.Loom.AutoStart,
 				Port:      req.Backends.Loom.Port,
+				GPUs:      req.Backends.Loom.GPUs,
 			},
 		},
 		Agents: agents,

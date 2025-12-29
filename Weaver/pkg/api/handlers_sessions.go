@@ -79,6 +79,7 @@ func (h *SessionsHandler) RegisterRoutes(router *Router) {
 	router.PUT("/api/sessions/:id", h.UpdateSession)
 	router.DELETE("/api/sessions/:id", h.DeleteSession)
 	router.POST("/api/sessions/:id/end", h.EndSession)
+	router.GET("/api/sessions/:id/messages", h.GetSessionMessages)
 }
 
 // -----------------------------------------------------------------------------
@@ -108,6 +109,18 @@ type UpdateSessionRequest struct {
 // SessionListResponse is the JSON response for GET /api/sessions.
 type SessionListResponse struct {
 	Sessions []*Session `json:"sessions"`
+	Total    int        `json:"total"`
+}
+
+// SingleSessionResponse is the JSON response for GET /api/sessions/:id.
+type SingleSessionResponse struct {
+	Session *Session `json:"session"`
+}
+
+// MessagesResponse is the JSON response for GET /api/sessions/:id/messages.
+type MessagesResponse struct {
+	Messages []any `json:"messages"`
+	Total    int   `json:"total"`
 }
 
 // -----------------------------------------------------------------------------
@@ -134,6 +147,7 @@ func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 
 	response := SessionListResponse{
 		Sessions: sessions,
+		Total:    len(sessions),
 	}
 
 	WriteJSON(w, http.StatusOK, response)
@@ -166,7 +180,10 @@ func (h *SessionsHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, session)
+	response := SingleSessionResponse{
+		Session: session,
+	}
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // CreateSession handles POST /api/sessions.
@@ -243,7 +260,10 @@ func (h *SessionsHandler) CreateSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	WriteJSON(w, http.StatusCreated, session)
+	response := SingleSessionResponse{
+		Session: session,
+	}
+	WriteJSON(w, http.StatusCreated, response)
 }
 
 // UpdateSession handles PUT /api/sessions/:id.
@@ -315,7 +335,10 @@ func (h *SessionsHandler) UpdateSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, session)
+	response := SingleSessionResponse{
+		Session: session,
+	}
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // DeleteSession handles DELETE /api/sessions/:id.
@@ -410,7 +433,47 @@ func (h *SessionsHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, session)
+	response := SingleSessionResponse{
+		Session: session,
+	}
+	WriteJSON(w, http.StatusOK, response)
+}
+
+// GetSessionMessages handles GET /api/sessions/:id/messages.
+// It returns messages for a specific session.
+// Note: Currently returns empty since sessions don't store messages yet.
+func (h *SessionsHandler) GetSessionMessages(w http.ResponseWriter, r *http.Request) {
+	sessionID := PathParam(r, "id")
+	if sessionID == "" {
+		WriteError(w, http.StatusBadRequest, "missing_session_id",
+			"Session ID is required in the URL path")
+		return
+	}
+
+	h.mu.RLock()
+	store := h.store
+	h.mu.RUnlock()
+
+	if store == nil {
+		WriteError(w, http.StatusServiceUnavailable, "no_store",
+			"Session store is not available")
+		return
+	}
+
+	// Check if session exists
+	_, ok := store.Get(sessionID)
+	if !ok {
+		WriteError(w, http.StatusNotFound, "session_not_found",
+			"Session '"+sessionID+"' not found")
+		return
+	}
+
+	// Return empty messages list (messages not stored in current implementation)
+	response := MessagesResponse{
+		Messages: []any{},
+		Total:    0,
+	}
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // -----------------------------------------------------------------------------

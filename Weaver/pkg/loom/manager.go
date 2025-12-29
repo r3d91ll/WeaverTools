@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +39,8 @@ type Config struct {
 	AutoStart bool `yaml:"auto_start"`
 	// StartupTimeout is how long to wait for TheLoom to be ready
 	StartupTimeout time.Duration `yaml:"startup_timeout"`
+	// GPUs is a list of GPU device IDs to use (e.g., [0, 1]). Empty = use all available.
+	GPUs []int `yaml:"gpus"`
 }
 
 // DefaultConfig returns sensible defaults.
@@ -123,6 +127,14 @@ func (m *Manager) Start(ctx context.Context) error {
 	args := []string{"run", "loom", "--port", fmt.Sprintf("%d", m.config.Port)}
 	if m.config.PreloadModel != "" {
 		args = append(args, "--preload", m.config.PreloadModel)
+	}
+	// Add GPU specification if configured
+	if len(m.config.GPUs) > 0 {
+		gpuStrs := make([]string, len(m.config.GPUs))
+		for i, gpu := range m.config.GPUs {
+			gpuStrs[i] = strconv.Itoa(gpu)
+		}
+		args = append(args, "--gpus", strings.Join(gpuStrs, ","))
 	}
 
 	// Create command

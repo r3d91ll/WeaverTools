@@ -6,3 +6,5 @@ export { SessionList, type SessionListProps, type SessionFilter, type SessionSor
 export { SessionStats, type SessionStatsProps } from './SessionStats';
 export { ConversationList, type ConversationListProps } from './ConversationList';
 export { MessageList, type MessageListProps } from './MessageList';
+export { CreateSessionModal, type CreateSessionModalProps } from './CreateSessionModal';
+export { DeleteSessionModal, type DeleteSessionModalProps } from './DeleteSessionModal';

@@ -4,9 +4,9 @@
  * Displays stored concepts with their samples and hidden state statistics.
  * Used for validating geometric signatures in the Kakeya framework.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { ConceptStats } from '@/types/concept';
-import { ConceptList } from '@/components/concepts';
+import { ConceptList, ExtractForm } from '@/components/concepts';
 
 /**
  * Concepts page component.
@@ -17,6 +17,13 @@ export const Concepts: React.FC = () => {
 
   // State for concept stats
   const [concepts, setConcepts] = useState<ConceptStats[]>([]);
+
+  // State for showing the extract form
+  const [showExtractForm, setShowExtractForm] = useState(false);
+  const [extractFormConceptName, setExtractFormConceptName] = useState<string | undefined>();
+
+  // Ref to trigger list refresh
+  const refreshKeyRef = useRef(0);
 
   // Calculate stats from concepts
   const totalConcepts = concepts.length;
@@ -48,6 +55,26 @@ export const Concepts: React.FC = () => {
   const handleViewDetails = useCallback((name: string) => {
     // TODO: Navigate to concept detail page when implemented
     // For now, we could show a modal or expand the card
+  }, []);
+
+  // Handle opening extract form
+  const handleOpenExtractForm = useCallback((conceptName?: string) => {
+    setExtractFormConceptName(conceptName);
+    setShowExtractForm(true);
+  }, []);
+
+  // Handle closing extract form
+  const handleCloseExtractForm = useCallback(() => {
+    setShowExtractForm(false);
+    setExtractFormConceptName(undefined);
+  }, []);
+
+  // Handle samples added - trigger list refresh
+  const handleSamplesAdded = useCallback((_conceptName: string, _count: number) => {
+    // Increment key to force ConceptList to refresh
+    refreshKeyRef.current += 1;
+    // Re-render the component to pick up new refreshKey
+    setConcepts((prev) => [...prev]);
   }, []);
 
   return (
@@ -85,7 +112,7 @@ export const Concepts: React.FC = () => {
         </div>
       </div>
 
-      {/* Search Filter */}
+      {/* Search Filter and Actions */}
       <div className="card">
         <div className="flex items-center space-x-4">
           <div className="relative flex-1">
@@ -110,11 +137,32 @@ export const Concepts: React.FC = () => {
               className="input pl-10 w-full"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => handleOpenExtractForm()}
+            className="btn-primary flex items-center gap-2 whitespace-nowrap"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+              />
+            </svg>
+            Add Sample
+          </button>
         </div>
       </div>
 
       {/* Concepts List */}
       <ConceptList
+        key={refreshKeyRef.current}
         onConceptsChange={handleConceptsChange}
         onConceptDeleted={handleConceptDeleted}
         onViewDetails={handleViewDetails}
@@ -146,13 +194,31 @@ export const Concepts: React.FC = () => {
             <p className="mt-1 text-sm text-blue-700">
               Concepts store hidden state samples extracted from language models.
               Each concept contains multiple samples that are used for Kakeya
-              geometry analysis to validate geometric signatures. Use the CLI
-              command <code className="bg-blue-100 px-1 rounded">/extract &lt;concept&gt; &lt;count&gt;</code> to
-              add samples to a concept.
+              geometry analysis to validate geometric signatures. Use the{' '}
+              <button
+                type="button"
+                onClick={() => handleOpenExtractForm()}
+                className="text-blue-800 underline hover:text-blue-900"
+              >
+                Add Sample
+              </button>{' '}
+              button above or the CLI command{' '}
+              <code className="bg-blue-100 px-1 rounded">/extract &lt;concept&gt; &lt;count&gt;</code>{' '}
+              to add samples to a concept.
             </p>
           </div>
         </div>
       </div>
+
+      {/* Extract Form Modal */}
+      {showExtractForm && (
+        <ExtractForm
+          conceptName={extractFormConceptName}
+          onSamplesAdded={handleSamplesAdded}
+          onCancel={handleCloseExtractForm}
+          isModal={true}
+        />
+      )}
     </div>
   );
 };

@@ -17,8 +17,37 @@ import type {
 const ENDPOINTS = {
   concepts: '/api/concepts',
   concept: (name: string) => `/api/concepts/${encodeURIComponent(name)}`,
+  samples: (name: string) => `/api/concepts/${encodeURIComponent(name)}/samples`,
   stats: '/api/concepts/stats',
 } as const;
+
+/**
+ * Request body for adding a sample to a concept.
+ */
+export interface AddSampleRequest {
+  /** Sample text content */
+  content: string;
+  /** Optional model name used to generate the sample */
+  model?: string;
+  /** Optional hidden state data */
+  hiddenState?: {
+    vector: number[];
+    layer: number;
+    tokenIdx: number;
+    dtype?: string;
+  };
+}
+
+/**
+ * Response from adding a sample to a concept.
+ */
+export interface AddSampleResponse {
+  id: string;
+  conceptName: string;
+  content: string;
+  model?: string;
+  extractedAt: string;
+}
 
 /**
  * List all concepts with their statistics.
@@ -80,6 +109,45 @@ export async function conceptExists(name: string): Promise<boolean> {
   }
 }
 
+/**
+ * Add a sample to a concept.
+ * Creates the concept if it doesn't exist.
+ * @param name - Concept name
+ * @param sample - Sample data to add
+ * @returns Promise resolving to AddSampleResponse
+ * @throws ApiError on failure
+ */
+export async function addSample(
+  name: string,
+  sample: AddSampleRequest
+): Promise<AddSampleResponse> {
+  const response = await post<AddSampleResponse>(
+    ENDPOINTS.samples(name),
+    sample
+  );
+  return response.data;
+}
+
+/**
+ * Add multiple samples to a concept.
+ * Creates the concept if it doesn't exist.
+ * @param name - Concept name
+ * @param samples - Array of sample data to add
+ * @returns Promise resolving to array of AddSampleResponse
+ * @throws ApiError on failure
+ */
+export async function addSamples(
+  name: string,
+  samples: AddSampleRequest[]
+): Promise<AddSampleResponse[]> {
+  const results: AddSampleResponse[] = [];
+  for (const sample of samples) {
+    const response = await addSample(name, sample);
+    results.push(response);
+  }
+  return results;
+}
+
 /** Concept API service object */
 export const conceptApi = {
   listConcepts,
@@ -87,6 +155,8 @@ export const conceptApi = {
   deleteConcept,
   getConceptStoreStats,
   conceptExists,
+  addSample,
+  addSamples,
 };
 
 export default conceptApi;

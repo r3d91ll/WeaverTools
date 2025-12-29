@@ -11,3 +11,9 @@ export type {
   ConceptSortBy,
   ConceptSortOrder,
 } from './ConceptList';
+
+export { ExtractForm } from './ExtractForm';
+export type { ExtractFormProps } from './ExtractForm';
+
+// Re-export ConceptStats type for convenience
+export type { ConceptStats } from '@/types/concept';

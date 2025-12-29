@@ -3,6 +3,16 @@
  * Re-exports all custom hooks for convenient imports.
  */
 
+// Chat hooks
+export {
+  useChat,
+  useChatWithAgent,
+  type UseChatOptions,
+  type UseChatReturn,
+  type UseChatWithAgentOptions,
+  type UseChatWithAgentReturn,
+} from './useChat';
+
 // WebSocket hooks
 export {
   useWebSocket,

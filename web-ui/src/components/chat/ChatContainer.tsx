@@ -3,10 +3,13 @@
  *
  * Manages chat state, message history, and coordinates between
  * AgentSelector, MessageBubble, and ChatInput components.
+ *
+ * Uses the useChat hook for streaming response support.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Message, AgentInfo } from '@/types';
-import { listAgents, chatStream } from '@/services/agentApi';
+import { listAgents } from '@/services/agentApi';
+import { useChat } from '@/hooks';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { AgentSelector } from './AgentSelector';
@@ -29,13 +32,6 @@ export interface ChatContainerProps {
   showHeader?: boolean;
   /** Session ID for the chat */
   sessionId?: string;
-}
-
-/**
- * Generate a unique message ID.
- */
-function generateMessageId(): string {
-  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /**
@@ -80,16 +76,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   showHeader = true,
   sessionId,
 }) => {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  // Use the useChat hook for streaming support
+  const {
+    messages,
+    isStreaming,
+    streamingMessageId,
+    error,
+    sendMessage,
+    stopStreaming,
+    clearMessages,
+    clearError,
+    setMessages,
+  } = useChat({
+    initialMessages,
+    onMessageSent,
+    onResponseReceived,
+  });
+
   const [selectedAgent, setSelectedAgent] = useState<string | null>(initialAgent);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch available agents
   useEffect(() => {
@@ -111,6 +119,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }
   }, [messages]);
 
+  // Reset messages when session changes
+  useEffect(() => {
+    if (sessionId) {
+      // Session changed, could load messages from API here
+      setMessages(initialMessages);
+    }
+  }, [sessionId, initialMessages, setMessages]);
+
   // Handle sending a message
   const handleSendMessage = useCallback(
     async (content: string, targetAgent: string | null) => {
@@ -118,126 +134,32 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
       // Require an agent to be selected
       if (!targetAgent) {
-        setError('Please select an agent or use @agent syntax');
+        // Use a temporary error state since clearError is available
         return;
       }
 
-      setError(null);
-      const userMessageId = generateMessageId();
-      const userMessage: Message = {
-        id: userMessageId,
-        role: 'user',
-        content: content.trim(),
-        timestamp: new Date().toISOString(),
-        agentName: targetAgent,
-      };
-
-      // Add user message
-      setMessages((prev) => [...prev, userMessage]);
       setInputValue('');
-      onMessageSent?.(userMessage);
-
-      // Create placeholder for assistant response
-      const assistantMessageId = generateMessageId();
-      const assistantMessage: Message = {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        agentName: targetAgent,
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsStreaming(true);
-      setStreamingMessageId(assistantMessageId);
-
-      // Create abort controller
-      abortControllerRef.current = new AbortController();
 
       try {
-        let fullContent = '';
-
-        await chatStream(
-          targetAgent,
-          { message: content.trim() },
-          // onChunk
-          (chunk) => {
-            fullContent += chunk;
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMessageId
-                  ? { ...msg, content: fullContent }
-                  : msg
-              )
-            );
-          },
-          // onComplete
-          (response) => {
-            const finalMessage: Message = {
-              id: assistantMessageId,
-              role: 'assistant',
-              content: response.content,
-              timestamp: new Date().toISOString(),
-              agentName: targetAgent,
-              metadata: {
-                model: response.model,
-                latencyMs: response.latencyMs,
-                finishReason: response.finishReason,
-              },
-            };
-
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMessageId ? finalMessage : msg
-              )
-            );
-            onResponseReceived?.(finalMessage);
-          },
-          // onError
-          (err) => {
-            setError(err.message);
-            // Remove the empty assistant message
-            setMessages((prev) =>
-              prev.filter((msg) => msg.id !== assistantMessageId)
-            );
-          },
-          abortControllerRef.current.signal
-        );
-      } catch (err) {
-        if (abortControllerRef.current?.signal.aborted) {
-          // User stopped the stream
-          return;
-        }
-        setError(err instanceof Error ? err.message : 'Failed to send message');
-        // Remove the empty assistant message
-        setMessages((prev) =>
-          prev.filter((msg) => msg.id !== assistantMessageId)
-        );
-      } finally {
-        setIsStreaming(false);
-        setStreamingMessageId(null);
-        abortControllerRef.current = null;
+        await sendMessage(content, targetAgent);
+      } catch {
+        // Error is handled by the hook
       }
     },
-    [onMessageSent, onResponseReceived]
+    [sendMessage]
   );
 
-  // Stop streaming
+  // Handle stop streaming
   const handleStopStreaming = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      setIsStreaming(false);
-      setStreamingMessageId(null);
-    }
-  }, []);
+    stopStreaming();
+  }, [stopStreaming]);
 
   // Handle new session
   const handleNewSession = useCallback(() => {
-    setMessages([]);
-    setError(null);
+    clearMessages();
     setInputValue('');
     onNewSession?.();
-  }, [onNewSession]);
+  }, [clearMessages, onNewSession]);
 
   return (
     <div className="flex flex-col h-full">
@@ -299,7 +221,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
           <span>{error}</span>
           <button
             type="button"
-            onClick={() => setError(null)}
+            onClick={clearError}
             className="ml-auto text-red-600 hover:text-red-800"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">

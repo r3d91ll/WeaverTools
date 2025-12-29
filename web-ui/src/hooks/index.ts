@@ -50,3 +50,18 @@ export {
   getWebSocketService,
   createWebSocketService,
 } from './useWebSocket';
+
+// Model management hooks
+export {
+  useModels,
+  useModelLoad,
+  useModelUnload,
+  useModelFormatters,
+  type ModelFilter,
+  type ModelSortBy,
+  type ModelSortOrder,
+  type ModelActionState,
+  type UseModelsOptions,
+  type UseModelsReturn,
+  type ModelStats,
+} from './useModels';

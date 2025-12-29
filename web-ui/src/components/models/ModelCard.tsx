@@ -26,8 +26,14 @@ export interface ModelCardProps {
   disabled?: boolean;
   /** Error message if operation failed */
   error?: string | null;
+  /** Callback to clear error state */
+  onClearError?: (name: string) => void;
   /** Whether to use compact view */
   compact?: boolean;
+  /** Whether to show the estimated load time */
+  showLoadEstimate?: boolean;
+  /** Optional className for the card container */
+  className?: string;
 }
 
 /**
@@ -47,6 +53,19 @@ function getBackendInfo(backend: string): { name: string; color: string } {
 }
 
 /**
+ * Estimate load time based on model size.
+ * Rough estimate: ~2 seconds per GB on average hardware.
+ */
+function estimateLoadTime(sizeBytes: number): string {
+  if (!sizeBytes) return '';
+  const sizeGB = sizeBytes / (1024 * 1024 * 1024);
+  const seconds = Math.ceil(sizeGB * 2);
+  if (seconds < 60) return `~${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `~${minutes}min`;
+}
+
+/**
  * ModelCard component for displaying model information.
  */
 export const ModelCard: React.FC<ModelCardProps> = ({
@@ -57,7 +76,10 @@ export const ModelCard: React.FC<ModelCardProps> = ({
   isUnloading = false,
   disabled = false,
   error = null,
+  onClearError,
   compact = false,
+  showLoadEstimate = false,
+  className = '',
 }) => {
   const status = getModelStatusType(model.loaded, isLoading, isUnloading, !!error);
   const isActionInProgress = isLoading || isUnloading;
@@ -76,8 +98,26 @@ export const ModelCard: React.FC<ModelCardProps> = ({
     onUnload?.(model.name);
   };
 
+  const handleClearError = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClearError?.(model.name);
+  };
+
+  const handleRetry = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClearError?.(model.name);
+    // Retry the last failed operation
+    if (model.loaded) {
+      onUnload?.(model.name);
+    } else {
+      onLoad?.(model.name);
+    }
+  };
+
   return (
-    <div className={`card ${isActionInProgress ? 'opacity-75' : ''} transition-all`}>
+    <div className={`card ${isActionInProgress ? 'opacity-75' : ''} transition-all ${className}`}>
       {/* Header with name and status */}
       <div className={`flex items-start justify-between ${compact ? 'mb-2' : 'mb-3'}`}>
         <div className="flex-1 min-w-0">
@@ -158,19 +198,60 @@ export const ModelCard: React.FC<ModelCardProps> = ({
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error message with retry/dismiss actions */}
       {error && (
         <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-700">{error}</p>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-2 flex-1 min-w-0">
+              <svg
+                className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {onClearError && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="text-xs text-red-600 hover:text-red-800 font-medium px-1.5 py-0.5 hover:bg-red-100 rounded"
+                    title="Retry operation"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearError}
+                    className="text-xs text-gray-500 hover:text-gray-700 px-1 py-0.5 hover:bg-gray-100 rounded"
+                    title="Dismiss error"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
       {/* Action buttons */}
       <div className="flex items-center justify-between pt-3 border-t border-gray-100">
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          {model.loaded && model.memoryUsed && (
+          {model.loaded && model.memoryUsed ? (
             <span>Using {formatModelSize(model.memoryUsed)} memory</span>
-          )}
+          ) : showLoadEstimate && model.size ? (
+            <span>Est. load time: {estimateLoadTime(model.size)}</span>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {model.loaded ? (

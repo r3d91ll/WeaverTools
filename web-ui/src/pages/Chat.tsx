@@ -1,47 +1,47 @@
-import { useState } from 'react'
+import { useState } from 'react';
 
 /**
- * Chat page - interactive chat interface with agent targeting
+ * Chat page - interactive chat interface with agent targeting.
+ *
+ * Supports @agent syntax for targeting specific agents and streaming responses.
  */
-const Chat: React.FC = () => {
-  const [message, setMessage] = useState('')
+export const Chat: React.FC = () => {
+  const [message, setMessage] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     // TODO: Implement chat message sending
-    setMessage('')
-  }
+    setMessage('');
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Chat</h1>
-            <p className="text-sm text-gray-500">
-              Use @agent syntax to target specific agents
-            </p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <select
-              className="input py-2 px-3 text-sm"
-              defaultValue=""
-            >
-              <option value="" disabled>
-                Select Agent
-              </option>
-              <option value="researcher">Researcher</option>
-              <option value="analyst">Analyst</option>
-            </select>
-            <button className="btn-secondary text-sm">New Session</button>
-          </div>
+    <div className="flex flex-col h-[calc(100vh-8rem)]">
+      {/* Chat Header */}
+      <div className="flex items-center justify-between pb-4 border-b border-gray-200">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Chat</h1>
+          <p className="text-sm text-gray-500">
+            Use @agent syntax to target specific agents
+          </p>
+        </div>
+        <div className="flex items-center space-x-4">
+          <select
+            className="input py-2 px-3 text-sm"
+            defaultValue=""
+          >
+            <option value="" disabled>
+              Select Agent
+            </option>
+            <option value="researcher">Researcher</option>
+            <option value="analyst">Analyst</option>
+          </select>
+          <button className="btn-secondary text-sm">New Session</button>
         </div>
       </div>
 
       {/* Chat Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
-        <div className="max-w-4xl mx-auto space-y-4">
+      <div className="flex-1 overflow-y-auto py-6 scrollbar-thin">
+        <div className="space-y-4">
           {/* Empty State */}
           <div className="text-center py-16">
             <div className="text-gray-400 mb-4">
@@ -71,8 +71,8 @@ const Chat: React.FC = () => {
       </div>
 
       {/* Input Area */}
-      <div className="bg-white border-t border-gray-200 px-6 py-4">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
+      <div className="pt-4 border-t border-gray-200">
+        <form onSubmit={handleSubmit}>
           <div className="flex space-x-4">
             <input
               type="text"
@@ -92,7 +92,7 @@ const Chat: React.FC = () => {
         </form>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export { Chat }
+export default Chat;

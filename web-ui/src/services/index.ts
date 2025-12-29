@@ -138,4 +138,5 @@ export {
   type WebSocketEventListener,
   type WebSocketServiceOptions,
   type ChatMessageData,
+  type ResourceUpdateData,
 } from './websocket';

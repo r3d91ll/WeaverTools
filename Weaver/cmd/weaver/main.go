@@ -20,7 +20,9 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/r3d91ll/weaver/pkg/api"
 	"github.com/r3d91ll/weaver/pkg/backend"
 	"github.com/r3d91ll/weaver/pkg/config"
 	werrors "github.com/r3d91ll/weaver/pkg/errors"
@@ -39,6 +41,8 @@ func main() {
 	sessionName := flag.String("session", "default", "Session name")
 	initConfig := flag.Bool("init", false, "Initialize default config file")
 	showVersion := flag.Bool("version", false, "Show version and exit")
+	serveMode := flag.Bool("serve", false, "Start HTTP/WebSocket server for web UI")
+	servePort := flag.Int("port", 8081, "Port for HTTP server (only used with --serve)")
 	flag.Parse()
 
 	if *showVersion {
@@ -120,6 +124,7 @@ func main() {
 			Path:      loomPath,
 			Port:      cfg.Backends.Loom.Port,
 			AutoStart: cfg.Backends.Loom.AutoStart,
+			GPUs:      cfg.Backends.Loom.GPUs,
 		})
 
 		// Ensure TheLoom is running (starts it if needed)
@@ -240,39 +245,96 @@ func main() {
 	fmt.Printf("Session: %s (%s)\n", session.Name, session.ID[:8])
 	fmt.Println()
 
-	// Get history file path
-	homeDir, _ := os.UserHomeDir()
-	historyFile := filepath.Join(homeDir, ".weaver_history")
+	// Branch based on mode: serve (HTTP/WS) or interactive shell
+	if *serveMode {
+		// Start HTTP/WebSocket server for web UI
+		serverConfig := api.DefaultServerConfig()
+		serverConfig.Port = *servePort
 
-	// Determine default agent (sorted for deterministic fallback)
-	defaultAgent := "senior"
-	if _, ok := cfg.Agents["senior"]; !ok {
-		// Use first active agent (sorted alphabetically for consistency)
-		names := make([]string, 0, len(cfg.Agents))
-		for name := range cfg.Agents {
-			if cfg.Agents[name].Active {
-				names = append(names, name)
+		server := api.NewServer(serverConfig)
+		router := server.Router()
+
+		// Create WebSocket hub for real-time updates
+		hub := api.NewHub()
+		go hub.Run()
+
+		// Register API handlers
+		configHandler := api.NewConfigHandler(cfgPath)
+		configHandler.RegisterRoutes(router)
+
+		sessionStore := api.NewMemorySessionStore()
+		sessionsHandler := api.NewSessionsHandler(sessionStore)
+		sessionsHandler.RegisterRoutes(router)
+
+		backendsHandler := api.NewBackendsHandlerWithRegistry(registry)
+		backendsHandler.RegisterRoutes(router)
+
+		agentsHandler := api.NewAgentsHandlerWithRuntime(agentMgr)
+		agentsHandler.RegisterRoutes(router)
+
+		exportHandler := api.NewExportHandler(sessionStore)
+		exportHandler.RegisterRoutes(router)
+
+		resourcesHandler := api.NewResourcesHandler()
+		resourcesHandler.RegisterRoutes(router)
+
+		// Register WebSocket handler
+		wsHandler := api.NewWebSocketHandler(hub)
+		router.GET("/ws", wsHandler.HandleFunc())
+
+		if err := server.Start(); err != nil {
+			fmt.Printf("Failed to start HTTP server: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Weaver HTTP/WebSocket server running on http://%s\n", server.Address())
+		fmt.Println("Press Ctrl+C to stop")
+
+		// Wait for shutdown signal
+		<-ctx.Done()
+
+		// Graceful shutdown with timeout
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			fmt.Printf("Error during server shutdown: %v\n", err)
+		}
+	} else {
+		// Interactive shell mode
+		// Get history file path
+		homeDir, _ := os.UserHomeDir()
+		historyFile := filepath.Join(homeDir, ".weaver_history")
+
+		// Determine default agent (sorted for deterministic fallback)
+		defaultAgent := "senior"
+		if _, ok := cfg.Agents["senior"]; !ok {
+			// Use first active agent (sorted alphabetically for consistency)
+			names := make([]string, 0, len(cfg.Agents))
+			for name := range cfg.Agents {
+				if cfg.Agents[name].Active {
+					names = append(names, name)
+				}
+			}
+			if len(names) > 0 {
+				sort.Strings(names)
+				defaultAgent = names[0]
 			}
 		}
-		if len(names) > 0 {
-			sort.Strings(names)
-			defaultAgent = names[0]
+
+		// Create and run shell
+		sh, err := shell.New(agentMgr, session, shell.Config{
+			HistoryFile:  historyFile,
+			DefaultAgent: defaultAgent,
+		})
+		if err != nil {
+			werrors.Display(createShellInitError(historyFile, err))
+			os.Exit(1)
 		}
-	}
 
-	// Create and run shell
-	sh, err := shell.New(agentMgr, session, shell.Config{
-		HistoryFile:  historyFile,
-		DefaultAgent: defaultAgent,
-	})
-	if err != nil {
-		werrors.Display(createShellInitError(historyFile, err))
-		os.Exit(1)
-	}
-
-	if err := sh.Run(ctx); err != nil && err != context.Canceled {
-		werrors.Display(createShellRunError(err))
-		os.Exit(1)
+		if err := sh.Run(ctx); err != nil && err != context.Canceled {
+			werrors.Display(createShellRunError(err))
+			os.Exit(1)
+		}
 	}
 
 	// Export session on exit

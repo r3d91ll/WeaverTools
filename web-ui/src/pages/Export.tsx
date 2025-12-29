@@ -5,7 +5,7 @@
  * various publication-ready formats (LaTeX, CSV, PDF, BibTeX).
  */
 import { useCallback, useState } from 'react';
-import { ExportForm } from '@/components/export';
+import { ExportForm, ExportPreview } from '@/components/export';
 import type { ExportResponse } from '@/services/exportApi';
 
 /**
@@ -15,17 +15,24 @@ export const Export: React.FC = () => {
   // Track successful exports for displaying stats
   const [lastExport, setLastExport] = useState<ExportResponse | null>(null);
   const [exportCount, setExportCount] = useState(0);
+  const [showPreview, setShowPreview] = useState(false);
 
   /** Handle successful export */
   const handleExportComplete = useCallback((result: ExportResponse) => {
     setLastExport(result);
     setExportCount((prev) => prev + 1);
+    setShowPreview(true);
   }, []);
 
   /** Handle export error */
-  const handleExportError = useCallback((error: Error) => {
+  const handleExportError = useCallback((_error: Error) => {
     // Error is already displayed by ExportForm
     // Could add analytics tracking here
+  }, []);
+
+  /** Handle closing the preview */
+  const handleClosePreview = useCallback(() => {
+    setShowPreview(false);
   }, []);
 
   return (
@@ -71,6 +78,23 @@ export const Export: React.FC = () => {
           onExportError={handleExportError}
         />
       </div>
+
+      {/* Export Preview */}
+      {showPreview && lastExport && (
+        <div className="card">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Export Preview</h2>
+            <p className="text-sm text-gray-500">
+              Review your exported content before downloading
+            </p>
+          </div>
+          <ExportPreview
+            exportResult={lastExport}
+            onClose={handleClosePreview}
+            maxHeight={400}
+          />
+        </div>
+      )}
 
       {/* Info Panel */}
       <div className="card bg-blue-50 border-blue-200">

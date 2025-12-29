@@ -6,6 +6,7 @@ import { Config } from './pages/Config';
 import { Chat } from './pages/Chat';
 import { Metrics } from './pages/Metrics';
 import { Models } from './pages/Models';
+import { Concepts } from './pages/Concepts';
 
 /**
  * Main application component with routing.
@@ -30,6 +31,7 @@ function App() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/models" element={<Models />} />
+          <Route path="/concepts" element={<Concepts />} />
         </Routes>
       </Layout>
     </BrowserRouter>

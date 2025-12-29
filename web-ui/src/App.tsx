@@ -7,6 +7,7 @@ import { Chat } from './pages/Chat';
 import { Metrics } from './pages/Metrics';
 import { Models } from './pages/Models';
 import { Concepts } from './pages/Concepts';
+import { Export } from './pages/Export';
 
 /**
  * Main application component with routing.
@@ -32,6 +33,7 @@ function App() {
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/models" element={<Models />} />
           <Route path="/concepts" element={<Concepts />} />
+          <Route path="/export" element={<Export />} />
         </Routes>
       </Layout>
     </BrowserRouter>

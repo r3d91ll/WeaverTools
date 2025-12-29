@@ -2,8 +2,10 @@
  * MetricChart component - base chart for conveyance metric visualization.
  *
  * Provides a reusable line chart component for displaying time-series
- * measurement data with responsive sizing and interactive tooltips.
+ * measurement data with responsive sizing, interactive tooltips, and
+ * real-time WebSocket updates.
  */
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -17,6 +19,7 @@ import {
   type TooltipProps,
 } from 'recharts';
 import type { MeasurementData, MeasurementEvent } from '@/types';
+import { useMeasurements, type UseMeasurementsOptions } from '@/hooks/useMeasurements';
 
 /** Supported metric types for visualization. */
 export type MetricType = 'deff' | 'beta' | 'alignment' | 'cpair';
@@ -86,8 +89,8 @@ export const METRIC_CONFIGS: Record<MetricType, MetricConfig> = {
  * MetricChart component props.
  */
 export interface MetricChartProps {
-  /** Measurement data to display */
-  data: MeasurementData[] | MeasurementEvent[];
+  /** Measurement data to display (not needed if using realTime mode) */
+  data?: MeasurementData[] | MeasurementEvent[];
   /** Metric type to visualize */
   metric: MetricType;
   /** Chart height in pixels */
@@ -120,6 +123,18 @@ export interface MetricChartProps {
   strokeWidth?: number;
   /** Whether to show dots on data points */
   showDots?: boolean;
+  /** Enable real-time updates via WebSocket (default: false) */
+  realTime?: boolean;
+  /** Options for real-time measurement hook (only used if realTime is true) */
+  realTimeOptions?: UseMeasurementsOptions;
+  /** Show live indicator when receiving real-time updates */
+  showLiveIndicator?: boolean;
+  /** Callback when live status changes */
+  onLiveStatusChange?: (isLive: boolean) => void;
+  /** Callback when new measurement is received in real-time mode */
+  onNewMeasurement?: (measurement: MeasurementEvent) => void;
+  /** Whether to auto-pause when not visible (uses IntersectionObserver) */
+  autoPauseWhenHidden?: boolean;
 }
 
 /**
@@ -204,20 +219,102 @@ const EmptyState: React.FC<{ message: string; height: number }> = ({ message, he
 );
 
 /**
+ * Live indicator showing real-time update status.
+ */
+interface LiveIndicatorProps {
+  isLive: boolean;
+  isPaused: boolean;
+  updateCount?: number;
+  onPauseToggle?: () => void;
+}
+
+const LiveIndicator: React.FC<LiveIndicatorProps> = ({
+  isLive,
+  isPaused,
+  updateCount,
+  onPauseToggle,
+}) => {
+  return (
+    <div className="flex items-center gap-2">
+      {/* Live status dot */}
+      <div className="flex items-center gap-1.5">
+        <span
+          className={`
+            w-2 h-2 rounded-full transition-colors duration-300
+            ${isLive && !isPaused ? 'bg-green-500 animate-pulse' : ''}
+            ${isPaused ? 'bg-yellow-500' : ''}
+            ${!isLive && !isPaused ? 'bg-gray-300' : ''}
+          `}
+        />
+        <span className="text-xs text-gray-500">
+          {isPaused ? 'Paused' : isLive ? 'Live' : 'Idle'}
+        </span>
+      </div>
+
+      {/* Update count */}
+      {updateCount !== undefined && updateCount > 0 && (
+        <span className="text-xs text-gray-400">
+          {updateCount} update{updateCount !== 1 ? 's' : ''}
+        </span>
+      )}
+
+      {/* Pause/resume button */}
+      {onPauseToggle && (
+        <button
+          onClick={onPauseToggle}
+          className="p-1 rounded hover:bg-gray-100 transition-colors"
+          title={isPaused ? 'Resume updates' : 'Pause updates'}
+          type="button"
+        >
+          {isPaused ? (
+            <svg className="w-3.5 h-3.5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                clipRule="evenodd"
+              />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
+                clipRule="evenodd"
+              />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
+  );
+};
+
+/**
  * MetricChart component for visualizing conveyance metrics.
+ *
+ * Supports both static data and real-time WebSocket updates.
  *
  * @example
  * ```tsx
+ * // Static data mode
  * <MetricChart
  *   data={measurements}
  *   metric="deff"
  *   height={300}
  *   showReferenceLines
  * />
+ *
+ * // Real-time mode
+ * <MetricChart
+ *   metric="beta"
+ *   realTime
+ *   realTimeOptions={{ sessionId: 'session-123' }}
+ *   showLiveIndicator
+ * />
  * ```
  */
 export const MetricChart: React.FC<MetricChartProps> = ({
-  data,
+  data: propData,
   metric,
   height = 300,
   showLegend = true,
@@ -225,7 +322,7 @@ export const MetricChart: React.FC<MetricChartProps> = ({
   showReferenceLines = true,
   title,
   className = '',
-  loading = false,
+  loading: propLoading = false,
   emptyMessage,
   onDataPointClick,
   xAxisKey = 'turn',
@@ -234,13 +331,82 @@ export const MetricChart: React.FC<MetricChartProps> = ({
   animate = true,
   strokeWidth = 2,
   showDots = true,
+  realTime = false,
+  realTimeOptions,
+  showLiveIndicator = false,
+  onLiveStatusChange,
+  onNewMeasurement,
+  autoPauseWhenHidden = false,
 }) => {
   const config = METRIC_CONFIGS[metric];
+
+  // Use real-time hook when realTime is enabled
+  const {
+    chartData: realTimeData,
+    latest,
+    isLive,
+    isPaused,
+    loading: realTimeLoading,
+    updateCount,
+    pauseLiveUpdates,
+    resumeLiveUpdates,
+  } = useMeasurements(realTime ? realTimeOptions : { autoConnect: false, subscribe: false });
+
+  // Determine which data source to use
+  const data = realTime ? realTimeData : propData;
+  const loading = realTime ? realTimeLoading : propLoading;
+
+  // Notify parent of live status changes
+  useEffect(() => {
+    if (realTime && onLiveStatusChange) {
+      onLiveStatusChange(isLive);
+    }
+  }, [realTime, isLive, onLiveStatusChange]);
+
+  // Notify parent of new measurements
+  useEffect(() => {
+    if (realTime && onNewMeasurement && latest) {
+      onNewMeasurement(latest);
+    }
+  }, [realTime, latest, onNewMeasurement]);
+
+  // Auto-pause when not visible
+  const containerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!autoPauseWhenHidden || !realTime || !node) return;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              resumeLiveUpdates();
+            } else {
+              pauseLiveUpdates();
+            }
+          });
+        },
+        { threshold: 0.1 }
+      );
+
+      observer.observe(node);
+      return () => observer.disconnect();
+    },
+    [autoPauseWhenHidden, realTime, pauseLiveUpdates, resumeLiveUpdates]
+  );
+
+  // Handle pause toggle
+  const handlePauseToggle = useCallback(() => {
+    if (isPaused) {
+      resumeLiveUpdates();
+    } else {
+      pauseLiveUpdates();
+    }
+  }, [isPaused, pauseLiveUpdates, resumeLiveUpdates]);
 
   // Handle loading state
   if (loading) {
     return (
-      <div className={className}>
+      <div className={className} ref={containerRef}>
         {title && (
           <h3 className="text-sm font-medium text-gray-700 mb-2">{title}</h3>
         )}
@@ -251,15 +417,25 @@ export const MetricChart: React.FC<MetricChartProps> = ({
 
   // Handle empty data
   if (!data || data.length === 0) {
+    const emptyStateMessage = realTime
+      ? `Waiting for ${config.name} data...`
+      : (emptyMessage ?? `No ${config.name} data available`);
+
     return (
-      <div className={className}>
-        {title && (
-          <h3 className="text-sm font-medium text-gray-700 mb-2">{title}</h3>
-        )}
-        <EmptyState
-          message={emptyMessage ?? `No ${config.name} data available`}
-          height={height}
-        />
+      <div className={className} ref={containerRef}>
+        <div className="flex items-center justify-between mb-2">
+          {title && (
+            <h3 className="text-sm font-medium text-gray-700">{title}</h3>
+          )}
+          {realTime && showLiveIndicator && (
+            <LiveIndicator
+              isLive={isLive}
+              isPaused={isPaused}
+              onPauseToggle={handlePauseToggle}
+            />
+          )}
+        </div>
+        <EmptyState message={emptyStateMessage} height={height} />
       </div>
     );
   }
@@ -274,10 +450,20 @@ export const MetricChart: React.FC<MetricChartProps> = ({
     : undefined;
 
   return (
-    <div className={className}>
-      {title && (
-        <h3 className="text-sm font-medium text-gray-700 mb-2">{title}</h3>
-      )}
+    <div className={className} ref={containerRef}>
+      <div className="flex items-center justify-between mb-2">
+        {title && (
+          <h3 className="text-sm font-medium text-gray-700">{title}</h3>
+        )}
+        {realTime && showLiveIndicator && (
+          <LiveIndicator
+            isLive={isLive}
+            isPaused={isPaused}
+            updateCount={updateCount}
+            onPauseToggle={handlePauseToggle}
+          />
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
           data={data}
@@ -347,11 +533,31 @@ export const MetricChart: React.FC<MetricChartProps> = ({
             dot={showDots ? { r: 3, fill: config.color } : false}
             activeDot={{ r: 5, fill: config.color }}
             isAnimationActive={animate}
+            animationDuration={realTime ? 200 : 500}
             name={config.name}
           />
         </LineChart>
       </ResponsiveContainer>
     </div>
+  );
+};
+
+/**
+ * RealTimeMetricChart is a convenience wrapper for MetricChart with realTime enabled.
+ * Use this when you always want real-time updates.
+ */
+export const RealTimeMetricChart: React.FC<
+  Omit<MetricChartProps, 'realTime' | 'data'> & {
+    options?: UseMeasurementsOptions;
+  }
+> = ({ options, ...props }) => {
+  return (
+    <MetricChart
+      {...props}
+      realTime
+      realTimeOptions={options}
+      showLiveIndicator={props.showLiveIndicator ?? true}
+    />
   );
 };
 

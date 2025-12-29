@@ -6,10 +6,13 @@
  * - Beta (Collapse Indicator)
  * - Alignment (Cosine Similarity)
  * - C_pair (Cross-pair Correlation)
+ *
+ * Real-time WebSocket support is available via the RealTimeMetricChart
+ * component or by setting `realTime={true}` on MetricChart.
  */
 
-// Generic metric chart
-export { MetricChart, METRIC_CONFIGS } from './MetricChart';
+// Generic metric chart with optional real-time support
+export { MetricChart, RealTimeMetricChart, METRIC_CONFIGS } from './MetricChart';
 export type {
   MetricChartProps,
   MetricType,

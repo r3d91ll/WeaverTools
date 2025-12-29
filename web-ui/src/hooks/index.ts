@@ -13,6 +13,18 @@ export {
   type UseChatWithAgentReturn,
 } from './useChat';
 
+// Measurement hooks
+export {
+  useMeasurements,
+  useMetric,
+  useBetaMonitor,
+  METRIC_TYPES,
+  type MetricType,
+  type UseMeasurementsOptions,
+  type UseMeasurementsReturn,
+  type MetricStats,
+} from './useMeasurements';
+
 // WebSocket hooks
 export {
   useWebSocket,

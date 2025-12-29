@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router';
 import { Layout } from './components/layout';
 import { Dashboard } from './pages/Dashboard';
+import { SessionDetail } from './pages/SessionDetail';
 import { Config } from './pages/Config';
 import { Chat } from './pages/Chat';
 import { Metrics } from './pages/Metrics';
@@ -24,6 +25,7 @@ function App() {
       <Layout connectionStatus={connectionStatus}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/sessions/:id" element={<SessionDetail />} />
           <Route path="/config" element={<Config />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/metrics" element={<Metrics />} />

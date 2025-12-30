@@ -172,11 +172,9 @@ func TestConfigHandler_PutConfig(t *testing.T) {
 			Backends: BackendsRequest{
 				ClaudeCode: ClaudeCodeRequest{Enabled: true},
 				Loom: LoomRequest{
-					Enabled:   true,
-					URL:       "http://localhost:9090",
-					Path:      "/path/to/loom",
-					AutoStart: false,
-					Port:      9090,
+					Enabled: true,
+					URL:     "http://localhost:9090",
+					Port:    9090,
 				},
 			},
 			Agents: map[string]AgentRequest{
@@ -286,11 +284,9 @@ func TestConfigHandler_ValidateConfig(t *testing.T) {
 			Backends: BackendsRequest{
 				ClaudeCode: ClaudeCodeRequest{Enabled: true},
 				Loom: LoomRequest{
-					Enabled:   true,
-					URL:       "http://localhost:8080",
-					Path:      "/path/to/loom",
-					AutoStart: true,
-					Port:      8080,
+					Enabled: true,
+					URL:     "http://localhost:8080",
+					Port:    8080,
 				},
 			},
 			Agents: map[string]AgentRequest{
@@ -533,11 +529,9 @@ func TestConfigToResponse(t *testing.T) {
 		Backends: BackendsRequest{
 			ClaudeCode: ClaudeCodeRequest{Enabled: true},
 			Loom: LoomRequest{
-				Enabled:   true,
-				URL:       "http://localhost:8080",
-				Path:      "/path/to/loom",
-				AutoStart: true,
-				Port:      8080,
+				Enabled: true,
+				URL:     "http://localhost:8080",
+				Port:    8080,
 			},
 		},
 		Agents: map[string]AgentRequest{
@@ -609,11 +603,9 @@ func TestRequestToConfig(t *testing.T) {
 		Backends: BackendsRequest{
 			ClaudeCode: ClaudeCodeRequest{Enabled: false},
 			Loom: LoomRequest{
-				Enabled:   true,
-				URL:       "http://custom:9090",
-				Path:      "/custom/path",
-				AutoStart: false,
-				Port:      9090,
+				Enabled: true,
+				URL:     "http://custom:9090",
+				Port:    9090,
 			},
 		},
 		Agents: map[string]AgentRequest{
@@ -721,8 +713,8 @@ func TestValidateConfig(t *testing.T) {
 			},
 			Agents: map[string]AgentRequest{
 				"agent1": {
-					Role:        "invalid",      // Error: invalid role
-					Backend:     "unknown",      // Error: invalid backend
+					Role:        "invalid", // Error: invalid role
+					Backend:     "unknown", // Error: invalid backend
 					Active:      true,
 					Temperature: &invalidTemp, // Error: out of range
 				},

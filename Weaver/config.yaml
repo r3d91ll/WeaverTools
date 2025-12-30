@@ -4,7 +4,6 @@ backends:
     loom:
         enabled: true
         url: http://localhost:8080
-        port: 8080
 agents:
     conversant1:
         role: conversant
@@ -94,7 +93,7 @@ agents:
         context_length: 8192
         top_p: null
         top_k: 0
-        gpu: auto
+        gpu: "auto"
 session:
     measurement_mode: active
     auto_export: true

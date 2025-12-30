@@ -2,10 +2,14 @@
 # Part of the Weaver Ecosystem
 #
 # Installation:
-#   sudo cp the-loom.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable the-loom
-#   sudo systemctl start the-loom
+#   1. Copy this file: sudo cp the-loom.service /etc/systemd/system/
+#   2. Edit the service file to customize for your system:
+#      sudo nano /etc/systemd/system/the-loom.service
+#      - Update User/Group (lines 25-26) to your username
+#      - Update WorkingDirectory (line 29) to your TheLoom install path
+#      - Update ExecStart (line 30) to your poetry path
+#   3. Reload systemd: sudo systemctl daemon-reload
+#   4. Enable and start: sudo systemctl enable --now the-loom
 #
 # View logs:
 #   journalctl -u the-loom -f
@@ -20,12 +24,14 @@ After=network.target
 
 [Service]
 Type=simple
-User=todd
-Group=todd
+# TODO: Change to your username
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
 
-# Working directory and command
-WorkingDirectory=/home/todd/olympus/git-repos/WeaverTools/TheLoom/the-loom
-ExecStart=/home/todd/.local/bin/poetry run loom --port 8080
+# TODO: Change to your TheLoom installation directory
+WorkingDirectory=/path/to/WeaverTools/TheLoom/the-loom
+# TODO: Change to your poetry path (run 'which poetry' to find it)
+ExecStart=/path/to/poetry run loom --port 8080
 
 # Restart behavior
 Restart=on-failure
@@ -35,7 +41,7 @@ TimeoutStopSec=30
 # Environment
 Environment=LOOM_LOGGING__LEVEL=INFO
 
-# Resource limits (adjust as needed)
+# Resource limits (adjust as needed for your GPU memory)
 # MemoryMax=32G
 # CPUQuota=400%
 

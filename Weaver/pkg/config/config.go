@@ -100,7 +100,7 @@ func Default() *Config {
 			Loom: LoomConfig{
 				Enabled: true,
 				URL:     "http://localhost:8080",
-				Port:    8080,
+				// Port is only used as fallback when URL is empty
 			},
 		},
 		Agents: map[string]AgentConfig{

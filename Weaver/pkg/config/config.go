@@ -39,7 +39,7 @@ type ClaudeCodeConfig struct {
 type LoomConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	URL     string `yaml:"url"`  // URL of TheLoom server (e.g., "http://localhost:8080")
-	Port    int    `yaml:"port"` // Port for TheLoom server (used if URL is empty)
+	Port    int    `yaml:"port"` // Deprecated: URL is required when Loom is enabled
 }
 
 // AgentConfig holds agent settings.
@@ -100,7 +100,7 @@ func Default() *Config {
 			Loom: LoomConfig{
 				Enabled: true,
 				URL:     "http://localhost:8080",
-				// Port is only used as fallback when URL is empty
+				// Port field is deprecated; URL is required when Loom is enabled
 			},
 		},
 		Agents: map[string]AgentConfig{

@@ -5,9 +5,9 @@
 #   1. Copy this file: sudo cp the-loom.service /etc/systemd/system/
 #   2. Edit the service file to customize for your system:
 #      sudo nano /etc/systemd/system/the-loom.service
-#      - Update User/Group (lines 25-26) to your username
-#      - Update WorkingDirectory (line 29) to your TheLoom install path
-#      - Update ExecStart (line 30) to your poetry path
+#      - Update User/Group (lines 28-29) to your username
+#      - Update WorkingDirectory (line 32) to your TheLoom install path
+#      - Update ExecStart (line 34) to your poetry path
 #   3. Reload systemd: sudo systemctl daemon-reload
 #   4. Enable and start: sudo systemctl enable --now the-loom
 #
@@ -51,6 +51,14 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/tmp
 PrivateTmp=true
+
+# GPU access (required for CUDA operations)
+DeviceAllow=/dev/nvidia0
+DeviceAllow=/dev/nvidia1
+DeviceAllow=/dev/nvidiactl
+DeviceAllow=/dev/nvidia-uvm
+DeviceAllow=/dev/nvidia-uvm-tools
+DeviceAllow=/dev/nvidia-modeset
 
 [Install]
 WantedBy=multi-user.target

@@ -249,6 +249,80 @@ async def run_both_servers(
     )
 
 
+def validate_startup(config: Any, logger: logging.Logger) -> bool:
+    """
+    Validate startup configuration before launching the server.
+
+    Checks GPU availability and device indices to catch configuration errors
+    early with clear error messages.
+
+    Parameters:
+        config: The Loom configuration object.
+        logger: Logger for warning/error messages.
+
+    Returns:
+        bool: True if validation passes, False if there are fatal errors.
+    """
+    import torch
+
+    warnings_found = False
+
+    # Check GPU configuration
+    if config.gpu.default_device >= 0:
+        # GPU mode requested
+        if not torch.cuda.is_available():
+            logger.error(
+                f"GPU device {config.gpu.default_device} requested but CUDA is not available. "
+                "Use --device cpu or set LOOM_GPU__DEFAULT_DEVICE=-1 for CPU mode."
+            )
+            return False
+
+        device_count = torch.cuda.device_count()
+        if config.gpu.default_device >= device_count:
+            logger.error(
+                f"GPU device {config.gpu.default_device} requested but only {device_count} GPU(s) available. "
+                f"Valid devices: 0-{device_count - 1}"
+            )
+            return False
+
+        # Log GPU info
+        device_name = torch.cuda.get_device_name(config.gpu.default_device)
+        logger.info(f"GPU {config.gpu.default_device}: {device_name}")
+
+    else:
+        # CPU mode
+        if torch.cuda.is_available():
+            logger.info("Running in CPU mode (GPU available but not configured)")
+        else:
+            logger.info("Running in CPU mode (no GPU available)")
+
+    # Validate precision settings
+    if config.memory.precision != "auto":
+        validation = config.memory.validate_precision(config.gpu.default_device)
+        for warning in validation.warnings:
+            logger.warning(warning)
+            warnings_found = True
+
+    # Check allowed GPU devices if specified
+    if config.gpu.allowed_devices:
+        if torch.cuda.is_available():
+            device_count = torch.cuda.device_count()
+            invalid_devices = [d for d in config.gpu.allowed_devices if d >= device_count]
+            if invalid_devices:
+                logger.warning(
+                    f"Configured GPU devices {invalid_devices} do not exist. "
+                    f"Available: 0-{device_count - 1}"
+                )
+                warnings_found = True
+
+    if warnings_found:
+        logger.warning("Startup validation completed with warnings")
+    else:
+        logger.info("Startup validation passed")
+
+    return True
+
+
 def preload_models(app: Any, model_ids: list[str]) -> None:
     """
     Preload the specified models into the application's model manager.
@@ -337,6 +411,11 @@ def main() -> None:
     logger.info(f"Default device: {device_display}")
     logger.info(f"Max loaded models: {config.models.max_loaded}")
     logger.info("=" * 60)
+
+    # Validate startup configuration
+    if not validate_startup(config, logger):
+        logger.error("Startup validation failed - exiting")
+        sys.exit(1)
 
     # Create the app
     app = create_http_app(config)

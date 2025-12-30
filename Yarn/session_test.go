@@ -20,7 +20,8 @@ func TestMeasurementModeIsValid(t *testing.T) {
 		{"typo mode is invalid", MeasurementMode("pasive"), false},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.mode.IsValid(); got != tt.valid {
 				t.Errorf("MeasurementMode(%q).IsValid() = %v, want %v", tt.mode, got, tt.valid)
@@ -88,7 +89,8 @@ func TestSessionConfigValidate(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
 			if tt.wantErr {
@@ -493,7 +495,8 @@ func TestSessionValidate(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.session.Validate()
 			if tt.wantErr {
@@ -578,7 +581,8 @@ func TestSessionValidateTimeConsistency(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			session := Session{
 				ID:            "session-time-test",
@@ -643,7 +647,8 @@ func TestNewSessionValidation(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			session := NewSession(tt.sessionName, tt.description)
 			err := session.Validate()

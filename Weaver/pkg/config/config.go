@@ -35,13 +35,11 @@ type ClaudeCodeConfig struct {
 }
 
 // LoomConfig holds The Loom backend settings.
+// TheLoom is expected to run as a systemd service: `systemctl start the-loom`
 type LoomConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	URL       string `yaml:"url"`
-	Path      string `yaml:"path"`       // Path to TheLoom directory (for auto-start)
-	AutoStart bool   `yaml:"auto_start"` // Start TheLoom if not running
-	Port      int    `yaml:"port"`       // Port for TheLoom server
-	GPUs      []int  `yaml:"gpus"`       // GPU device IDs to use (e.g., [0, 1]). Empty = auto-detect all
+	Enabled bool   `yaml:"enabled"`
+	URL     string `yaml:"url"`  // URL of TheLoom server (e.g., "http://localhost:8080")
+	Port    int    `yaml:"port"` // Deprecated: URL is required when Loom is enabled
 }
 
 // AgentConfig holds agent settings.
@@ -100,11 +98,9 @@ func Default() *Config {
 				Enabled:   true,
 			},
 			Loom: LoomConfig{
-				Enabled:   true,
-				URL:       "http://localhost:8080",
-				Path:      "../TheLoom/the-loom",
-				AutoStart: true,
-				Port:      8080,
+				Enabled: true,
+				URL:     "http://localhost:8080",
+				// Port field is deprecated; URL is required when Loom is enabled
 			},
 		},
 		Agents: map[string]AgentConfig{
@@ -226,7 +222,7 @@ func InitConfig(path string) error {
 var validBackends = []string{"claudecode", "loom"}
 
 // validRoles is the list of supported agent roles.
-var validRoles = []string{"senior", "junior", "analyst", "architect", "reviewer"}
+var validRoles = []string{"senior", "junior", "analyst", "architect", "reviewer", "conversant", "subject"}
 
 // validMeasurementModes is the list of supported measurement modes.
 var validMeasurementModes = []string{"active", "passive", "disabled"}

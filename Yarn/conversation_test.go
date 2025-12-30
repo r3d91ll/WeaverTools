@@ -295,7 +295,8 @@ func TestConversationValidate(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.conv.Validate()
 			if tt.wantErr {
@@ -406,7 +407,8 @@ func TestParticipantValidate(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.participant.Validate()
 			if tt.wantErr {
@@ -453,7 +455,8 @@ func TestNewConversationValidation(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			conv := NewConversation(tt.convName)
 			err := conv.Validate()
@@ -596,7 +599,8 @@ func TestConversationValidateTimeConsistency(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			conv := Conversation{
 				ID:        "conv-time-test",

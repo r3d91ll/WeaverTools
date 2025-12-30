@@ -109,32 +109,18 @@ func main() {
 		registry.Register("claudecode", claudeCode)
 	}
 
-	// Initialize TheLoom manager for auto-start capability
+	// Initialize TheLoom manager (TheLoom runs as a systemd service)
 	var loomMgr *loom.Manager
 	if cfg.Backends.Loom.Enabled {
-		// Resolve TheLoom path relative to config file location
-		loomPath := cfg.Backends.Loom.Path
-		if loomPath != "" && !filepath.IsAbs(loomPath) {
-			// Make path relative to config file directory
-			cfgDir := filepath.Dir(cfgPath)
-			loomPath = filepath.Join(cfgDir, loomPath)
-		}
-
 		loomMgr = loom.NewManager(loom.Config{
-			Path:      loomPath,
-			Port:      cfg.Backends.Loom.Port,
-			AutoStart: cfg.Backends.Loom.AutoStart,
-			GPUs:      cfg.Backends.Loom.GPUs,
+			URL:  cfg.Backends.Loom.URL,
+			Port: cfg.Backends.Loom.Port,
 		})
 
-		// Ensure TheLoom is running (starts it if needed)
+		// Check if TheLoom is running
 		if err := loomMgr.EnsureRunning(ctx); err != nil {
-			if cfg.Backends.Loom.AutoStart {
-				fmt.Printf("⚠ Failed to start TheLoom: %v\n", err)
-			}
+			fmt.Printf("⚠ TheLoom not available: %v\n", err)
 			// Continue - backend will show as unavailable
-		} else if loomMgr.IsManaged() {
-			fmt.Println("✓ Started TheLoom server")
 		}
 
 		loomBackend := backend.NewLoom(backend.LoomConfig{
@@ -347,15 +333,8 @@ func main() {
 		}
 	}
 
-	// Stop TheLoom if we started it
-	if loomMgr != nil && loomMgr.IsManaged() {
-		fmt.Print("Stopping TheLoom server...")
-		if err := loomMgr.Stop(); err != nil {
-			fmt.Printf(" error: %v\n", err)
-		} else {
-			fmt.Println(" done")
-		}
-	}
+	// Note: TheLoom is managed by systemd, not by this process.
+	// To stop it: systemctl stop the-loom
 
 	fmt.Println("Goodbye!")
 }

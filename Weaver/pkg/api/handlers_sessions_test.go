@@ -172,15 +172,17 @@ func TestSessionsHandler_GetSession(t *testing.T) {
 			t.Error("Expected success response")
 		}
 
+		// Response is wrapped in SingleSessionResponse with "session" field
 		data := resp.Data.(map[string]interface{})
-		if data["name"] != "Test Session" {
-			t.Errorf("Expected name 'Test Session', got %v", data["name"])
+		sessionData := data["session"].(map[string]interface{})
+		if sessionData["name"] != "Test Session" {
+			t.Errorf("Expected name 'Test Session', got %v", sessionData["name"])
 		}
-		if data["description"] != "A test session" {
-			t.Errorf("Expected description 'A test session', got %v", data["description"])
+		if sessionData["description"] != "A test session" {
+			t.Errorf("Expected description 'A test session', got %v", sessionData["description"])
 		}
 
-		config := data["config"].(map[string]interface{})
+		config := sessionData["config"].(map[string]interface{})
 		if config["measurementMode"] != "passive" {
 			t.Errorf("Expected measurementMode 'passive', got %v", config["measurementMode"])
 		}
@@ -258,16 +260,18 @@ func TestSessionsHandler_CreateSession(t *testing.T) {
 			t.Error("Expected success response")
 		}
 
+		// Response is wrapped in SingleSessionResponse with "session" field
 		data := resp.Data.(map[string]interface{})
-		if data["name"] != "New Session" {
-			t.Errorf("Expected name 'New Session', got %v", data["name"])
+		sessionData := data["session"].(map[string]interface{})
+		if sessionData["name"] != "New Session" {
+			t.Errorf("Expected name 'New Session', got %v", sessionData["name"])
 		}
-		if data["id"] == "" {
+		if sessionData["id"] == "" {
 			t.Error("Expected session ID to be generated")
 		}
 
 		// Check defaults
-		config := data["config"].(map[string]interface{})
+		config := sessionData["config"].(map[string]interface{})
 		if config["measurementMode"] != "active" {
 			t.Errorf("Expected default measurementMode 'active', got %v", config["measurementMode"])
 		}
@@ -309,17 +313,18 @@ func TestSessionsHandler_CreateSession(t *testing.T) {
 
 		resp := parseAPIResponse(t, rec.Body)
 		data := resp.Data.(map[string]interface{})
+		sessionData := data["session"].(map[string]interface{})
 
-		if data["description"] != "A complete session" {
-			t.Errorf("Expected description 'A complete session', got %v", data["description"])
+		if sessionData["description"] != "A complete session" {
+			t.Errorf("Expected description 'A complete session', got %v", sessionData["description"])
 		}
 
-		config := data["config"].(map[string]interface{})
+		config := sessionData["config"].(map[string]interface{})
 		if config["measurementMode"] != "triggered" {
 			t.Errorf("Expected measurementMode 'triggered', got %v", config["measurementMode"])
 		}
 
-		metadata := data["metadata"].(map[string]interface{})
+		metadata := sessionData["metadata"].(map[string]interface{})
 		if metadata["project"] != "test-project" {
 			t.Errorf("Expected metadata project 'test-project', got %v", metadata["project"])
 		}
@@ -477,8 +482,9 @@ func TestSessionsHandler_UpdateSession(t *testing.T) {
 		}
 
 		data := resp.Data.(map[string]interface{})
-		if data["name"] != "Updated Name" {
-			t.Errorf("Expected name 'Updated Name', got %v", data["name"])
+		sessionData := data["session"].(map[string]interface{})
+		if sessionData["name"] != "Updated Name" {
+			t.Errorf("Expected name 'Updated Name', got %v", sessionData["name"])
 		}
 	})
 
@@ -520,7 +526,8 @@ func TestSessionsHandler_UpdateSession(t *testing.T) {
 
 		resp := parseAPIResponse(t, rec.Body)
 		data := resp.Data.(map[string]interface{})
-		config := data["config"].(map[string]interface{})
+		sessionData := data["session"].(map[string]interface{})
+		config := sessionData["config"].(map[string]interface{})
 
 		if config["measurementMode"] != "passive" {
 			t.Errorf("Expected measurementMode 'passive', got %v", config["measurementMode"])
@@ -726,7 +733,8 @@ func TestSessionsHandler_EndSession(t *testing.T) {
 		}
 
 		data := resp.Data.(map[string]interface{})
-		if data["endedAt"] == nil {
+		sessionData := data["session"].(map[string]interface{})
+		if sessionData["endedAt"] == nil {
 			t.Error("Expected endedAt to be set")
 		}
 	})

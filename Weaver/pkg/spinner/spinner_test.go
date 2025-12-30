@@ -330,8 +330,8 @@ func TestFail(t *testing.T) {
 	}
 }
 
-// TestFailDefaultMessage verifies Fail uses current message if empty.
-func TestFailDefaultMessage(t *testing.T) {
+// TestSpinnerFailDefaultMessage verifies Fail uses current message if empty.
+func TestSpinnerFailDefaultMessage(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewWithConfig(Config{
 		Message:     "original message",
@@ -460,8 +460,8 @@ func TestThreadSafetyConcurrentUpdate(t *testing.T) {
 	}
 }
 
-// TestThreadSafetyConcurrentMixedOperations tests mixed concurrent operations.
-func TestThreadSafetyConcurrentMixedOperations(t *testing.T) {
+// TestSpinnerThreadSafetyConcurrentMixedOperations tests mixed concurrent operations.
+func TestSpinnerThreadSafetyConcurrentMixedOperations(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewWithConfig(Config{
 		Message:    "mixed test",
@@ -679,8 +679,8 @@ func TestNonTTYStaticOutput(t *testing.T) {
 	}
 }
 
-// TestNonTTYSuccessOutput verifies Success output in non-TTY mode.
-func TestNonTTYSuccessOutput(t *testing.T) {
+// TestSpinnerNonTTYSuccessOutput verifies Success output in non-TTY mode.
+func TestSpinnerNonTTYSuccessOutput(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewWithConfig(Config{
 		Message:     "processing",
@@ -710,8 +710,8 @@ func TestNonTTYSuccessOutput(t *testing.T) {
 	}
 }
 
-// TestNonTTYFailOutput verifies Fail output in non-TTY mode.
-func TestNonTTYFailOutput(t *testing.T) {
+// TestSpinnerNonTTYFailOutput verifies Fail output in non-TTY mode.
+func TestSpinnerNonTTYFailOutput(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewWithConfig(Config{
 		Message:     "processing",

@@ -333,15 +333,8 @@ func main() {
 		}
 	}
 
-	// Stop TheLoom if we started it
-	if loomMgr != nil && loomMgr.IsManaged() {
-		fmt.Print("Stopping TheLoom server...")
-		if err := loomMgr.Stop(); err != nil {
-			fmt.Printf(" error: %v\n", err)
-		} else {
-			fmt.Println(" done")
-		}
-	}
+	// Note: TheLoom is managed by systemd, not by this process.
+	// To stop it: systemctl stop the-loom
 
 	fmt.Println("Goodbye!")
 }

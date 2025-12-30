@@ -83,14 +83,3 @@ func (m *Manager) EnsureRunning(ctx context.Context) error {
 	}
 	return fmt.Errorf("TheLoom not running at %s. Start it with: systemctl start the-loom", m.URL())
 }
-
-// Stop is a no-op since TheLoom is managed by systemd.
-// Kept for interface compatibility.
-func (m *Manager) Stop() error {
-	return nil
-}
-
-// IsManaged returns false since TheLoom is managed by systemd, not this process.
-func (m *Manager) IsManaged() bool {
-	return false
-}

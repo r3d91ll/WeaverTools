@@ -100,6 +100,30 @@ from .concept_landscape import (
     run_concept_landscape_pipeline,
 )
 
+from .memory_tracing import (
+    # Constants
+    SPARSITY_THRESHOLD,
+    RANK_THRESHOLD,
+    TOP_SINGULAR_VALUES,
+    MIN_EPOCHS_FOR_TREND,
+    # Result types
+    LayerMemoryStats,
+    MemoryEpisodeStats,
+    MemoryEvolutionResult,
+    # Core analysis functions
+    compute_matrix_stats,
+    analyze_layer_memory,
+    analyze_memory_states,
+    analyze_memory_checkpoint,
+    analyze_memory_evolution,
+    # Visualization functions
+    create_memory_heatmap,
+    create_evolution_plot,
+    create_singular_value_plot,
+    # High-level interface
+    MemoryTracer,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -179,4 +203,25 @@ __all__ = [
     "create_convergence_plot",
     # Concept Landscape pipeline
     "run_concept_landscape_pipeline",
+    # Memory Tracing constants
+    "SPARSITY_THRESHOLD",
+    "RANK_THRESHOLD",
+    "TOP_SINGULAR_VALUES",
+    "MIN_EPOCHS_FOR_TREND",
+    # Memory Tracing result types
+    "LayerMemoryStats",
+    "MemoryEpisodeStats",
+    "MemoryEvolutionResult",
+    # Memory Tracing analysis functions
+    "compute_matrix_stats",
+    "analyze_layer_memory",
+    "analyze_memory_states",
+    "analyze_memory_checkpoint",
+    "analyze_memory_evolution",
+    # Memory Tracing visualization functions
+    "create_memory_heatmap",
+    "create_evolution_plot",
+    "create_singular_value_plot",
+    # Memory Tracing high-level interface
+    "MemoryTracer",
 ]

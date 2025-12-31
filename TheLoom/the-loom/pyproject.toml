@@ -70,6 +70,8 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring GPU/models",
     "gpu: marks tests requiring GPU hardware (deselect with '-m \"not gpu\"')",
+    "e2e: marks end-to-end tests for full pipeline verification",
+    "synthetic: marks tests using synthetic data (no real checkpoints needed)",
 ]
 
 [tool.mypy]

@@ -181,6 +181,24 @@ from .atlas_statistics import (
     AtlasStatisticsAnalyzer,
 )
 
+from .batch_pipeline import (
+    # Constants
+    TOTAL_EPOCHS,
+    GPU_MEMORY_BUDGET_MB,
+    VISUALIZATION_SAMPLE_EPOCHS,
+    # Result types
+    ValidationSummary,
+    PipelineStageResult,
+    BatchPipelineResult,
+    # Stage functions
+    stage_validate_checkpoints,
+    stage_concept_landscape,
+    stage_memory_tracing,
+    stage_statistics,
+    # High-level interface
+    BatchAnalysisPipeline,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -332,4 +350,19 @@ __all__ = [
     "compute_summary_statistics",
     # Atlas Statistics high-level interface
     "AtlasStatisticsAnalyzer",
+    # Batch Pipeline constants
+    "TOTAL_EPOCHS",
+    "GPU_MEMORY_BUDGET_MB",
+    "VISUALIZATION_SAMPLE_EPOCHS",
+    # Batch Pipeline result types
+    "ValidationSummary",
+    "PipelineStageResult",
+    "BatchPipelineResult",
+    # Batch Pipeline stage functions
+    "stage_validate_checkpoints",
+    "stage_concept_landscape",
+    "stage_memory_tracing",
+    "stage_statistics",
+    # Batch Pipeline high-level interface
+    "BatchAnalysisPipeline",
 ]

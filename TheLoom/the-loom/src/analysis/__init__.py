@@ -78,6 +78,28 @@ from .aligned_pca import (
     compute_convergence_curve,
 )
 
+from .concept_landscape import (
+    # Constants
+    DEFAULT_SAMPLE_TEXTS,
+    VISUALIZATION_COMPONENTS,
+    ANALYSIS_COMPONENTS,
+    MIN_EPOCHS_FOR_ANALYSIS,
+    # Result types
+    EpochEmbeddings,
+    ConceptLandscapeResult,
+    VisualizationConfig,
+    # Extraction functions
+    extract_embeddings_from_checkpoint,
+    extract_embeddings_batch,
+    # Analysis functions
+    analyze_concept_landscape,
+    # Visualization functions
+    create_landscape_visualization,
+    create_convergence_plot,
+    # Pipeline orchestration
+    run_concept_landscape_pipeline,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -138,4 +160,23 @@ __all__ = [
     "build_cross_epoch_trajectory",
     "compute_epoch_distances",
     "compute_convergence_curve",
+    # Concept Landscape constants
+    "DEFAULT_SAMPLE_TEXTS",
+    "VISUALIZATION_COMPONENTS",
+    "ANALYSIS_COMPONENTS",
+    "MIN_EPOCHS_FOR_ANALYSIS",
+    # Concept Landscape result types
+    "EpochEmbeddings",
+    "ConceptLandscapeResult",
+    "VisualizationConfig",
+    # Concept Landscape extraction functions
+    "extract_embeddings_from_checkpoint",
+    "extract_embeddings_batch",
+    # Concept Landscape analysis functions
+    "analyze_concept_landscape",
+    # Concept Landscape visualization functions
+    "create_landscape_visualization",
+    "create_convergence_plot",
+    # Concept Landscape pipeline
+    "run_concept_landscape_pipeline",
 ]

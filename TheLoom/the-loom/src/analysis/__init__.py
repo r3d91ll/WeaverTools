@@ -61,6 +61,23 @@ from .agent_flow import (
     visualize_agent_alignment,
 )
 
+from .aligned_pca import (
+    # Constants
+    DEFAULT_REFERENCE_EPOCH,
+    DEFAULT_N_COMPONENTS,
+    VARIANCE_EXPLAINED_THRESHOLD,
+    # Main class
+    AlignedPCA,
+    # Result types
+    AlignedPCAFitResult,
+    AlignedPCAResult,
+    CrossEpochTrajectory,
+    # Utility functions
+    build_cross_epoch_trajectory,
+    compute_epoch_distances,
+    compute_convergence_curve,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -107,4 +124,18 @@ __all__ = [
     "AgentBottleneckResult",
     "AgentFlowGraphResult",
     "FlowComparisonResult",
+    # Aligned PCA constants
+    "DEFAULT_REFERENCE_EPOCH",
+    "DEFAULT_N_COMPONENTS",
+    "VARIANCE_EXPLAINED_THRESHOLD",
+    # Aligned PCA main class
+    "AlignedPCA",
+    # Aligned PCA result types
+    "AlignedPCAFitResult",
+    "AlignedPCAResult",
+    "CrossEpochTrajectory",
+    # Aligned PCA utility functions
+    "build_cross_epoch_trajectory",
+    "compute_epoch_distances",
+    "compute_convergence_curve",
 ]

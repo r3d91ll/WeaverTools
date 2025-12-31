@@ -124,6 +124,42 @@ from .memory_tracing import (
     MemoryTracer,
 )
 
+from .visualization import (
+    # Constants
+    DEFAULT_AXIS_RANGE,
+    DEFAULT_PNG_WIDTH,
+    DEFAULT_PNG_HEIGHT,
+    PNG_SCALE_FACTOR,
+    MAX_HTML_SIZE_BYTES,
+    DEFAULT_ANIMATION_DURATION_MS,
+    WEBGL_THRESHOLD_POINTS,
+    # Configuration classes
+    VisualizationStyle,
+    AnimationConfig,
+    ExportConfig,
+    Axis3DConfig,
+    Landscape3DConfig,
+    # Result types
+    ExportResult,
+    # Core 3D visualization functions
+    create_scatter_3d,
+    create_animated_scatter_3d,
+    create_trajectory_plot_3d,
+    create_surface_3d,
+    # Heatmap functions
+    create_heatmap,
+    create_multi_heatmap_grid,
+    # Line plot functions
+    create_line_plot,
+    create_multi_line_subplot,
+    # Export functions
+    export_figure,
+    export_for_publication,
+    # High-level visualization functions
+    visualize_epoch_evolution,
+    visualize_memory_statistics,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -224,4 +260,37 @@ __all__ = [
     "create_singular_value_plot",
     # Memory Tracing high-level interface
     "MemoryTracer",
+    # Visualization module constants
+    "DEFAULT_AXIS_RANGE",
+    "DEFAULT_PNG_WIDTH",
+    "DEFAULT_PNG_HEIGHT",
+    "PNG_SCALE_FACTOR",
+    "MAX_HTML_SIZE_BYTES",
+    "DEFAULT_ANIMATION_DURATION_MS",
+    "WEBGL_THRESHOLD_POINTS",
+    # Visualization configuration classes
+    "VisualizationStyle",
+    "AnimationConfig",
+    "ExportConfig",
+    "Axis3DConfig",
+    "Landscape3DConfig",
+    # Visualization result types
+    "ExportResult",
+    # Core 3D visualization functions
+    "create_scatter_3d",
+    "create_animated_scatter_3d",
+    "create_trajectory_plot_3d",
+    "create_surface_3d",
+    # Heatmap visualization functions
+    "create_heatmap",
+    "create_multi_heatmap_grid",
+    # Line plot visualization functions
+    "create_line_plot",
+    "create_multi_line_subplot",
+    # Visualization export functions
+    "export_figure",
+    "export_for_publication",
+    # High-level visualization functions
+    "visualize_epoch_evolution",
+    "visualize_memory_statistics",
 ]

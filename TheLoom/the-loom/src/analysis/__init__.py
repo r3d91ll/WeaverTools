@@ -160,6 +160,27 @@ from .visualization import (
     visualize_memory_statistics,
 )
 
+from .atlas_statistics import (
+    # Constants
+    OUTLIER_Z_THRESHOLD,
+    OUTLIER_IQR_MULTIPLIER,
+    MIN_EPOCHS_FOR_STATS,
+    DEFAULT_CLUSTER_COMPONENTS,
+    # Result types
+    EpochStatistics,
+    ClusterStabilityMetrics,
+    TrendAnalysis,
+    OutlierDetectionResult,
+    AtlasStatisticsResult,
+    # Core analysis functions
+    compute_epoch_statistics,
+    analyze_trends,
+    detect_outliers,
+    compute_summary_statistics,
+    # High-level interface
+    AtlasStatisticsAnalyzer,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -293,4 +314,22 @@ __all__ = [
     # High-level visualization functions
     "visualize_epoch_evolution",
     "visualize_memory_statistics",
+    # Atlas Statistics constants
+    "OUTLIER_Z_THRESHOLD",
+    "OUTLIER_IQR_MULTIPLIER",
+    "MIN_EPOCHS_FOR_STATS",
+    "DEFAULT_CLUSTER_COMPONENTS",
+    # Atlas Statistics result types
+    "EpochStatistics",
+    "ClusterStabilityMetrics",
+    "TrendAnalysis",
+    "OutlierDetectionResult",
+    "AtlasStatisticsResult",
+    # Atlas Statistics analysis functions
+    "compute_epoch_statistics",
+    "analyze_trends",
+    "detect_outliers",
+    "compute_summary_statistics",
+    # Atlas Statistics high-level interface
+    "AtlasStatisticsAnalyzer",
 ]

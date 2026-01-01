@@ -114,11 +114,12 @@ class TestCheckpointValidation:
     def test_validate_valid_checkpoint(self, valid_checkpoint):
         loader = AtlasLoader()
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save(valid_checkpoint, f.name)
-            result = loader.validate_checkpoint(f.name)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save(valid_checkpoint, path)
+            result = loader.validate_checkpoint(str(path))
 
-        assert result["valid"] is True
+            assert result["valid"] is True
         assert result["step"] == 1000
         assert result["epoch"] == 10
         assert result["num_parameters"] > 0
@@ -134,12 +135,13 @@ class TestCheckpointValidation:
             "_padding": torch.randn(512, 512),
         }
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save(incomplete_checkpoint, f.name)
-            result = loader.validate_checkpoint(f.name)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save(incomplete_checkpoint, path)
+            result = loader.validate_checkpoint(str(path))
 
-        assert result["valid"] is False
-        assert "missing required keys" in result["error"].lower()
+            assert result["valid"] is False
+            assert "missing required keys" in result["error"].lower()
 
     def test_validate_empty_model_state_dict(self):
         loader = AtlasLoader()
@@ -153,21 +155,23 @@ class TestCheckpointValidation:
             "_padding": torch.randn(512, 512),
         }
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save(checkpoint, f.name)
-            result = loader.validate_checkpoint(f.name)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save(checkpoint, path)
+            result = loader.validate_checkpoint(str(path))
 
-        assert result["valid"] is False
-        assert "empty" in result["error"].lower()
+            assert result["valid"] is False
+            assert "empty" in result["error"].lower()
 
     def test_validate_memory_states_dict_format(self, valid_checkpoint_with_memory):
         loader = AtlasLoader()
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save(valid_checkpoint_with_memory, f.name)
-            result = loader.validate_checkpoint(f.name, strict=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save(valid_checkpoint_with_memory, path)
+            result = loader.validate_checkpoint(str(path), strict=True)
 
-        assert result["valid"] is True
+            assert result["valid"] is True
         assert result["has_memory_states"] is True
         assert result["num_layers_with_memory"] == 4
         # Check that layer shapes are recorded in strict mode
@@ -184,24 +188,27 @@ class TestCheckpointValidation:
             for _ in range(4)
         ]
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save(checkpoint, f.name)
-            result = loader.validate_checkpoint(f.name, strict=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save(checkpoint, path)
+            result = loader.validate_checkpoint(str(path), strict=True)
 
-        assert result["valid"] is True
-        assert result["has_memory_states"] is True
-        assert result["num_layers_with_memory"] == 4
+            assert result["valid"] is True
+            assert result["has_memory_states"] is True
+            assert result["num_layers_with_memory"] == 4
 
     def test_validate_checkpoint_too_small(self):
         loader = AtlasLoader()
 
         # Create a very small file (less than 1MB)
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            f.write(b"tiny file")
-            result = loader.validate_checkpoint(f.name)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            with open(path, "wb") as f:
+                f.write(b"tiny file")
+            result = loader.validate_checkpoint(str(path))
 
-        assert result["valid"] is False
-        assert "too small" in result["error"].lower()
+            assert result["valid"] is False
+            assert "too small" in result["error"].lower()
 
 
 class TestStateDictCleaning:
@@ -379,11 +386,12 @@ class TestCheckpointPathResolution:
     def test_resolve_direct_file(self):
         loader = AtlasLoader()
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save({"step": 1000}, f.name)
-            resolved = loader._resolve_checkpoint_path(f.name)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save({"step": 1000}, path)
+            resolved = loader._resolve_checkpoint_path(str(path))
 
-        assert resolved == Path(f.name)
+            assert resolved == path
 
     def test_resolve_directory(self):
         loader = AtlasLoader()
@@ -654,14 +662,15 @@ class TestDeviceRemapping:
             "config": {"d_model": 512},
         }
 
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-            torch.save(checkpoint, f.name)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "checkpoint.pt"
+            torch.save(checkpoint, path)
 
             # Validation should work without GPU
             with patch("torch.load") as mock_load:
                 mock_load.return_value = checkpoint
 
-                loader.validate_checkpoint(f.name)
+                loader.validate_checkpoint(str(path))
 
                 # Verify torch.load was called with cpu mapping
                 mock_load.assert_called()

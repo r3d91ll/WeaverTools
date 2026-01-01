@@ -656,11 +656,14 @@ class AtlasLoader(ModelLoader):
             memory_states: Optional pre-loaded memory states.
 
         Returns:
-            Dict mapping layer index to hidden state tensor.
+            Dict mapping layer index to final logits tensor (post-LM-head).
+            Note: Atlas currently returns vocab-sized logits for all requested
+            layers as intermediate hidden states are not exposed. Shape is
+            [batch, vocab_size] rather than typical [batch, d_model].
         """
         # This is a simplified extraction - Atlas architecture would need
         # modification to return intermediate hidden states properly.
-        # For now, we return the final layer's output.
+        # For now, we return the final layer's output (post-LM-head logits).
         result: dict[int, torch.Tensor] = {}
 
         with torch.no_grad():

@@ -908,6 +908,12 @@ def run_concept_landscape_pipeline(
     if checkpoint_dir is None:
         checkpoint_dir = DEFAULT_CHECKPOINT_DIR
 
+    if not checkpoint_dir:
+        raise ValueError(
+            "No checkpoint directory specified. Set ATLAS_CHECKPOINT_DIR "
+            "environment variable or pass checkpoint_dir parameter."
+        )
+
     checkpoint_dir = Path(checkpoint_dir)
 
     logger.info(f"Starting concept landscape pipeline for epochs: {epochs}")

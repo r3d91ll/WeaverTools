@@ -208,7 +208,7 @@ class CheckpointManager:
         self,
         checkpoint_dir: str | Path,
         save_every_epoch: int = 1,
-    ):
+    ) -> None:
         """Initialize the checkpoint manager.
 
         Args:
@@ -427,7 +427,7 @@ class SyntheticDataLoader:
         batch_size: int,
         num_batches: int,
         device: str = "cpu",
-    ):
+    ) -> None:
         """Initialize the synthetic data loader.
 
         Args:
@@ -525,7 +525,7 @@ class AtlasTrainer:
         trainer.train()
     """
 
-    def __init__(self, config: TrainingConfig):
+    def __init__(self, config: TrainingConfig) -> None:
         """Initialize the trainer.
 
         Args:

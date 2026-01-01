@@ -72,7 +72,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -873,7 +873,7 @@ class BatchAnalysisPipeline:
 
     def run(
         self,
-        epochs: str | list[int] = "all",
+        epochs: Literal["all"] | list[int] = "all",
         output_dir: str | Path = "/tmp/analysis_results",
         skip_concept_landscape: bool = False,
         skip_memory_tracing: bool = False,
@@ -906,7 +906,8 @@ class BatchAnalysisPipeline:
         if epochs == "all":
             requested_epochs = None  # Will discover from checkpoints
         else:
-            requested_epochs = list(epochs) if isinstance(epochs, list) else [epochs]
+            # epochs is list[int] here due to Literal type narrowing
+            requested_epochs = list(epochs)
 
         logger.info("Starting batch analysis pipeline")
         logger.info(f"Checkpoint directory: {self.checkpoint_dir}")

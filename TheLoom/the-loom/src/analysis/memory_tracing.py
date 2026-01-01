@@ -71,6 +71,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
+from scipy.stats import pearsonr
 
 logger = logging.getLogger(__name__)
 
@@ -648,7 +649,8 @@ def analyze_memory_checkpoint(
 
     # Clean up
     del checkpoint
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return result
 
@@ -695,15 +697,15 @@ def analyze_memory_evolution(
 
     for checkpoint_path in all_checkpoints:
         try:
-            stats = analyze_memory_checkpoint(checkpoint_path, device=device)
+            episode = analyze_memory_checkpoint(checkpoint_path, device=device)
 
-            if epochs is None or stats.epoch in epochs:
-                epoch_stats[stats.epoch] = stats
-                analyzed_epochs.append(stats.epoch)
+            if epochs is None or episode.epoch in epochs:
+                epoch_stats[episode.epoch] = episode
+                analyzed_epochs.append(episode.epoch)
                 logger.info(
-                    f"Analyzed epoch {stats.epoch}: "
-                    f"sparsity={stats.mean_m_sparsity:.3f}, "
-                    f"rank={stats.mean_m_effective_rank:.1f}"
+                    f"Analyzed epoch {episode.epoch}: "
+                    f"sparsity={episode.mean_m_sparsity:.3f}, "
+                    f"rank={episode.mean_m_effective_rank:.1f}"
                 )
 
             # Check if we have all requested epochs
@@ -730,11 +732,11 @@ def analyze_memory_evolution(
 
         # Pearson correlations
         if np.std(sparsities) > 0:
-            sparsity_trend = float(stats.pearsonr(epoch_array, sparsities).statistic)
+            sparsity_trend = float(pearsonr(epoch_array, sparsities).statistic)
         if np.std(ranks) > 0:
-            rank_trend = float(stats.pearsonr(epoch_array, ranks).statistic)
+            rank_trend = float(pearsonr(epoch_array, ranks).statistic)
         if np.std(magnitudes) > 0:
-            magnitude_trend = float(stats.pearsonr(epoch_array, magnitudes).statistic)
+            magnitude_trend = float(pearsonr(epoch_array, magnitudes).statistic)
 
         # Detect outliers (> 2 std from mean)
         sparsity_mean = np.mean(sparsities)

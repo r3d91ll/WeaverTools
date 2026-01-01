@@ -783,14 +783,19 @@ class AtlasTrainer:
         Returns:
             Final training state
         """
-        # Calculate total training steps
-        total_steps = num_batches_per_epoch * self.config.max_epochs
+        # Calculate total optimizer steps (accounting for gradient accumulation)
+        # scheduler.step() is called only when optimizer.step() is called,
+        # which happens every grad_accumulation_steps batches
+        total_batches = num_batches_per_epoch * self.config.max_epochs
+        total_optimizer_steps = math.ceil(
+            total_batches / self.config.grad_accumulation_steps
+        )
 
         # Initialize scheduler
         self.scheduler = get_cosine_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=self.config.warmup_steps,
-            num_training_steps=total_steps,
+            num_training_steps=total_optimizer_steps,
         )
 
         # If resuming, advance scheduler
@@ -799,7 +804,8 @@ class AtlasTrainer:
 
         logger.info(
             f"Starting training: {self.config.max_epochs} epochs, "
-            f"{num_batches_per_epoch} batches/epoch, {total_steps} total steps"
+            f"{num_batches_per_epoch} batches/epoch, "
+            f"{total_optimizer_steps} optimizer steps (grad_accum={self.config.grad_accumulation_steps})"
         )
 
         start_epoch = self.training_state.epoch

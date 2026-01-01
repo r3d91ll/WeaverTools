@@ -117,11 +117,17 @@ VISUALIZATION_SAMPLE_EPOCHS = [0, 10, 25, 50, 75, 100, 125, 150, 175, 185]
 class ValidationSummary:
     """Summary of checkpoint validation results.
 
+    Note: When an `epochs` filter is provided to the pipeline, `valid_checkpoints`
+    counts only checkpoints that are both structurally valid AND whose epoch
+    is in the requested filter. This means `success_rate` reflects "valid and
+    selected" checkpoints relative to total files found, not overall structural
+    health. Use `total_checkpoints` for the full count of files found.
+
     Attributes:
         total_checkpoints: Total number of checkpoint files found.
-        valid_checkpoints: Number of valid checkpoints.
+        valid_checkpoints: Number of valid and selected checkpoints (filtered by epochs if specified).
         invalid_checkpoints: Number of invalid checkpoints.
-        epochs_found: List of epoch numbers found.
+        epochs_found: List of epoch numbers found (only those passing the filter).
         validation_errors: Dict mapping invalid paths to error messages.
         validation_time_seconds: Time taken for validation.
     """

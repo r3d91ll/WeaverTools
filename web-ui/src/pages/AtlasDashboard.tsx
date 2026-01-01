@@ -255,6 +255,7 @@ export const AtlasDashboard: React.FC = () => {
   /**
    * Check if the dashboard server is reachable.
    * Uses a HEAD request to avoid loading the full page.
+   * Uses functional state updates to avoid depending on connectionState.
    */
   const checkConnection = useCallback(async () => {
     try {
@@ -262,7 +263,7 @@ export const AtlasDashboard: React.FC = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-      const response = await fetch(dashboardUrl, {
+      await fetch(dashboardUrl, {
         method: 'HEAD',
         mode: 'no-cors', // Dashboard may not have CORS headers for HEAD
         signal: controller.signal,
@@ -273,19 +274,18 @@ export const AtlasDashboard: React.FC = () => {
 
       // In no-cors mode, we can't check response.ok
       // A successful fetch (no abort/error) means the server is reachable
-      if (connectionState !== 'connected') {
-        setConnectionState('connected');
-      }
+      // Use functional update to avoid depending on connectionState
+      setConnectionState((prev) => prev !== 'connected' ? 'connected' : prev);
     } catch (err) {
       setLastCheck(new Date());
-      if (connectionState === 'connected') {
-        setConnectionState('disconnected');
-      } else if (connectionState === 'connecting') {
-        // After initial connecting state, if we fail, show error
-        setConnectionState('error');
-      }
+      // Use functional update to avoid depending on connectionState
+      setConnectionState((prev) => {
+        if (prev === 'connected') return 'disconnected';
+        if (prev === 'connecting') return 'error';
+        return prev;
+      });
     }
-  }, [dashboardUrl, connectionState]);
+  }, [dashboardUrl]);
 
   /**
    * Handle iframe load event - indicates dashboard loaded successfully.

@@ -766,7 +766,8 @@ def _extract_embeddings_batch(
             # Clean up - critical for memory management
             del loaded_model.model
             del loaded_model
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         except Exception as e:
             logger.warning(f"Failed to extract embeddings for epoch {epoch}: {e}")

@@ -304,7 +304,7 @@ class CheckpointManager:
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[Any] = None,
         device: str = "cpu",
-    ) -> tuple[TrainingState, list]:
+    ) -> tuple[TrainingState, list, Optional[dict]]:
         """Load a training checkpoint.
 
         Args:
@@ -315,7 +315,9 @@ class CheckpointManager:
             device: Target device
 
         Returns:
-            Tuple of (TrainingState, memory_states)
+            Tuple of (TrainingState, memory_states, scheduler_state_dict)
+            scheduler_state_dict is returned for deferred restoration when
+            scheduler is None at load time but will be created later.
         """
         checkpoint_path = Path(checkpoint_path)
 
@@ -337,9 +339,11 @@ class CheckpointManager:
         if optimizer and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        # Load scheduler state
-        if scheduler and checkpoint.get("scheduler_state_dict"):
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        # Load scheduler state if scheduler exists, otherwise return for later
+        scheduler_state_dict = checkpoint.get("scheduler_state_dict")
+        if scheduler and scheduler_state_dict:
+            scheduler.load_state_dict(scheduler_state_dict)
+            scheduler_state_dict = None  # Already applied
 
         # Restore training state
         state_dict = checkpoint.get("training_state", {})
@@ -370,7 +374,7 @@ class CheckpointManager:
             f"Resumed from epoch {training_state.epoch}, step {training_state.global_step}"
         )
 
-        return training_state, memory_states
+        return training_state, memory_states, scheduler_state_dict
 
     def add_metrics(self, metrics: TrainingMetrics) -> None:
         """Add metrics to history for checkpointing.
@@ -566,6 +570,9 @@ class AtlasTrainer:
         # Metrics file for dashboard
         self._metrics_file = Path(config.metrics_file) if config.metrics_file else None
 
+        # Pending scheduler state for deferred restoration (set during resume)
+        self._pending_scheduler_state: Optional[dict] = None
+
         # Resume if specified
         if config.resume_from:
             self._resume_from_checkpoint(config.resume_from)
@@ -576,7 +583,11 @@ class AtlasTrainer:
         Args:
             checkpoint_path: Path to checkpoint file
         """
-        self.training_state, self.memory_states = self.checkpoint_manager.load_checkpoint(
+        (
+            self.training_state,
+            self.memory_states,
+            self._pending_scheduler_state,
+        ) = self.checkpoint_manager.load_checkpoint(
             checkpoint_path,
             self.model,
             self.optimizer,
@@ -798,9 +809,15 @@ class AtlasTrainer:
             num_training_steps=total_optimizer_steps,
         )
 
-        # If resuming, advance scheduler
-        for _ in range(self.training_state.global_step):
-            self.scheduler.step()
+        # Restore scheduler state from checkpoint if available
+        if self._pending_scheduler_state is not None:
+            self.scheduler.load_state_dict(self._pending_scheduler_state)
+            self._pending_scheduler_state = None
+            logger.info("Restored scheduler state from checkpoint")
+        elif self.training_state.global_step > 0:
+            # Fallback: advance scheduler to match global_step if no state dict
+            for _ in range(self.training_state.global_step):
+                self.scheduler.step()
 
         logger.info(
             f"Starting training: {self.config.max_epochs} epochs, "

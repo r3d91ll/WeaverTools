@@ -859,7 +859,7 @@ class BatchAnalysisPipeline:
         checkpoint_dir: str | Path | None = None,
         device: str = "cuda:0",
         reference_epoch: int = DEFAULT_REFERENCE_EPOCH,
-    ):
+    ) -> None:
         """Initialize the pipeline.
 
         Parameters:
@@ -1105,6 +1105,7 @@ def main() -> None:
         return
 
     # Parse epochs
+    epochs: Literal["all"] | list[int]
     if args.epochs.lower() == "all":
         epochs = "all"
     else:

@@ -250,7 +250,8 @@ class AtlasLoader(ModelLoader):
             # Clean up memory
             if "checkpoint" in dir():
                 del checkpoint
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         return result
 
@@ -358,7 +359,8 @@ class AtlasLoader(ModelLoader):
 
         # Clean up checkpoint from memory
         del checkpoint
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return LoadedModel(
             model=model,
@@ -672,7 +674,8 @@ class AtlasLoader(ModelLoader):
             # For the last layer, we can extract from the final output
             # before the lm_head projection
             for layer_idx in layers:
-                actual_idx = layer_idx if layer_idx >= 0 else num_layers + layer_idx
+                # Convert negative indices to positive (e.g., -1 -> num_layers-1)
+                _ = layer_idx if layer_idx >= 0 else num_layers + layer_idx
                 # Store the last token's representation
                 # Shape: [batch, hidden_size]
                 result[layer_idx] = logits[:, -1, :].cpu()

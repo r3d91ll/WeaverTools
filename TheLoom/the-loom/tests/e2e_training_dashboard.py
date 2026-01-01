@@ -37,21 +37,17 @@ PERFORMANCE TARGETS
 from __future__ import annotations
 
 import json
-import math
-import multiprocessing
 import os
 import shutil
 import signal
 import socket
-import subprocess
 import sys
 import tempfile
 import threading
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator, Optional
 
 import pytest
 import torch
@@ -135,7 +131,7 @@ def is_port_in_use(port: int) -> bool:
         try:
             s.bind(("localhost", port))
             return False
-        except socket.error:
+        except OSError:
             return True
 
 
@@ -182,7 +178,7 @@ def wait_for_metrics_file(
                 entries = [json.loads(line) for line in lines if line]
                 if len(entries) >= min_entries:
                     return entries
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
         time.sleep(0.5)
 
@@ -231,8 +227,8 @@ class TestTrainingConfigE2E:
 
     def test_atlas_config_conversion(self) -> None:
         """Verify TrainingConfig converts to AtlasConfig correctly."""
-        from src.training.atlas_trainer import TrainingConfig
         from src.loaders.atlas_model import AtlasConfig
+        from src.training.atlas_trainer import TrainingConfig
 
         config = TrainingConfig(**E2E_TRAIN_CONFIG)
         atlas_config = config.to_atlas_config()
@@ -258,7 +254,7 @@ class TestDashboardMetricsE2E:
         metrics_file: Path,
     ) -> None:
         """Verify training generates correctly formatted metrics for dashboard."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             **E2E_TRAIN_CONFIG,
@@ -308,7 +304,7 @@ class TestDashboardMetricsE2E:
         metrics_file: Path,
     ) -> None:
         """Verify metrics are written at expected frequency for 1 Hz dashboard."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             **E2E_TRAIN_CONFIG,
@@ -369,7 +365,7 @@ class TestDashboardComponentsE2E:
 
     def test_metrics_buffer_operations(self) -> None:
         """Verify MetricsBuffer supports dashboard operations."""
-        from src.training.dashboard import MetricsBuffer, DashboardMetrics
+        from src.training.dashboard import DashboardMetrics, MetricsBuffer
 
         buffer = MetricsBuffer(max_size=100)
 
@@ -391,7 +387,7 @@ class TestDashboardComponentsE2E:
         clean_training_dir: Path,
     ) -> None:
         """Verify MetricsFileReader can read training output incrementally."""
-        from src.training.dashboard import MetricsFileReader, MetricsBuffer
+        from src.training.dashboard import MetricsBuffer, MetricsFileReader
 
         metrics_file = clean_training_dir / "reader_test.jsonl"
         buffer = MetricsBuffer()
@@ -444,7 +440,7 @@ class TestTenEpochTrainingE2E:
         3. Verify 10 checkpoints saved
         4. Verify metrics file has entries from all epochs
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             **E2E_TRAIN_CONFIG,
@@ -473,7 +469,7 @@ class TestTenEpochTrainingE2E:
         with open(metrics_file) as f:
             entries = [json.loads(line.strip()) for line in f if line.strip()]
 
-        epochs_in_metrics = set(entry["epoch"] for entry in entries)
+        epochs_in_metrics = {entry["epoch"] for entry in entries}
         expected_epochs = set(range(10))
         assert epochs_in_metrics == expected_epochs, (
             f"Missing epochs in metrics: {expected_epochs - epochs_in_metrics}"
@@ -503,8 +499,8 @@ class TestDashboardUpdateRateE2E:
         The dashboard reads metrics at 1 Hz. Training must write metrics
         at least this frequently for real-time display.
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
-        from src.training.dashboard import MetricsFileReader, MetricsBuffer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
+        from src.training.dashboard import MetricsBuffer, MetricsFileReader
 
         config = TrainingConfig(
             **E2E_TRAIN_CONFIG,
@@ -591,7 +587,7 @@ class TestCheckpointResumeE2E:
         3. Resume training from epoch 5
         4. Verify training continues correctly
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         # Phase 1: Train for 10 epochs
         config1 = TrainingConfig(
@@ -656,7 +652,7 @@ class TestCheckpointResumeE2E:
         clean_training_dir: Path,
     ) -> None:
         """Verify checkpoint resume restores complete training state."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         # Train for 3 epochs
         config1 = TrainingConfig(
@@ -667,7 +663,7 @@ class TestCheckpointResumeE2E:
         )
 
         trainer1 = AtlasTrainer(config1)
-        state1 = trainer1.train(num_batches_per_epoch=5)
+        trainer1.train(num_batches_per_epoch=5)  # Run training
 
         # Get latest checkpoint
         checkpoints = list(clean_training_dir.glob("checkpoint_epoch*.pt"))
@@ -716,7 +712,7 @@ class TestTrainingOverheadE2E:
 
         Target: Dashboard metrics writing should add <1% to training time.
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         # Common training parameters
         base_config = dict(
@@ -761,7 +757,7 @@ class TestTrainingOverheadE2E:
         overhead = (time_with_metrics - time_no_metrics) / time_no_metrics
         overhead_percent = overhead * 100
 
-        print(f"\n=== Overhead Measurement ===")
+        print("\n=== Overhead Measurement ===")
         print(f"Without metrics: {time_no_metrics:.3f}s")
         print(f"With metrics: {time_with_metrics:.3f}s")
         print(f"Overhead: {overhead_percent:.2f}%")
@@ -887,12 +883,11 @@ class TestFullTrainingDashboardE2E:
         Note: We don't actually start the Dash server in tests, but verify
         all the components that enable dashboard display.
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
         from src.training.dashboard import (
-            MetricsFileReader,
-            MetricsBuffer,
-            DashboardMetrics,
             UPDATE_INTERVAL_MS,
+            MetricsBuffer,
+            MetricsFileReader,
         )
 
         print("\n" + "=" * 60)
@@ -929,8 +924,7 @@ class TestFullTrainingDashboardE2E:
         count = reader.read_new_metrics()
         assert count > 0, "Dashboard should read metrics from file"
 
-        all_metrics = buffer.get_all()
-        latest = buffer.get_latest()
+        latest = buffer.get_latest()  # Note: buffer.get_all() also available
 
         assert latest is not None, "Should have latest metrics"
         print(f"  Read {count} metrics, latest step: {latest.step}")
@@ -974,7 +968,7 @@ class TestFullTrainingDashboardE2E:
         reader2 = MetricsFileReader(metrics_file, buffer2)
         reader2.read_new_metrics()
 
-        epochs_in_metrics = set(m.epoch for m in buffer2.get_all())
+        epochs_in_metrics = {m.epoch for m in buffer2.get_all()}
         print(f"  Epochs in metrics: {sorted(epochs_in_metrics)}")
 
         print("\n" + "=" * 60)
@@ -1000,7 +994,7 @@ class TestGPUMemoryE2E:
         clean_training_dir: Path,
     ) -> None:
         """Verify training stays within 5GB GPU memory budget."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()

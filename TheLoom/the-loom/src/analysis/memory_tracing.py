@@ -71,7 +71,6 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from scipy import linalg
-from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +78,9 @@ logger = logging.getLogger(__name__)
 # Constants
 # ============================================================================
 
-# Default checkpoint directory
-DEFAULT_CHECKPOINT_DIR = os.environ.get(
-    "ATLAS_CHECKPOINT_DIR",
-    "/home/todd/olympus/models/Atlas/runs/atlas_dumas/checkpoints",
-)
+# Default checkpoint directory (from environment or empty)
+# Set ATLAS_CHECKPOINT_DIR environment variable or pass --checkpoint-dir explicitly
+DEFAULT_CHECKPOINT_DIR = os.environ.get("ATLAS_CHECKPOINT_DIR", "")
 
 # Threshold for considering an entry as "near-zero" in sparsity calculation
 SPARSITY_THRESHOLD = 1e-6
@@ -678,7 +675,6 @@ def analyze_memory_evolution(
     Returns:
         MemoryEvolutionResult with cross-epoch analysis.
     """
-    import torch
 
     checkpoint_dir = Path(checkpoint_dir)
     start_time = time.time()
@@ -797,8 +793,7 @@ def create_memory_heatmap(
     s_sparsity = [s.s_sparsity for s in stats.layer_stats]
     m_rank = [s.m_effective_rank for s in stats.layer_stats]
     s_rank = [s.s_effective_rank for s in stats.layer_stats]
-    m_magnitude = [s.m_magnitude_mean for s in stats.layer_stats]
-    s_magnitude = [s.s_magnitude_mean for s in stats.layer_stats]
+    # Note: magnitude data available via stats.layer_stats if needed
 
     fig = make_subplots(
         rows=2,
@@ -933,7 +928,7 @@ def create_evolution_plot(
             y=m_sparsity,
             mode="lines+markers",
             name="M Sparsity",
-            line=dict(color="blue", width=2),
+            line={"color": "blue", "width": 2},
         ),
         row=1,
         col=1,
@@ -944,7 +939,7 @@ def create_evolution_plot(
             y=s_sparsity,
             mode="lines+markers",
             name="S Sparsity",
-            line=dict(color="green", width=2, dash="dash"),
+            line={"color": "green", "width": 2, "dash": "dash"},
         ),
         row=1,
         col=1,
@@ -957,7 +952,7 @@ def create_evolution_plot(
             y=m_rank,
             mode="lines+markers",
             name="M Rank",
-            line=dict(color="purple", width=2),
+            line={"color": "purple", "width": 2},
         ),
         row=2,
         col=1,
@@ -968,7 +963,7 @@ def create_evolution_plot(
             y=s_rank,
             mode="lines+markers",
             name="S Rank",
-            line=dict(color="orange", width=2, dash="dash"),
+            line={"color": "orange", "width": 2, "dash": "dash"},
         ),
         row=2,
         col=1,
@@ -981,7 +976,7 @@ def create_evolution_plot(
             y=m_magnitude,
             mode="lines+markers",
             name="M Magnitude",
-            line=dict(color="red", width=2),
+            line={"color": "red", "width": 2},
         ),
         row=3,
         col=1,
@@ -990,7 +985,6 @@ def create_evolution_plot(
     # Mark outlier epochs
     for outlier_epoch in result.outlier_epochs:
         if outlier_epoch in epochs:
-            idx = epochs.index(outlier_epoch)
             fig.add_vline(
                 x=outlier_epoch,
                 line_dash="dot",
@@ -1003,7 +997,7 @@ def create_evolution_plot(
         title=f"Memory Evolution (Sparsity trend: {result.sparsity_trend:.3f})",
         height=800,
         showlegend=True,
-        legend=dict(x=1.02, y=1),
+        legend={"x": 1.02, "y": 1},
     )
 
     fig.update_xaxes(title_text="Epoch", row=3, col=1)
@@ -1244,11 +1238,11 @@ def main() -> None:
             print(f"Epoch: {stats.epoch}, Step: {stats.step}")
             print(f"Layers: {stats.num_layers}")
             print(f"Overall Health: {stats.overall_health}")
-            print(f"\nM Matrix Statistics:")
+            print("\nM Matrix Statistics:")
             print(f"  Mean Sparsity: {stats.mean_m_sparsity:.4f}")
             print(f"  Mean Effective Rank: {stats.mean_m_effective_rank:.1f}")
             print(f"  Mean Magnitude: {stats.mean_m_magnitude:.4f}")
-            print(f"\nS Matrix Statistics:")
+            print("\nS Matrix Statistics:")
             print(f"  Mean Sparsity: {stats.mean_s_sparsity:.4f}")
             print(f"  Mean Effective Rank: {stats.mean_s_effective_rank:.1f}")
             print(f"  Mean Magnitude: {stats.mean_s_magnitude:.4f}")
@@ -1285,7 +1279,7 @@ def main() -> None:
             print("\n=== Memory Evolution Analysis ===")
             print(f"Checkpoint directory: {checkpoint_dir}")
             print(f"Epochs analyzed: {result.epochs}")
-            print(f"\nTrends:")
+            print("\nTrends:")
             print(f"  Sparsity trend: {result.sparsity_trend:.3f}")
             print(f"  Rank trend: {result.rank_trend:.3f}")
             print(f"  Magnitude trend: {result.magnitude_trend:.3f}")
@@ -1350,7 +1344,7 @@ def _run_synthetic_test(output_path: str | None = None) -> None:
     print(f"Epoch: {stats.epoch}, Step: {stats.step}")
     print(f"Layers: {stats.num_layers}")
     print(f"Overall Health: {stats.overall_health}")
-    print(f"\nM Matrix Statistics:")
+    print("\nM Matrix Statistics:")
     print(f"  Mean Sparsity: {stats.mean_m_sparsity:.4f}")
     print(f"  Mean Effective Rank: {stats.mean_m_effective_rank:.1f}")
     print(f"  Mean Magnitude: {stats.mean_m_magnitude:.4f}")

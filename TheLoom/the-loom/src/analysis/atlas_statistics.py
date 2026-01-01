@@ -70,11 +70,9 @@ logger = logging.getLogger(__name__)
 # Constants
 # ============================================================================
 
-# Default checkpoint directory (from environment or hardcoded)
-DEFAULT_CHECKPOINT_DIR = os.environ.get(
-    "ATLAS_CHECKPOINT_DIR",
-    "/home/todd/olympus/models/Atlas/runs/atlas_dumas/checkpoints",
-)
+# Default checkpoint directory (from environment or current working directory)
+# Set ATLAS_CHECKPOINT_DIR environment variable or pass --checkpoint-dir explicitly
+DEFAULT_CHECKPOINT_DIR = os.environ.get("ATLAS_CHECKPOINT_DIR", "")
 
 # Z-score threshold for outlier detection
 OUTLIER_Z_THRESHOLD = 2.5
@@ -376,7 +374,7 @@ class AtlasStatisticsResult:
                 # Filter to only columns we want
                 writer.writerow({k: row.get(k, "") for k in columns})
 
-        logger.info(f"CSV exported with columns: epoch, magnitude_mean, sparsity, rank")
+        logger.info("CSV exported with columns: epoch, magnitude_mean, sparsity, rank")
 
     def export_json(self, output_path: str | Path) -> None:
         """Export full results to JSON.
@@ -416,6 +414,7 @@ class AtlasStatisticsResult:
             },
             "trends": {k: v.to_dict() for k, v in self.trends.items()},
             "outliers": self.outliers.to_dict(),
+            "cluster_stability": [cs.to_dict() for cs in self.cluster_stability],
             "summary_statistics": self.summary_statistics,
             "total_analysis_time_seconds": self.total_analysis_time_seconds,
             "metadata": self.metadata,
@@ -455,7 +454,7 @@ def compute_epoch_statistics(
     s_frobenius: list[float] = []
     all_top_sv: list[NDArray[np.floating[Any]]] = []
 
-    for layer_idx, layer_state in enumerate(memory_states):
+    for _layer_idx, layer_state in enumerate(memory_states):
         # Extract M and S matrices
         m_matrix, s_matrix = _extract_matrices(layer_state)
         if m_matrix is None or s_matrix is None:
@@ -499,8 +498,8 @@ def compute_epoch_statistics(
         )
 
     # Aggregate statistics
-    all_magnitudes = m_magnitudes + s_magnitudes
-    magnitude_mean = float(np.mean(m_magnitudes))  # Use M matrix as primary
+    # Note: Using M matrix as primary for magnitude metrics
+    magnitude_mean = float(np.mean(m_magnitudes))
     magnitude_std = float(np.std(m_magnitudes))
     magnitude_min = float(np.min(m_magnitudes))
     magnitude_max = float(np.max(m_magnitudes))
@@ -1127,7 +1126,7 @@ def main() -> None:
         print("\n=== Atlas Statistical Analysis ===")
         print(f"Checkpoint directory: {checkpoint_dir}")
         print(f"Epochs analyzed: {result.epochs}")
-        print(f"\nSummary Statistics:")
+        print("\nSummary Statistics:")
         if "magnitude" in result.summary_statistics:
             mag = result.summary_statistics["magnitude"]
             print(f"  Magnitude: mean={mag['mean']:.4f}, std={mag['std']:.4f}")
@@ -1156,7 +1155,7 @@ def main() -> None:
         # Export CSV
         if args.output:
             result.export_csv(args.output)
-            print(f"\nCSV exported with columns: epoch, magnitude_mean, sparsity, rank")
+            print("\nCSV exported with columns: epoch, magnitude_mean, sparsity, rank")
 
         # Export JSON
         if args.output_json:
@@ -1241,7 +1240,7 @@ def _run_synthetic_test(output_path: str | None = None) -> None:
 
     if output_path:
         result.export_csv(output_path)
-        print(f"\nCSV exported with columns: epoch, magnitude_mean, sparsity, rank")
+        print("\nCSV exported with columns: epoch, magnitude_mean, sparsity, rank")
     else:
         print("\nNo output path specified, skipping CSV export")
         print("Use --output <path.csv> to export CSV")

@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import threading
 import time
@@ -32,19 +31,26 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-# Dash and Plotly imports
+# Dash and Plotly imports - optional dependency
+DASH_AVAILABLE = True
 try:
     import dash
-    from dash import dcc, html, callback, Input, Output, State
-    from dash.exceptions import PreventUpdate
     import plotly.graph_objects as go
+    from dash import Input, Output, dcc, html
+
+    # Note: State, callback, PreventUpdate available via dash if needed
     from plotly.subplots import make_subplots
 except ImportError as e:
-    print(f"Error: Dash not installed. Install with: poetry add dash")
-    print(f"Import error: {e}")
-    sys.exit(1)
+    DASH_AVAILABLE = False
+    dash = None  # type: ignore[assignment]
+    go = None  # type: ignore[assignment]
+    dcc = None  # type: ignore[assignment]
+    html = None  # type: ignore[assignment]
+    make_subplots = None  # type: ignore[assignment]
+    Input = None  # type: ignore[assignment]
+    Output = None  # type: ignore[assignment]
 
 # Add parent paths for imports when running as module
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -64,7 +70,7 @@ MAX_DATA_POINTS = 500
 
 # Chart layout configuration
 CHART_HEIGHT = 300
-CHART_MARGIN = dict(l=60, r=30, t=40, b=40)
+CHART_MARGIN = {"l": 60, "r": 30, "t": 40, "b": 40}
 
 # Color palette matching TheLoom branding
 COLORS = {
@@ -104,7 +110,7 @@ class DashboardMetrics:
     timestamp: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DashboardMetrics":
+    def from_dict(cls, data: dict[str, Any]) -> DashboardMetrics:
         """Create from dictionary."""
         return cls(
             loss=data.get("loss", 0.0),
@@ -127,9 +133,13 @@ class MetricsBuffer:
     data access for dashboard updates.
     """
     max_size: int = MAX_DATA_POINTS
-    _data: deque = field(default_factory=lambda: deque(maxlen=MAX_DATA_POINTS))
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-    _last_read_position: int = 0
+    _data: deque = field(default_factory=deque, init=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    _last_read_position: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        """Initialize deque with correct maxlen after dataclass init."""
+        self._data = deque(maxlen=self.max_size)
 
     def add(self, metrics: DashboardMetrics) -> None:
         """Add metrics to the buffer (thread-safe)."""
@@ -141,7 +151,7 @@ class MetricsBuffer:
         with self._lock:
             return list(self._data)
 
-    def get_latest(self) -> Optional[DashboardMetrics]:
+    def get_latest(self) -> DashboardMetrics | None:
         """Get the most recent metrics (thread-safe)."""
         with self._lock:
             return self._data[-1] if self._data else None
@@ -207,13 +217,16 @@ class MetricsFileReader:
         if not self.metrics_file.exists():
             return 0
 
-        # Check if file was modified
+        # Check if file was modified (mtime or size change)
         try:
-            current_mtime = self.metrics_file.stat().st_mtime
+            stat = self.metrics_file.stat()
+            current_mtime = stat.st_mtime
+            current_size = stat.st_size
         except OSError:
             return 0
 
-        if current_mtime <= self._last_mtime:
+        # Skip if no changes (check both mtime and size to handle fast writes)
+        if current_mtime <= self._last_mtime and current_size <= self._file_position:
             return 0
 
         self._last_mtime = current_mtime
@@ -221,7 +234,7 @@ class MetricsFileReader:
         # Read new lines from last position
         count = 0
         try:
-            with open(self.metrics_file, "r") as f:
+            with open(self.metrics_file) as f:
                 f.seek(self._file_position)
 
                 for line in f:
@@ -275,7 +288,7 @@ def create_loss_chart(
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
-            font=dict(size=16, color=COLORS["text_secondary"]),
+            font={"size": 16, "color": COLORS["text_secondary"]},
         )
     else:
         steps = [m.step for m in metrics]
@@ -295,7 +308,7 @@ def create_loss_chart(
                 y=losses,
                 mode="lines",
                 name="Loss",
-                line=dict(color=COLORS["line_loss"], width=2),
+                line={"color": COLORS["line_loss"], "width": 2},
                 hovertemplate="Step: %{x}<br>Loss: %{y:.4f}<extra></extra>",
             ),
             row=1, col=1,
@@ -308,7 +321,7 @@ def create_loss_chart(
                 y=perplexities,
                 mode="lines",
                 name="Perplexity",
-                line=dict(color=COLORS["warning"], width=2),
+                line={"color": COLORS["warning"], "width": 2},
                 hovertemplate="Step: %{x}<br>PPL: %{y:.2f}<extra></extra>",
             ),
             row=1, col=2,
@@ -324,7 +337,7 @@ def create_loss_chart(
         margin=CHART_MARGIN,
         paper_bgcolor=COLORS["card_bg"],
         plot_bgcolor=COLORS["card_bg"],
-        font=dict(color=COLORS["text"]),
+        font={"color": COLORS["text"]},
         showlegend=False,
     )
 
@@ -350,7 +363,7 @@ def create_lr_chart(
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
-            font=dict(size=16, color=COLORS["text_secondary"]),
+            font={"size": 16, "color": COLORS["text_secondary"]},
         )
     else:
         steps = [m.step for m in metrics]
@@ -362,9 +375,9 @@ def create_lr_chart(
                 y=lrs,
                 mode="lines",
                 name="Learning Rate",
-                line=dict(color=COLORS["line_lr"], width=2),
+                line={"color": COLORS["line_lr"], "width": 2},
                 fill="tozeroy",
-                fillcolor=f"rgba(16, 185, 129, 0.1)",
+                fillcolor="rgba(16, 185, 129, 0.1)",
                 hovertemplate="Step: %{x}<br>LR: %{y:.2e}<extra></extra>",
             )
         )
@@ -378,7 +391,7 @@ def create_lr_chart(
         margin=CHART_MARGIN,
         paper_bgcolor=COLORS["card_bg"],
         plot_bgcolor=COLORS["card_bg"],
-        font=dict(color=COLORS["text"]),
+        font={"color": COLORS["text"]},
         showlegend=False,
     )
 
@@ -403,7 +416,7 @@ def create_gpu_chart(
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
-            font=dict(size=16, color=COLORS["text_secondary"]),
+            font={"size": 16, "color": COLORS["text_secondary"]},
         )
     else:
         steps = [m.step for m in metrics]
@@ -423,9 +436,9 @@ def create_gpu_chart(
                 y=gpu_mb,
                 mode="lines",
                 name="GPU Memory",
-                line=dict(color=COLORS["line_gpu"], width=2),
+                line={"color": COLORS["line_gpu"], "width": 2},
                 fill="tozeroy",
-                fillcolor=f"rgba(239, 68, 68, 0.1)",
+                fillcolor="rgba(239, 68, 68, 0.1)",
                 hovertemplate="Step: %{x}<br>GPU: %{y:.0f} MB<extra></extra>",
             ),
             row=1, col=1,
@@ -438,9 +451,9 @@ def create_gpu_chart(
                 y=tokens_s,
                 mode="lines",
                 name="Tokens/s",
-                line=dict(color=COLORS["primary"], width=2),
+                line={"color": COLORS["primary"], "width": 2},
                 fill="tozeroy",
-                fillcolor=f"rgba(99, 102, 241, 0.1)",
+                fillcolor="rgba(99, 102, 241, 0.1)",
                 hovertemplate="Step: %{x}<br>Tokens/s: %{y:.0f}<extra></extra>",
             ),
             row=1, col=2,
@@ -456,7 +469,7 @@ def create_gpu_chart(
         margin=CHART_MARGIN,
         paper_bgcolor=COLORS["card_bg"],
         plot_bgcolor=COLORS["card_bg"],
-        font=dict(color=COLORS["text"]),
+        font={"color": COLORS["text"]},
         showlegend=False,
     )
 
@@ -482,7 +495,7 @@ def create_memory_chart(
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
-            font=dict(size=16, color=COLORS["text_secondary"]),
+            font={"size": 16, "color": COLORS["text_secondary"]},
         )
     else:
         steps = [m.step for m in metrics]
@@ -494,9 +507,9 @@ def create_memory_chart(
                 y=memory_norms,
                 mode="lines",
                 name="Memory Norm",
-                line=dict(color=COLORS["line_memory"], width=2),
+                line={"color": COLORS["line_memory"], "width": 2},
                 fill="tozeroy",
-                fillcolor=f"rgba(245, 158, 11, 0.1)",
+                fillcolor="rgba(245, 158, 11, 0.1)",
                 hovertemplate="Step: %{x}<br>Norm: %{y:.4f}<extra></extra>",
             )
         )
@@ -510,7 +523,7 @@ def create_memory_chart(
         margin=CHART_MARGIN,
         paper_bgcolor=COLORS["card_bg"],
         plot_bgcolor=COLORS["card_bg"],
-        font=dict(color=COLORS["text"]),
+        font={"color": COLORS["text"]},
         showlegend=False,
     )
 
@@ -551,7 +564,15 @@ class TrainingDashboard:
             metrics_file: Path to metrics JSON lines file
             update_interval_ms: Update interval in milliseconds (default 1000 for 1 Hz)
             debug: Enable Dash debug mode
+
+        Raises:
+            ImportError: If Dash/Plotly are not installed
         """
+        if not DASH_AVAILABLE:
+            raise ImportError(
+                "Dash and Plotly are required for the training dashboard. "
+                "Install with: poetry add dash plotly"
+            )
         self.metrics_file = Path(metrics_file)
         self.update_interval_ms = update_interval_ms
         self.debug = debug
@@ -820,7 +841,7 @@ class TrainingDashboard:
                 Tuple of updated component values
             """
             # Read new metrics
-            new_count = self.reader.read_new_metrics()
+            self.reader.read_new_metrics()
             metrics = self.buffer.get_all()
             latest = self.buffer.get_latest()
 
@@ -969,7 +990,7 @@ def generate_demo_metrics(output_file: Path, duration_seconds: int = 30) -> None
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Generating demo metrics to {output_file}...")
-    print(f"Dashboard should be accessible at http://localhost:8050")
+    print("Dashboard should be accessible at http://localhost:8050")
     print("Press Ctrl+C to stop")
 
     step = 0

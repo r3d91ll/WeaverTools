@@ -8,11 +8,19 @@ import pytest
 import torch
 
 from src.loaders.atlas_loader import (
+    REQUIRED_CHECKPOINT_KEYS,
     AtlasLoader,
     CheckpointValidationError,
-    REQUIRED_CHECKPOINT_KEYS,
 )
 from src.loaders.base import EmbeddingOutput, GenerationOutput, LoadedModel
+
+
+@pytest.fixture
+def temp_checkpoint_file(tmp_path):
+    """Create a temporary checkpoint file that is automatically cleaned up."""
+    checkpoint_path = tmp_path / "test_checkpoint.pt"
+    yield checkpoint_path
+    # Cleanup happens automatically via tmp_path fixture
 
 
 class TestAtlasLoaderBasics:
@@ -52,18 +60,23 @@ class TestCheckpointValidation:
 
     @pytest.fixture
     def valid_checkpoint(self):
-        """Create a valid checkpoint dict for testing."""
+        """Create a valid checkpoint dict for testing.
+
+        Note: Checkpoint must be > 1MB to pass size validation.
+        512x512 float32 tensor = 1MB.
+        """
         return {
             "step": 1000,
             "epoch": 10,
             "model_state_dict": {
-                "layer.weight": torch.randn(128, 128),
-                "layer.bias": torch.randn(128),
+                # Use larger tensors to pass 1MB size check
+                "layer.weight": torch.randn(512, 512),  # ~1MB
+                "layer.bias": torch.randn(512),
             },
             "config": {
-                "d_model": 128,
+                "d_model": 512,
                 "n_layers": 4,
-                "n_heads": 4,
+                "n_heads": 8,
                 "vocab_size": 29056,
             },
         }
@@ -113,10 +126,12 @@ class TestCheckpointValidation:
     def test_validate_missing_required_keys(self):
         loader = AtlasLoader()
 
-        # Create checkpoint missing required keys
+        # Create checkpoint missing required keys but large enough to pass size check
         incomplete_checkpoint = {
             "step": 1000,
             # Missing: epoch, model_state_dict, config
+            # Add padding to pass size check (> 1MB)
+            "_padding": torch.randn(512, 512),
         }
 
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
@@ -134,6 +149,8 @@ class TestCheckpointValidation:
             "epoch": 10,
             "model_state_dict": {},  # Empty
             "config": {"d_model": 128},
+            # Add padding to pass size check (> 1MB)
+            "_padding": torch.randn(512, 512),
         }
 
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
@@ -229,9 +246,11 @@ class TestStateDictCleaning:
 
         cleaned = loader._clean_state_dict(state_dict)
 
-        # Should remove module. prefix, leaving _orig_mod. to be cleaned
-        # The implementation cleans module. then _orig_mod. sequentially
-        assert "layer.weight" in cleaned or "_orig_mod.layer.weight" in cleaned
+        # Implementation removes module. first, then _orig_mod. second
+        # "module._orig_mod.layer.weight" -> "_orig_mod.layer.weight" -> "layer.weight"
+        assert "layer.weight" in cleaned
+        assert "module._orig_mod.layer.weight" not in cleaned
+        assert "_orig_mod.layer.weight" not in cleaned
 
     def test_clean_no_prefix(self):
         loader = AtlasLoader()
@@ -334,7 +353,7 @@ class TestFindLatestCheckpoint:
             tmpdir_path = Path(tmpdir)
 
             # Create multiple checkpoints with different timestamps
-            for i, step in enumerate([1000, 5000, 10000]):
+            for step in [1000, 5000, 10000]:
                 ckpt_path = tmpdir_path / f"checkpoint_{step}.pt"
                 torch.save({"step": step}, ckpt_path)
 
@@ -375,8 +394,9 @@ class TestCheckpointPathResolution:
 
             resolved = loader._resolve_checkpoint_path(tmpdir)
 
-        assert resolved.exists()
-        assert resolved.suffix == ".pt"
+            # Assertions must be inside context before temp dir is deleted
+            assert resolved.exists()
+            assert resolved.suffix == ".pt"
 
     def test_resolve_nonexistent_raises(self):
         loader = AtlasLoader()
@@ -418,9 +438,11 @@ class TestAtlasLoaderIntegration:
     def test_generate_returns_correct_output_type(self, mock_loaded_model):
         loader = AtlasLoader()
 
-        # Mock the model's forward pass for hidden state extraction
-        mock_loaded_model.model.__call__ = MagicMock(
-            return_value=(torch.randn(1, 5, 29056), None, None)
+        # Mock the model's forward pass - set return_value on the model callable
+        mock_loaded_model.model.return_value = (
+            torch.randn(1, 5, 29056),
+            None,
+            None,
         )
 
         result = loader.generate(
@@ -439,8 +461,10 @@ class TestAtlasLoaderIntegration:
         loader = AtlasLoader()
 
         # Mock the model's forward pass
-        mock_loaded_model.model.__call__ = MagicMock(
-            return_value=(torch.randn(1, 5, 29056), None, None)
+        mock_loaded_model.model.return_value = (
+            torch.randn(1, 5, 29056),
+            None,
+            None,
         )
 
         result = loader.generate(
@@ -457,8 +481,10 @@ class TestAtlasLoaderIntegration:
         loader = AtlasLoader()
 
         # Mock the model's forward pass
-        mock_loaded_model.model.__call__ = MagicMock(
-            return_value=(torch.randn(1, 5, 29056), None, None)
+        mock_loaded_model.model.return_value = (
+            torch.randn(1, 5, 29056),
+            None,
+            None,
         )
 
         result = loader.embed(
@@ -476,8 +502,10 @@ class TestAtlasLoaderIntegration:
         loader = AtlasLoader()
 
         # Mock the model's forward pass
-        mock_loaded_model.model.__call__ = MagicMock(
-            return_value=(torch.randn(1, 5, 29056), None, None)
+        mock_loaded_model.model.return_value = (
+            torch.randn(1, 5, 29056),
+            None,
+            None,
         )
 
         for pooling in ["last_token", "mean", "first_token"]:
@@ -492,8 +520,10 @@ class TestAtlasLoaderIntegration:
         loader = AtlasLoader()
 
         # Mock the model's forward pass
-        mock_loaded_model.model.__call__ = MagicMock(
-            return_value=(torch.randn(1, 5, 29056), None, None)
+        mock_loaded_model.model.return_value = (
+            torch.randn(1, 5, 29056),
+            None,
+            None,
         )
 
         with pytest.raises(ValueError) as excinfo:
@@ -511,10 +541,7 @@ class TestPrunedTokenizerIntegration:
 
     def test_tokenizer_encode_decode_mock(self):
         """Test tokenizer using mocks when bundled assets unavailable."""
-        from unittest.mock import patch
-
-        loader = AtlasLoader()
-
+        # Note: AtlasLoader() would be used with real tokenizer integration
         mock_tokenizer = MagicMock()
         mock_tokenizer.encode.return_value = [1, 2, 3, 4, 5]
         mock_tokenizer.decode.return_value = "Hello world"
@@ -551,25 +578,18 @@ class TestConfigCreation:
         # The method should return the config as-is when it's already AtlasConfig
         with patch("src.loaders.atlas_loader.AtlasConfig") as MockAtlasConfig:
             MockAtlasConfig.return_value = mock_config
-            # Patch isinstance to return True for our mock
-            with patch("builtins.isinstance") as mock_isinstance:
-                # Make isinstance return True for AtlasConfig check
-                def isinstance_side_effect(obj, cls):
-                    if cls.__name__ == "AtlasConfig" if hasattr(cls, "__name__") else False:
-                        return obj is mock_config
-                    return type(obj).__name__ == cls.__name__ if hasattr(cls, "__name__") else False
-
-                # Actually just test the dict path since it's more straightforward
-                config_dict = {
+            # Test the dict path since it's more straightforward
+            checkpoint = {
+                "config": {
                     "d_model": 128,
                     "n_layers": 4,
                     "n_heads": 4,
                     "d_ff": 512,
                     "vocab_size": 29056,
                 }
-                checkpoint = {"config": config_dict}
+            }
 
-                with patch.object(loader, "_create_config_from_checkpoint") as mock_create:
+            with patch.object(loader, "_create_config_from_checkpoint") as mock_create:
                     mock_create.return_value = MagicMock(d_model=128, n_layers=4)
                     result = mock_create(checkpoint)
                     assert result.d_model == 128
@@ -579,12 +599,7 @@ class TestConfigCreation:
         loader = AtlasLoader()
 
         # Test that the method handles different config key names
-        config_dict = {
-            "hidden_size": 256,  # Alternative name for d_model
-            "num_layers": 8,  # Alternative name for n_layers
-            "num_attention_heads": 8,  # Alternative name for n_heads
-        }
-
+        # The loader internally handles hidden_size->d_model, num_layers->n_layers, etc.
         # We can't fully test _create_config_from_checkpoint without AtlasConfig
         # but we can verify the key mapping logic exists by checking the method
         assert hasattr(loader, "_create_config_from_checkpoint")
@@ -631,11 +646,12 @@ class TestDeviceRemapping:
         """Verify validation loads with CPU mapping to avoid GPU memory."""
         loader = AtlasLoader()
 
+        # Create checkpoint large enough to pass size check (> 1MB)
         checkpoint = {
             "step": 1000,
             "epoch": 10,
-            "model_state_dict": {"layer.weight": torch.randn(128, 128)},
-            "config": {"d_model": 128},
+            "model_state_dict": {"layer.weight": torch.randn(512, 512)},
+            "config": {"d_model": 512},
         }
 
         with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:

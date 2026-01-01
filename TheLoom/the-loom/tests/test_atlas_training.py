@@ -17,15 +17,11 @@ Mark as slow to skip in normal test runs:
 """
 
 import json
-import math
-import os
 import shutil
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import pytest
 import torch
@@ -59,10 +55,14 @@ def temp_checkpoint_dir():
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def temp_metrics_file(temp_checkpoint_dir):
-    """Create a temporary metrics file path."""
-    return temp_checkpoint_dir / "metrics.jsonl"
+    """Create a temporary metrics file path, cleared for each test."""
+    path = temp_checkpoint_dir / "metrics.jsonl"
+    # Clear any existing content
+    if path.exists():
+        path.unlink()
+    return path
 
 
 @pytest.fixture(scope="function")
@@ -79,6 +79,11 @@ def clean_checkpoint_dir(temp_checkpoint_dir):
     latest = temp_checkpoint_dir / "checkpoint_latest.pt"
     if latest.exists() or latest.is_symlink():
         latest.unlink()
+
+    # Clear metrics file
+    metrics = temp_checkpoint_dir / "metrics.jsonl"
+    if metrics.exists():
+        metrics.unlink()
 
     return temp_checkpoint_dir
 
@@ -301,7 +306,7 @@ class TestSyntheticDataLoader:
         )
 
         batch_count = 0
-        for input_ids, labels in loader:
+        for _input_ids, _labels in loader:
             batch_count += 1
 
         assert batch_count == 5
@@ -387,7 +392,7 @@ class TestAtlasTrainerUnit:
 
     def test_trainer_init_cpu(self, clean_checkpoint_dir):
         """Verify trainer initializes on CPU."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -411,7 +416,7 @@ class TestAtlasTrainerUnit:
 
     def test_trainer_gpu_memory_method(self, clean_checkpoint_dir):
         """Verify _get_gpu_memory_mb returns 0 on CPU."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -433,7 +438,7 @@ class TestAtlasTrainerUnit:
 
     def test_trainer_memory_norm_empty(self, clean_checkpoint_dir):
         """Verify _get_memory_norm returns 0 when no memory states."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -451,7 +456,7 @@ class TestAtlasTrainerUnit:
 
     def test_trainer_data_loader(self, clean_checkpoint_dir):
         """Verify trainer creates data loader correctly."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -468,7 +473,7 @@ class TestAtlasTrainerUnit:
 
         assert len(loader) == 5
 
-        for input_ids, labels in loader:
+        for input_ids, _labels in loader:
             assert input_ids.shape == (2, 32)
             break
 
@@ -493,7 +498,7 @@ class TestTrainingIntegration:
         2. Checkpoints are saved correctly
         3. Metrics file is written
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -553,7 +558,7 @@ class TestTrainingIntegration:
         3. Creates new trainer resuming from checkpoint
         4. Verifies state is restored correctly
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         # First training run
         config1 = TrainingConfig(
@@ -616,7 +621,7 @@ class TestTrainingIntegration:
 
         Atlas model uses memory states that must persist across checkpoints.
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -660,7 +665,7 @@ class TestDashboardMetrics:
     @pytest.mark.slow
     def test_metrics_file_format(self, clean_checkpoint_dir, temp_metrics_file):
         """Verify metrics file has correct format for dashboard."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -710,7 +715,7 @@ class TestDashboardMetrics:
 
     def test_metrics_incremental_steps(self, clean_checkpoint_dir, temp_metrics_file):
         """Verify metrics show increasing step numbers."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=32,
@@ -773,7 +778,7 @@ class TestDashboardComponents:
 
     def test_metrics_buffer_thread_safety(self):
         """Verify MetricsBuffer is thread-safe."""
-        from src.training.dashboard import MetricsBuffer, DashboardMetrics
+        from src.training.dashboard import DashboardMetrics, MetricsBuffer
 
         buffer = MetricsBuffer()
 
@@ -800,7 +805,7 @@ class TestDashboardComponents:
 
     def test_metrics_buffer_max_size(self):
         """Verify MetricsBuffer respects max size."""
-        from src.training.dashboard import MetricsBuffer, DashboardMetrics
+        from src.training.dashboard import DashboardMetrics, MetricsBuffer
 
         buffer = MetricsBuffer(max_size=10)
 
@@ -818,7 +823,7 @@ class TestDashboardComponents:
 
     def test_metrics_buffer_get_latest(self):
         """Verify get_latest returns most recent metrics."""
-        from src.training.dashboard import MetricsBuffer, DashboardMetrics
+        from src.training.dashboard import DashboardMetrics, MetricsBuffer
 
         buffer = MetricsBuffer()
 
@@ -836,7 +841,7 @@ class TestMetricsFileReader:
 
     def test_read_empty_file(self, temp_checkpoint_dir):
         """Verify reader handles empty file."""
-        from src.training.dashboard import MetricsFileReader, MetricsBuffer
+        from src.training.dashboard import MetricsBuffer, MetricsFileReader
 
         metrics_file = temp_checkpoint_dir / "empty_metrics.jsonl"
         metrics_file.touch()
@@ -850,7 +855,7 @@ class TestMetricsFileReader:
 
     def test_read_metrics_incremental(self, temp_checkpoint_dir):
         """Verify reader reads incrementally."""
-        from src.training.dashboard import MetricsFileReader, MetricsBuffer
+        from src.training.dashboard import MetricsBuffer, MetricsFileReader
 
         metrics_file = temp_checkpoint_dir / "inc_metrics.jsonl"
 
@@ -877,7 +882,7 @@ class TestMetricsFileReader:
 
     def test_read_malformed_lines(self, temp_checkpoint_dir):
         """Verify reader skips malformed JSON lines."""
-        from src.training.dashboard import MetricsFileReader, MetricsBuffer
+        from src.training.dashboard import MetricsBuffer, MetricsFileReader
 
         metrics_file = temp_checkpoint_dir / "malformed_metrics.jsonl"
 
@@ -909,21 +914,20 @@ class TestTrainingOverhead:
 
         Target: <1% overhead from metrics writing.
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
-        import time
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
-        base_config = dict(
-            d_model=32,
-            n_layers=1,
-            vocab_size=100,
-            max_seq_len=32,
-            batch_size=2,
-            max_epochs=1,
-            log_every_steps=1,
-            checkpoint_dir=str(clean_checkpoint_dir),
-            device="cpu",
-            seed=42,
-        )
+        base_config = {
+            "d_model": 32,
+            "n_layers": 1,
+            "vocab_size": 100,
+            "max_seq_len": 32,
+            "batch_size": 2,
+            "max_epochs": 1,
+            "log_every_steps": 1,
+            "checkpoint_dir": str(clean_checkpoint_dir),
+            "device": "cpu",
+            "seed": 42,
+        }
 
         # Run without metrics file
         config_no_metrics = TrainingConfig(**base_config, metrics_file=None)
@@ -976,7 +980,7 @@ class TestTrainingGPU:
 
     def test_train_on_gpu(self, clean_checkpoint_dir):
         """Verify training works on GPU."""
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=64,
@@ -1018,7 +1022,7 @@ class TestTrainingGPU:
 
         Target: <5GB for small model training.
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
         config = TrainingConfig(
             d_model=128,
@@ -1062,7 +1066,7 @@ class TestTrainingGPU:
 class TestEndToEnd:
     """End-to-end tests for complete training workflow."""
 
-    def test_full_training_workflow_10_epochs(self, temp_checkpoint_dir):
+    def test_full_training_workflow_10_epochs(self, clean_checkpoint_dir):
         """Run complete 10 epoch training workflow.
 
         Verifies:
@@ -1071,8 +1075,9 @@ class TestEndToEnd:
         3. Resume from epoch 5 works
         4. Final state is correct
         """
-        from src.training.atlas_trainer import TrainingConfig, AtlasTrainer
+        from src.training.atlas_trainer import AtlasTrainer, TrainingConfig
 
+        temp_checkpoint_dir = clean_checkpoint_dir
         metrics_file = temp_checkpoint_dir / "e2e_metrics.jsonl"
 
         config = TrainingConfig(

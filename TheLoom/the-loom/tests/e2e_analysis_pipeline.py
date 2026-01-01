@@ -37,9 +37,7 @@ import csv
 import json
 import os
 import tempfile
-import time
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -52,11 +50,9 @@ pytestmark = [pytest.mark.e2e]
 # Configuration
 # ============================================================================
 
-# Default checkpoint directory from environment
-DEFAULT_CHECKPOINT_DIR = os.environ.get(
-    "ATLAS_CHECKPOINT_DIR",
-    "/home/todd/olympus/models/Atlas/runs/atlas_dumas/checkpoints",
-)
+# Default checkpoint directory (from environment or empty - tests use synthetic data)
+# Set ATLAS_CHECKPOINT_DIR environment variable for real checkpoint tests
+DEFAULT_CHECKPOINT_DIR = os.environ.get("ATLAS_CHECKPOINT_DIR", "")
 
 # Test epochs for E2E analysis
 E2E_EPOCHS = [0, 50, 100, 185]
@@ -174,7 +170,7 @@ class TestAlignedPCAE2E:
         self, synthetic_embeddings: dict[int, np.ndarray]
     ) -> None:
         """Test that PCA uses epoch 186 as reference per PRD v1.1."""
-        from src.analysis import AlignedPCA, DEFAULT_REFERENCE_EPOCH
+        from src.analysis import DEFAULT_REFERENCE_EPOCH, AlignedPCA
 
         # Verify constant
         assert DEFAULT_REFERENCE_EPOCH == 186
@@ -213,7 +209,7 @@ class TestAlignedPCAE2E:
         assert len(results) >= 3  # At least 0, 50, 100
 
         # All transforms should have same number of components
-        for epoch, result in results.items():
+        for _epoch, result in results.items():
             assert result.n_components == 50
             assert result.transformed_embeddings.shape[1] == 50
 
@@ -262,7 +258,7 @@ class TestConceptLandscapeE2E:
         output_dir: Path,
     ) -> None:
         """Test generating animated 3D concept landscape."""
-        from src.analysis import visualize_epoch_evolution, ExportResult
+        from src.analysis import ExportResult, visualize_epoch_evolution
 
         # Generate visualization
         html_path = output_dir / "concept_landscape.html"
@@ -292,9 +288,9 @@ class TestConceptLandscapeE2E:
     ) -> None:
         """Test that animated visualization uses fixed axis ranges."""
         from src.analysis import (
-            create_animated_scatter_3d,
-            Landscape3DConfig,
             DEFAULT_AXIS_RANGE,
+            Landscape3DConfig,
+            create_animated_scatter_3d,
         )
 
         # Prepare frames data
@@ -328,7 +324,7 @@ class TestMemoryTracingE2E:
         synthetic_memory_states: dict[int, list[dict[str, np.ndarray]]],
     ) -> None:
         """Test computing memory statistics for all epochs."""
-        from src.analysis import analyze_memory_states, MemoryEpisodeStats
+        from src.analysis import MemoryEpisodeStats, analyze_memory_states
 
         results = {}
         for epoch, memory_states in synthetic_memory_states.items():
@@ -339,7 +335,7 @@ class TestMemoryTracingE2E:
         assert len(results) == len(synthetic_memory_states)
 
         # Each result should have layer stats
-        for epoch, stats in results.items():
+        for _epoch, stats in results.items():
             assert isinstance(stats, MemoryEpisodeStats)
             assert stats.num_layers == 4
             assert len(stats.layer_stats) == 4
@@ -381,7 +377,7 @@ class TestStatisticalAnalysisE2E:
         synthetic_memory_states: dict[int, list[dict[str, np.ndarray]]],
     ) -> None:
         """Test computing epoch statistics."""
-        from src.analysis import compute_epoch_statistics, EpochStatistics
+        from src.analysis import EpochStatistics, compute_epoch_statistics
 
         for epoch, memory_states in synthetic_memory_states.items():
             stats = compute_epoch_statistics(
@@ -398,7 +394,7 @@ class TestStatisticalAnalysisE2E:
         synthetic_memory_states: dict[int, list[dict[str, np.ndarray]]],
     ) -> None:
         """Test trend analysis across epochs."""
-        from src.analysis import compute_epoch_statistics, analyze_trends, TrendAnalysis
+        from src.analysis import analyze_trends, compute_epoch_statistics
 
         # Compute stats for each epoch
         epoch_statistics = {}
@@ -420,9 +416,9 @@ class TestStatisticalAnalysisE2E:
     ) -> None:
         """Test outlier detection in statistics."""
         from src.analysis import (
+            OutlierDetectionResult,
             compute_epoch_statistics,
             detect_outliers,
-            OutlierDetectionResult,
         )
 
         # Compute stats
@@ -447,11 +443,11 @@ class TestStatisticalAnalysisE2E:
     ) -> None:
         """Test exporting statistics to CSV."""
         from src.analysis import (
-            compute_epoch_statistics,
-            analyze_trends,
-            detect_outliers,
-            compute_summary_statistics,
             AtlasStatisticsResult,
+            analyze_trends,
+            compute_epoch_statistics,
+            compute_summary_statistics,
+            detect_outliers,
         )
 
         # Compute stats
@@ -520,15 +516,14 @@ class TestFullPipelineE2E:
         """
         from src.analysis import (
             AlignedPCA,
+            AtlasStatisticsResult,
+            analyze_trends,
             build_cross_epoch_trajectory,
             compute_convergence_curve,
-            visualize_epoch_evolution,
-            analyze_trends,
-            detect_outliers,
-            compute_summary_statistics,
-            AtlasStatisticsResult,
-            EpochStatistics,
             compute_epoch_statistics,
+            compute_summary_statistics,
+            detect_outliers,
+            visualize_epoch_evolution,
         )
 
         # Step 1: Aligned PCA with epoch 186 reference
@@ -701,9 +696,9 @@ class TestBatchPipelineSyntheticE2E:
     ) -> None:
         """Test batch pipeline result structure."""
         from src.analysis import (
-            ValidationSummary,
-            PipelineStageResult,
             BatchPipelineResult,
+            PipelineStageResult,
+            ValidationSummary,
         )
 
         # Create synthetic results
@@ -808,10 +803,10 @@ class TestExportVerificationE2E:
     ) -> None:
         """Verify PNG exports have correct dimensions for 300 DPI."""
         from src.analysis import (
-            visualize_epoch_evolution,
-            PNG_SCALE_FACTOR,
-            DEFAULT_PNG_WIDTH,
             DEFAULT_PNG_HEIGHT,
+            DEFAULT_PNG_WIDTH,
+            PNG_SCALE_FACTOR,
+            visualize_epoch_evolution,
         )
 
         png_path = output_dir / "test_dpi.png"

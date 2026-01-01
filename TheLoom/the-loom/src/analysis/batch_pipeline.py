@@ -83,11 +83,9 @@ logger = logging.getLogger(__name__)
 # Constants
 # ============================================================================
 
-# Default checkpoint directory from environment
-DEFAULT_CHECKPOINT_DIR = os.environ.get(
-    "ATLAS_CHECKPOINT_DIR",
-    "/home/todd/olympus/models/Atlas/runs/atlas_dumas/checkpoints",
-)
+# Default checkpoint directory (from environment or empty)
+# Set ATLAS_CHECKPOINT_DIR environment variable or pass --checkpoint-dir explicitly
+DEFAULT_CHECKPOINT_DIR = os.environ.get("ATLAS_CHECKPOINT_DIR", "")
 
 # Default reference epoch per PRD v1.1
 DEFAULT_REFERENCE_EPOCH = 186
@@ -341,11 +339,11 @@ def stage_concept_landscape(
         PipelineStageResult with stage outcomes.
     """
     from .concept_landscape import (
-        analyze_concept_landscape,
-        create_landscape_visualization,
-        create_convergence_plot,
-        VisualizationConfig,
         DEFAULT_SAMPLE_TEXTS,
+        VisualizationConfig,
+        analyze_concept_landscape,
+        create_convergence_plot,
+        create_landscape_visualization,
     )
 
     start_time = time.time()
@@ -514,8 +512,9 @@ def stage_memory_tracing(
             )
 
         # Compute trends (reusing from memory_tracing)
-        from .memory_tracing import MemoryEvolutionResult
         from scipy import stats as scipy_stats
+
+        from .memory_tracing import MemoryEvolutionResult
 
         analyzed_epochs = sorted(epoch_stats.keys())
         epoch_array = np.array(analyzed_epochs)
@@ -646,10 +645,10 @@ def stage_statistics(
 
         # Compute trends and summary
         from .atlas_statistics import (
-            analyze_trends,
-            detect_outliers,
-            compute_summary_statistics,
             AtlasStatisticsResult,
+            analyze_trends,
+            compute_summary_statistics,
+            detect_outliers,
         )
 
         trends = analyze_trends(epoch_statistics)
@@ -902,7 +901,7 @@ class BatchAnalysisPipeline:
         else:
             requested_epochs = list(epochs) if isinstance(epochs, list) else [epochs]
 
-        logger.info(f"Starting batch analysis pipeline")
+        logger.info("Starting batch analysis pipeline")
         logger.info(f"Checkpoint directory: {self.checkpoint_dir}")
         logger.info(f"Output directory: {output_dir}")
         logger.info(f"Epochs: {'all' if requested_epochs is None else requested_epochs}")
@@ -1123,7 +1122,7 @@ def main() -> None:
         )
 
         # Print summary
-        print(f"\n=== Batch Analysis Complete ===")
+        print("\n=== Batch Analysis Complete ===")
         print(f"Processed {result.epochs_processed} epochs")
         print(f"Duration: {result.total_duration_seconds:.2f}s")
         print(f"Output: {result.output_directory}")
@@ -1232,10 +1231,10 @@ def _run_synthetic_test(output_dir: str) -> None:
                 "rank": f"{100 - 50 * progress:.2f}",
             })
 
-    print(f"\n=== Synthetic Test Complete ===")
+    print("\n=== Synthetic Test Complete ===")
     print(f"Processed {result.epochs_processed} epochs")
     print(f"Output directory: {output_dir}")
-    print(f"Files created:")
+    print("Files created:")
     print(f"  - {output_dir / 'pipeline_summary.json'}")
     print(f"  - {output_dir / 'metrics.csv'}")
 

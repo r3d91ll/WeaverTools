@@ -11,67 +11,64 @@ Test Coverage:
 - Batch Pipeline: Stage execution, result aggregation
 """
 
-import numpy as np
-import pytest
 import tempfile
 from pathlib import Path
-from typing import Any
+
+import numpy as np
+import pytest
 
 from src.analysis import (
+    # Visualization module
+    DEFAULT_AXIS_RANGE,
+    DEFAULT_N_COMPONENTS,
+    DEFAULT_PNG_HEIGHT,
+    DEFAULT_PNG_WIDTH,
     # AlignedPCA module
     DEFAULT_REFERENCE_EPOCH,
-    DEFAULT_N_COMPONENTS,
+    GPU_MEMORY_BUDGET_MB,
+    MAX_HTML_SIZE_BYTES,
+    MIN_EPOCHS_FOR_STATS,
+    MIN_EPOCHS_FOR_TREND,
+    OUTLIER_IQR_MULTIPLIER,
+    # Atlas Statistics module
+    OUTLIER_Z_THRESHOLD,
+    PNG_SCALE_FACTOR,
+    RANK_THRESHOLD,
+    # Memory Tracing module
+    SPARSITY_THRESHOLD,
+    TOP_SINGULAR_VALUES,
+    # Batch Pipeline module
+    TOTAL_EPOCHS,
     VARIANCE_EXPLAINED_THRESHOLD,
     AlignedPCA,
     AlignedPCAFitResult,
     AlignedPCAResult,
+    AnimationConfig,
+    AtlasStatisticsResult,
+    Axis3DConfig,
+    BatchPipelineResult,
     CrossEpochTrajectory,
-    build_cross_epoch_trajectory,
-    compute_epoch_distances,
-    compute_convergence_curve,
-    # Memory Tracing module
-    SPARSITY_THRESHOLD,
-    RANK_THRESHOLD,
-    TOP_SINGULAR_VALUES,
-    MIN_EPOCHS_FOR_TREND,
+    EpochStatistics,
+    ExportConfig,
+    Landscape3DConfig,
     LayerMemoryStats,
     MemoryEpisodeStats,
     MemoryEvolutionResult,
-    compute_matrix_stats,
+    OutlierDetectionResult,
+    PipelineStageResult,
+    TrendAnalysis,
+    ValidationSummary,
+    VisualizationStyle,
     analyze_layer_memory,
     analyze_memory_states,
-    MemoryTracer,
-    # Atlas Statistics module
-    OUTLIER_Z_THRESHOLD,
-    OUTLIER_IQR_MULTIPLIER,
-    MIN_EPOCHS_FOR_STATS,
-    EpochStatistics,
-    TrendAnalysis,
-    OutlierDetectionResult,
-    AtlasStatisticsResult,
-    compute_epoch_statistics,
     analyze_trends,
-    detect_outliers,
+    build_cross_epoch_trajectory,
+    compute_convergence_curve,
+    compute_epoch_statistics,
+    compute_matrix_stats,
     compute_summary_statistics,
-    # Visualization module
-    DEFAULT_AXIS_RANGE,
-    DEFAULT_PNG_WIDTH,
-    DEFAULT_PNG_HEIGHT,
-    PNG_SCALE_FACTOR,
-    MAX_HTML_SIZE_BYTES,
-    VisualizationStyle,
-    AnimationConfig,
-    ExportConfig,
-    Axis3DConfig,
-    Landscape3DConfig,
-    # Batch Pipeline module
-    TOTAL_EPOCHS,
-    GPU_MEMORY_BUDGET_MB,
-    ValidationSummary,
-    PipelineStageResult,
-    BatchPipelineResult,
+    detect_outliers,
 )
-
 
 # ============================================================================
 # AlignedPCA Tests
@@ -1185,7 +1182,9 @@ class TestAxis3DConfig:
     def test_default_range(self) -> None:
         """Test that axis config has fixed range."""
         config = Axis3DConfig()
-        assert config.range == DEFAULT_AXIS_RANGE
+        assert config.x_range == DEFAULT_AXIS_RANGE
+        assert config.y_range == DEFAULT_AXIS_RANGE
+        assert config.z_range == DEFAULT_AXIS_RANGE
 
 
 class TestLandscape3DConfig:
@@ -1194,9 +1193,8 @@ class TestLandscape3DConfig:
     def test_contains_axis_configs(self) -> None:
         """Test that landscape config contains axis configs."""
         config = Landscape3DConfig()
-        assert hasattr(config, "x_axis")
-        assert hasattr(config, "y_axis")
-        assert hasattr(config, "z_axis")
+        assert hasattr(config, "axis_config")
+        assert isinstance(config.axis_config, Axis3DConfig)
 
 
 # ============================================================================
@@ -1225,12 +1223,14 @@ class TestValidationSummary:
             total_checkpoints=186,
             valid_checkpoints=186,
             invalid_checkpoints=0,
-            validation_errors=[],
-            checkpoint_paths=["/path/to/checkpoint.pt"],
+            epochs_found=[1, 2, 3, 186],
+            validation_errors={},
+            validation_time_seconds=10.5,
         )
 
         assert summary.total_checkpoints == 186
         assert summary.valid_checkpoints == 186
+        assert summary.success_rate == 1.0
 
 
 class TestPipelineStageResult:
@@ -1241,14 +1241,16 @@ class TestPipelineStageResult:
         result = PipelineStageResult(
             stage_name="concept_landscape",
             success=True,
+            epochs_processed=4,
             duration_seconds=120.0,
+            error=None,
             outputs={"html_path": "/tmp/output.html"},
-            errors=[],
             metrics={"n_epochs": 4},
         )
 
         assert result.success is True
         assert result.stage_name == "concept_landscape"
+        assert result.epochs_processed == 4
 
 
 class TestBatchPipelineResult:
@@ -1256,32 +1258,46 @@ class TestBatchPipelineResult:
 
     def test_pipeline_result_aggregation(self) -> None:
         """Test pipeline result aggregation."""
+        validation_summary = ValidationSummary(
+            total_checkpoints=10,
+            valid_checkpoints=10,
+            invalid_checkpoints=0,
+            epochs_found=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            validation_errors={},
+            validation_time_seconds=5.0,
+        )
+        stage_results = [
+            PipelineStageResult(
+                stage_name="validation",
+                success=True,
+                epochs_processed=10,
+                duration_seconds=10.0,
+                outputs={},
+                metrics={},
+            ),
+            PipelineStageResult(
+                stage_name="concept_landscape",
+                success=True,
+                epochs_processed=10,
+                duration_seconds=120.0,
+                outputs={},
+                metrics={},
+            ),
+        ]
         result = BatchPipelineResult(
-            stages={
-                "validation": PipelineStageResult(
-                    stage_name="validation",
-                    success=True,
-                    duration_seconds=10.0,
-                    outputs={},
-                    errors=[],
-                    metrics={},
-                ),
-                "concept_landscape": PipelineStageResult(
-                    stage_name="concept_landscape",
-                    success=True,
-                    duration_seconds=120.0,
-                    outputs={},
-                    errors=[],
-                    metrics={},
-                ),
-            },
+            epochs_processed=10,
+            epochs_requested=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            validation_summary=validation_summary,
+            stage_results=stage_results,
+            output_directory="/tmp/output",
             total_duration_seconds=130.0,
-            success=True,
-            summary={},
+            peak_memory_mb=1024.0,
+            start_time="2024-01-01T00:00:00",
+            end_time="2024-01-01T00:02:10",
         )
 
-        assert result.success is True
-        assert len(result.stages) == 2
+        assert result.epochs_processed == 10
+        assert len(result.stage_results) == 2
 
 
 # ============================================================================

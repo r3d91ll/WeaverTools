@@ -22,19 +22,17 @@ import argparse
 import json
 import logging
 import math
-import os
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
+from torch.optim.lr_scheduler import LambdaLR
 
 # Add parent paths for imports when running as module
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -623,12 +621,30 @@ class AtlasTrainer:
             Tuple of (loss, metrics_dict)
         """
         # Forward pass with memory states
-        loss, self.memory_states, metrics = self.model.compute_loss(
+        loss, new_memory_states, metrics = self.model.compute_loss(
             input_ids,
             labels,
             memory_states=self.memory_states,
             return_metrics=True,
         )
+
+        # Detach memory states to prevent backprop through time
+        # This is required because memory states are reused across batches
+        if new_memory_states:
+            self.memory_states = []
+            for state in new_memory_states:
+                if isinstance(state, tuple) and len(state) == 2:
+                    M, S = state
+                    self.memory_states.append((M.detach(), S.detach()))
+                elif isinstance(state, dict):
+                    self.memory_states.append({
+                        k: v.detach() if isinstance(v, torch.Tensor) else v
+                        for k, v in state.items()
+                    })
+                elif isinstance(state, torch.Tensor):
+                    self.memory_states.append(state.detach())
+                else:
+                    self.memory_states.append(state)
 
         return loss, metrics or {}
 
@@ -696,8 +712,6 @@ class AtlasTrainer:
         tokens_processed = 0
 
         for batch_idx, (input_ids, labels) in enumerate(data_loader):
-            step_start = time.time()
-
             # Forward and loss
             loss, model_metrics = self._compute_loss(input_ids, labels)
 
@@ -730,8 +744,8 @@ class AtlasTrainer:
 
             # Log periodically
             if (batch_idx + 1) % self.config.log_every_steps == 0:
-                step_time = time.time() - step_start
-                tokens_per_second = tokens_processed / (time.time() - start_time)
+                elapsed = time.time() - start_time
+                tokens_per_second = tokens_processed / elapsed if elapsed > 0 else 0
                 current_lr = self.scheduler.get_last_lr()[0] if self.scheduler else self.config.learning_rate
 
                 metrics = TrainingMetrics(

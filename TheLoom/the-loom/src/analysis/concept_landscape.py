@@ -67,11 +67,8 @@ logger = logging.getLogger(__name__)
 # Default reference epoch as specified in PRD v1.1
 DEFAULT_REFERENCE_EPOCH = 186
 
-# Default checkpoint directory
-DEFAULT_CHECKPOINT_DIR = os.environ.get(
-    "ATLAS_CHECKPOINT_DIR",
-    "/home/todd/olympus/models/Atlas/runs/atlas_dumas/checkpoints",
-)
+# Default checkpoint directory (from environment, no hardcoded fallback)
+DEFAULT_CHECKPOINT_DIR = os.environ.get("ATLAS_CHECKPOINT_DIR", "")
 
 # Number of PCA components for visualization (3 for 3D plots)
 VISUALIZATION_COMPONENTS = 3
@@ -308,14 +305,19 @@ def extract_embeddings_from_checkpoint(
     with torch.no_grad():
         for text in sample_texts:
             embedding_output = loader.embed(loaded_model, text, pooling=pooling)
-            embeddings_list.append(embedding_output.embedding.numpy())
+            # Move to CPU before converting to numpy (required for GPU tensors)
+            embedding = embedding_output.embedding
+            if embedding.is_cuda:
+                embedding = embedding.cpu()
+            embeddings_list.append(embedding.numpy())
 
     embeddings = np.stack(embeddings_list)
 
     # Clean up - critical for memory management
     del loaded_model.model
     del loaded_model
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     extraction_time = time.time() - start_time
 
@@ -433,7 +435,7 @@ def analyze_concept_landscape(
     Raises:
         ValueError: If reference epoch not in embeddings or <2 epochs.
     """
-    from .aligned_pca import AlignedPCA, build_cross_epoch_trajectory
+    from .aligned_pca import AlignedPCA
 
     start_time = time.time()
 
@@ -520,8 +522,8 @@ def _compute_clusters_per_epoch(
     Returns:
         Dict mapping epoch to cluster labels array.
     """
-    from sklearn.cluster import DBSCAN
     from scipy.spatial.distance import cdist
+    from sklearn.cluster import DBSCAN
 
     cluster_labels = {}
 
@@ -610,12 +612,12 @@ def create_landscape_visualization(
                     y=emb_3d[:, 1],
                     z=emb_3d[:, 2],
                     mode="markers",
-                    marker=dict(
-                        size=config.marker_size,
-                        color=np.arange(n_samples),
-                        colorscale=config.colormap,
-                        opacity=0.8,
-                    ),
+                    marker={
+                        "size": config.marker_size,
+                        "color": np.arange(n_samples),
+                        "colorscale": config.colormap,
+                        "opacity": 0.8,
+                    },
                     text=labels,
                     hovertemplate=(
                         "%{text}<br>"
@@ -629,19 +631,19 @@ def create_landscape_visualization(
             name=str(epoch),
             layout=go.Layout(
                 annotations=[
-                    dict(
-                        text=(
+                    {
+                        "text": (
                             f"Epoch {epoch} | "
                             f"Var: {variance_exp:.1%} | "
                             f"Dist to final: {conv_dist:.2f}"
                         ),
-                        x=0.5,
-                        y=1.05,
-                        xref="paper",
-                        yref="paper",
-                        showarrow=False,
-                        font=dict(size=14),
-                    )
+                        "x": 0.5,
+                        "y": 1.05,
+                        "xref": "paper",
+                        "yref": "paper",
+                        "showarrow": False,
+                        "font": {"size": 14},
+                    }
                 ]
             ),
         )
@@ -658,112 +660,112 @@ def create_landscape_visualization(
                 y=initial_emb[:, 1],
                 z=initial_emb[:, 2],
                 mode="markers",
-                marker=dict(
-                    size=config.marker_size,
-                    color=np.arange(n_samples),
-                    colorscale=config.colormap,
-                    opacity=0.8,
-                ),
+                marker={
+                    "size": config.marker_size,
+                    "color": np.arange(n_samples),
+                    "colorscale": config.colormap,
+                    "opacity": 0.8,
+                },
                 text=labels,
             )
         ],
         frames=frames,
         layout=go.Layout(
-            title=dict(
-                text=config.title,
-                x=0.5,
-                font=dict(size=20),
-            ),
-            scene=dict(
-                xaxis=dict(
-                    range=list(axis_range),
-                    title="PC1",
-                    showbackground=True,
-                    backgroundcolor="rgb(230, 230, 230)",
-                ),
-                yaxis=dict(
-                    range=list(axis_range),
-                    title="PC2",
-                    showbackground=True,
-                    backgroundcolor="rgb(230, 230, 230)",
-                ),
-                zaxis=dict(
-                    range=list(axis_range),
-                    title="PC3",
-                    showbackground=True,
-                    backgroundcolor="rgb(230, 230, 230)",
-                ),
-                camera=dict(
-                    eye=dict(x=1.5, y=1.5, z=1.5),
-                ),
-            ),
+            title={
+                "text": config.title,
+                "x": 0.5,
+                "font": {"size": 20},
+            },
+            scene={
+                "xaxis": {
+                    "range": list(axis_range),
+                    "title": "PC1",
+                    "showbackground": True,
+                    "backgroundcolor": "rgb(230, 230, 230)",
+                },
+                "yaxis": {
+                    "range": list(axis_range),
+                    "title": "PC2",
+                    "showbackground": True,
+                    "backgroundcolor": "rgb(230, 230, 230)",
+                },
+                "zaxis": {
+                    "range": list(axis_range),
+                    "title": "PC3",
+                    "showbackground": True,
+                    "backgroundcolor": "rgb(230, 230, 230)",
+                },
+                "camera": {
+                    "eye": {"x": 1.5, "y": 1.5, "z": 1.5},
+                },
+            },
             updatemenus=[
-                dict(
-                    type="buttons",
-                    showactive=False,
-                    y=0,
-                    x=0.1,
-                    xanchor="left",
-                    yanchor="top",
-                    buttons=[
-                        dict(
-                            label="▶ Play",
-                            method="animate",
-                            args=[
+                {
+                    "type": "buttons",
+                    "showactive": False,
+                    "y": 0,
+                    "x": 0.1,
+                    "xanchor": "left",
+                    "yanchor": "top",
+                    "buttons": [
+                        {
+                            "label": "▶ Play",
+                            "method": "animate",
+                            "args": [
                                 None,
-                                dict(
-                                    frame=dict(
-                                        duration=config.animation_duration,
-                                        redraw=True,
-                                    ),
-                                    fromcurrent=True,
-                                    mode="immediate",
-                                ),
+                                {
+                                    "frame": {
+                                        "duration": config.animation_duration,
+                                        "redraw": True,
+                                    },
+                                    "fromcurrent": True,
+                                    "mode": "immediate",
+                                },
                             ],
-                        ),
-                        dict(
-                            label="⏸ Pause",
-                            method="animate",
-                            args=[
+                        },
+                        {
+                            "label": "⏸ Pause",
+                            "method": "animate",
+                            "args": [
                                 [None],
-                                dict(
-                                    frame=dict(duration=0, redraw=False),
-                                    mode="immediate",
-                                ),
+                                {
+                                    "frame": {"duration": 0, "redraw": False},
+                                    "mode": "immediate",
+                                },
                             ],
-                        ),
+                        },
                     ],
-                )
+                }
             ],
             sliders=[
-                dict(
-                    active=0,
-                    yanchor="top",
-                    xanchor="left",
-                    currentvalue=dict(
-                        prefix="Epoch: ",
-                        visible=True,
-                        xanchor="center",
-                    ),
-                    pad=dict(t=50, b=10),
-                    len=0.9,
-                    x=0.1,
-                    y=0,
-                    steps=[
-                        dict(
-                            args=[
+                {
+                    "active": 0,
+                    "yanchor": "top",
+                    "xanchor": "left",
+                    "currentvalue": {
+                        "prefix": "Epoch: ",
+                        "visible": True,
+                        "xanchor": "center",
+                    },
+                    "pad": {"t": 50, "b": 10},
+                    "len": 0.9,
+                    "x": 0.1,
+                    "y": 0,
+                    "steps": [
+                        {
+                            "args": [
                                 [str(epoch)],
-                                dict(
-                                    frame=dict(duration=0, redraw=True),
-                                    mode="immediate",
-                                ),
+                                {
+                                    "frame": {"duration": 0, "redraw": True},
+                                    "mode": "immediate",
+                                },
                             ],
-                            label=str(epoch),
-                            method="animate",
-                        )
+                            "label": str(epoch),
+                            "method": "animate",
+                        }
                         for epoch in epochs
                     ],
-                )
+                }
             ],
         ),
     )
@@ -818,8 +820,8 @@ def create_convergence_plot(
             mode="lines+markers",
             name="Distance to Final",
             yaxis="y1",
-            line=dict(color="blue", width=2),
-            marker=dict(size=6),
+            line={"color": "blue", "width": 2},
+            marker={"size": 6},
         )
     )
 
@@ -831,29 +833,29 @@ def create_convergence_plot(
             mode="lines+markers",
             name="Variance Explained",
             yaxis="y2",
-            line=dict(color="green", width=2, dash="dash"),
-            marker=dict(size=6),
+            line={"color": "green", "width": 2, "dash": "dash"},
+            marker={"size": 6},
         )
     )
 
     fig.update_layout(
         title="Concept Landscape Convergence",
-        xaxis=dict(title="Epoch"),
-        yaxis=dict(
-            title="Mean Distance to Epoch 186",
-            titlefont=dict(color="blue"),
-            tickfont=dict(color="blue"),
-        ),
-        yaxis2=dict(
-            title="Variance Explained",
-            titlefont=dict(color="green"),
-            tickfont=dict(color="green"),
-            anchor="x",
-            overlaying="y",
-            side="right",
-            tickformat=".0%",
-        ),
-        legend=dict(x=0.5, y=1.15, xanchor="center", orientation="h"),
+        xaxis={"title": "Epoch"},
+        yaxis={
+            "title": "Mean Distance to Epoch 186",
+            "titlefont": {"color": "blue"},
+            "tickfont": {"color": "blue"},
+        },
+        yaxis2={
+            "title": "Variance Explained",
+            "titlefont": {"color": "green"},
+            "tickfont": {"color": "green"},
+            "anchor": "x",
+            "overlaying": "y",
+            "side": "right",
+            "tickformat": ".0%",
+        },
+        legend={"x": 0.5, "y": 1.15, "xanchor": "center", "orientation": "h"},
         hovermode="x unified",
     )
 

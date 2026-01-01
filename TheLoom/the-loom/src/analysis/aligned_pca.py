@@ -60,7 +60,6 @@ import numpy as np
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
-
 # ============================================================================
 # Constants
 # ============================================================================
@@ -165,7 +164,10 @@ class AlignedPCAFitResult:
     def effective_dimensionality(self) -> int:
         """Number of components needed for 95% variance."""
         cumulative = np.cumsum(self.variance_explained)
-        return int(np.searchsorted(cumulative, 0.95) + 1)
+        idx = int(np.searchsorted(cumulative, 0.95))
+        # Clamp to valid range to avoid off-by-one when 95% is never reached
+        idx = min(idx, len(cumulative) - 1)
+        return idx + 1
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -679,7 +681,7 @@ def main() -> None:
         aligner = AlignedPCA(n_components=50, reference_epoch=186)
         fit_result = aligner.fit_reference(epoch_186, epoch=186)
 
-        print(f"\nFit Results (epoch 186 reference):")
+        print("\nFit Results (epoch 186 reference):")
         print(f"  Components: {fit_result.n_components}")
         print(f"  Variance explained: {fit_result.total_variance_explained:.2%}")
         print(f"  Effective dimensionality: {fit_result.effective_dimensionality}")
@@ -707,7 +709,7 @@ def main() -> None:
         # Compute convergence
         epochs, distances = compute_convergence_curve(trajectory)
         print("\nConvergence to epoch 186:")
-        for e, d in zip(epochs, distances):
+        for e, d in zip(epochs, distances, strict=False):
             print(f"  Epoch {e:3d}: mean distance = {d:.4f}")
 
         print("\nTest completed successfully!")

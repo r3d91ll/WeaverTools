@@ -61,6 +61,144 @@ from .agent_flow import (
     visualize_agent_alignment,
 )
 
+from .aligned_pca import (
+    # Constants
+    DEFAULT_REFERENCE_EPOCH,
+    DEFAULT_N_COMPONENTS,
+    VARIANCE_EXPLAINED_THRESHOLD,
+    # Main class
+    AlignedPCA,
+    # Result types
+    AlignedPCAFitResult,
+    AlignedPCAResult,
+    CrossEpochTrajectory,
+    # Utility functions
+    build_cross_epoch_trajectory,
+    compute_epoch_distances,
+    compute_convergence_curve,
+)
+
+from .concept_landscape import (
+    # Constants
+    DEFAULT_SAMPLE_TEXTS,
+    VISUALIZATION_COMPONENTS,
+    ANALYSIS_COMPONENTS,
+    MIN_EPOCHS_FOR_ANALYSIS,
+    # Result types
+    EpochEmbeddings,
+    ConceptLandscapeResult,
+    VisualizationConfig,
+    # Extraction functions
+    extract_embeddings_from_checkpoint,
+    extract_embeddings_batch,
+    # Analysis functions
+    analyze_concept_landscape,
+    # Visualization functions
+    create_landscape_visualization,
+    create_convergence_plot,
+    # Pipeline orchestration
+    run_concept_landscape_pipeline,
+)
+
+from .memory_tracing import (
+    # Constants
+    SPARSITY_THRESHOLD,
+    RANK_THRESHOLD,
+    TOP_SINGULAR_VALUES,
+    MIN_EPOCHS_FOR_TREND,
+    # Result types
+    LayerMemoryStats,
+    MemoryEpisodeStats,
+    MemoryEvolutionResult,
+    # Core analysis functions
+    compute_matrix_stats,
+    analyze_layer_memory,
+    analyze_memory_states,
+    analyze_memory_checkpoint,
+    analyze_memory_evolution,
+    # Visualization functions
+    create_memory_heatmap,
+    create_evolution_plot,
+    create_singular_value_plot,
+    # High-level interface
+    MemoryTracer,
+)
+
+from .visualization import (
+    # Constants
+    DEFAULT_AXIS_RANGE,
+    DEFAULT_PNG_WIDTH,
+    DEFAULT_PNG_HEIGHT,
+    PNG_SCALE_FACTOR,
+    MAX_HTML_SIZE_BYTES,
+    DEFAULT_ANIMATION_DURATION_MS,
+    WEBGL_THRESHOLD_POINTS,
+    # Configuration classes
+    VisualizationStyle,
+    AnimationConfig,
+    ExportConfig,
+    Axis3DConfig,
+    Landscape3DConfig,
+    # Result types
+    ExportResult,
+    # Core 3D visualization functions
+    create_scatter_3d,
+    create_animated_scatter_3d,
+    create_trajectory_plot_3d,
+    create_surface_3d,
+    # Heatmap functions
+    create_heatmap,
+    create_multi_heatmap_grid,
+    # Line plot functions
+    create_line_plot,
+    create_multi_line_subplot,
+    # Export functions
+    export_figure,
+    export_for_publication,
+    # High-level visualization functions
+    visualize_epoch_evolution,
+    visualize_memory_statistics,
+)
+
+from .atlas_statistics import (
+    # Constants
+    OUTLIER_Z_THRESHOLD,
+    OUTLIER_IQR_MULTIPLIER,
+    MIN_EPOCHS_FOR_STATS,
+    DEFAULT_CLUSTER_COMPONENTS,
+    # Result types
+    EpochStatistics,
+    ClusterStabilityMetrics,
+    TrendAnalysis,
+    OutlierDetectionResult,
+    AtlasStatisticsResult,
+    # Core analysis functions
+    compute_epoch_statistics,
+    analyze_trends,
+    detect_outliers,
+    compute_summary_statistics,
+    # High-level interface
+    AtlasStatisticsAnalyzer,
+)
+
+from .batch_pipeline import (
+    # Constants
+    TOTAL_EPOCHS,
+    GPU_MEMORY_BUDGET_MB,
+    VISUALIZATION_SAMPLE_EPOCHS,
+    # Result types
+    ValidationSummary,
+    PipelineStageResult,
+    BatchPipelineResult,
+    # Stage functions
+    stage_validate_checkpoints,
+    stage_concept_landscape,
+    stage_memory_tracing,
+    stage_statistics,
+    # High-level interface
+    BatchAnalysisPipeline,
+)
+
 __all__ = [
     # Constants
     "MIN_SAMPLES_FOR_ANALYSIS",
@@ -107,4 +245,124 @@ __all__ = [
     "AgentBottleneckResult",
     "AgentFlowGraphResult",
     "FlowComparisonResult",
+    # Aligned PCA constants
+    "DEFAULT_REFERENCE_EPOCH",
+    "DEFAULT_N_COMPONENTS",
+    "VARIANCE_EXPLAINED_THRESHOLD",
+    # Aligned PCA main class
+    "AlignedPCA",
+    # Aligned PCA result types
+    "AlignedPCAFitResult",
+    "AlignedPCAResult",
+    "CrossEpochTrajectory",
+    # Aligned PCA utility functions
+    "build_cross_epoch_trajectory",
+    "compute_epoch_distances",
+    "compute_convergence_curve",
+    # Concept Landscape constants
+    "DEFAULT_SAMPLE_TEXTS",
+    "VISUALIZATION_COMPONENTS",
+    "ANALYSIS_COMPONENTS",
+    "MIN_EPOCHS_FOR_ANALYSIS",
+    # Concept Landscape result types
+    "EpochEmbeddings",
+    "ConceptLandscapeResult",
+    "VisualizationConfig",
+    # Concept Landscape extraction functions
+    "extract_embeddings_from_checkpoint",
+    "extract_embeddings_batch",
+    # Concept Landscape analysis functions
+    "analyze_concept_landscape",
+    # Concept Landscape visualization functions
+    "create_landscape_visualization",
+    "create_convergence_plot",
+    # Concept Landscape pipeline
+    "run_concept_landscape_pipeline",
+    # Memory Tracing constants
+    "SPARSITY_THRESHOLD",
+    "RANK_THRESHOLD",
+    "TOP_SINGULAR_VALUES",
+    "MIN_EPOCHS_FOR_TREND",
+    # Memory Tracing result types
+    "LayerMemoryStats",
+    "MemoryEpisodeStats",
+    "MemoryEvolutionResult",
+    # Memory Tracing analysis functions
+    "compute_matrix_stats",
+    "analyze_layer_memory",
+    "analyze_memory_states",
+    "analyze_memory_checkpoint",
+    "analyze_memory_evolution",
+    # Memory Tracing visualization functions
+    "create_memory_heatmap",
+    "create_evolution_plot",
+    "create_singular_value_plot",
+    # Memory Tracing high-level interface
+    "MemoryTracer",
+    # Visualization module constants
+    "DEFAULT_AXIS_RANGE",
+    "DEFAULT_PNG_WIDTH",
+    "DEFAULT_PNG_HEIGHT",
+    "PNG_SCALE_FACTOR",
+    "MAX_HTML_SIZE_BYTES",
+    "DEFAULT_ANIMATION_DURATION_MS",
+    "WEBGL_THRESHOLD_POINTS",
+    # Visualization configuration classes
+    "VisualizationStyle",
+    "AnimationConfig",
+    "ExportConfig",
+    "Axis3DConfig",
+    "Landscape3DConfig",
+    # Visualization result types
+    "ExportResult",
+    # Core 3D visualization functions
+    "create_scatter_3d",
+    "create_animated_scatter_3d",
+    "create_trajectory_plot_3d",
+    "create_surface_3d",
+    # Heatmap visualization functions
+    "create_heatmap",
+    "create_multi_heatmap_grid",
+    # Line plot visualization functions
+    "create_line_plot",
+    "create_multi_line_subplot",
+    # Visualization export functions
+    "export_figure",
+    "export_for_publication",
+    # High-level visualization functions
+    "visualize_epoch_evolution",
+    "visualize_memory_statistics",
+    # Atlas Statistics constants
+    "OUTLIER_Z_THRESHOLD",
+    "OUTLIER_IQR_MULTIPLIER",
+    "MIN_EPOCHS_FOR_STATS",
+    "DEFAULT_CLUSTER_COMPONENTS",
+    # Atlas Statistics result types
+    "EpochStatistics",
+    "ClusterStabilityMetrics",
+    "TrendAnalysis",
+    "OutlierDetectionResult",
+    "AtlasStatisticsResult",
+    # Atlas Statistics analysis functions
+    "compute_epoch_statistics",
+    "analyze_trends",
+    "detect_outliers",
+    "compute_summary_statistics",
+    # Atlas Statistics high-level interface
+    "AtlasStatisticsAnalyzer",
+    # Batch Pipeline constants
+    "TOTAL_EPOCHS",
+    "GPU_MEMORY_BUDGET_MB",
+    "VISUALIZATION_SAMPLE_EPOCHS",
+    # Batch Pipeline result types
+    "ValidationSummary",
+    "PipelineStageResult",
+    "BatchPipelineResult",
+    # Batch Pipeline stage functions
+    "stage_validate_checkpoints",
+    "stage_concept_landscape",
+    "stage_memory_tracing",
+    "stage_statistics",
+    # Batch Pipeline high-level interface
+    "BatchAnalysisPipeline",
 ]

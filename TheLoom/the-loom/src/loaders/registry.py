@@ -15,6 +15,7 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
+from .atlas_loader import AtlasLoader
 from .base import (
     EmbeddingOutput,
     GenerationOutput,
@@ -70,6 +71,7 @@ class LoaderRegistry:
 
         # Initialize loaders in priority order
         self.loaders: dict[str, ModelLoader] = {
+            "atlas": AtlasLoader(),
             "mistral": MistralLoader(),
             "qwen": QwenLoader(),
             "transformers": TransformersLoader(),
@@ -80,6 +82,7 @@ class LoaderRegistry:
         # Fallback order for auto-detection
         # Specialized loaders checked first, then transformers as general fallback
         self.fallback_order = [
+            "atlas",
             "mistral",
             "qwen",
             "transformers",

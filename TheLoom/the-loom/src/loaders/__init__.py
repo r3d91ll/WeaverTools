@@ -1,5 +1,6 @@
 """Model loaders for different architectures."""
 
+from .atlas_loader import AtlasLoader, CheckpointValidationError
 from .base import EmbeddingOutput, GenerationOutput, LoadedModel, ModelLoader
 from .custom_loader import CustomLoader, CustomModelConfig, register_custom_model
 from .mistral_loader import MistralLoader
@@ -20,6 +21,8 @@ __all__ = [
     "GenerationOutput",
     "EmbeddingOutput",
     # Loaders
+    "AtlasLoader",
+    "CheckpointValidationError",
     "TransformersLoader",
     "SentenceTransformersLoader",
     "MistralLoader",

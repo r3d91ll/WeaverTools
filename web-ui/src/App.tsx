@@ -9,6 +9,7 @@ import { Models } from './pages/Models';
 import { Concepts } from './pages/Concepts';
 import { Export } from './pages/Export';
 import { Resources } from './pages/Resources';
+import { AtlasDashboard } from './pages/AtlasDashboard';
 import {
   ConfigProvider,
   ConnectionProvider,
@@ -35,6 +36,7 @@ function AppContent(): React.ReactElement {
         <Route path="/concepts" element={<Concepts />} />
         <Route path="/export" element={<Export />} />
         <Route path="/resources" element={<Resources />} />
+        <Route path="/atlas-dashboard" element={<AtlasDashboard />} />
       </Routes>
     </Layout>
   );

@@ -100,28 +100,20 @@ from .concept_landscape import (
     run_concept_landscape_pipeline,
 )
 
-from .memory_tracing import (
-    # Constants
-    SPARSITY_THRESHOLD,
-    RANK_THRESHOLD,
-    TOP_SINGULAR_VALUES,
-    MIN_EPOCHS_FOR_TREND,
+from .tnt_memory_analysis import (
     # Result types
-    LayerMemoryStats,
-    MemoryEpisodeStats,
-    MemoryEvolutionResult,
+    LocalMemoryMetrics,
+    BlockMemoryMetrics,
+    TNTMemoryAnalysis,
     # Core analysis functions
-    compute_matrix_stats,
-    analyze_layer_memory,
-    analyze_memory_states,
-    analyze_memory_checkpoint,
-    analyze_memory_evolution,
-    # Visualization functions
-    create_memory_heatmap,
-    create_evolution_plot,
-    create_singular_value_plot,
-    # High-level interface
-    MemoryTracer,
+    compute_d_eff as compute_tnt_d_eff,
+    compute_beta as compute_tnt_beta,
+    analyze_local_memory,
+    analyze_block_memory,
+    analyze_tnt_memory,
+    compare_memory_states,
+    # Concept probing functions
+    probe_concept_memory,
 )
 
 from .visualization import (
@@ -160,26 +152,6 @@ from .visualization import (
     visualize_memory_statistics,
 )
 
-from .atlas_statistics import (
-    # Constants
-    OUTLIER_Z_THRESHOLD,
-    OUTLIER_IQR_MULTIPLIER,
-    MIN_EPOCHS_FOR_STATS,
-    DEFAULT_CLUSTER_COMPONENTS,
-    # Result types
-    EpochStatistics,
-    ClusterStabilityMetrics,
-    TrendAnalysis,
-    OutlierDetectionResult,
-    AtlasStatisticsResult,
-    # Core analysis functions
-    compute_epoch_statistics,
-    analyze_trends,
-    detect_outliers,
-    compute_summary_statistics,
-    # High-level interface
-    AtlasStatisticsAnalyzer,
-)
 
 from .batch_pipeline import (
     # Constants
@@ -278,27 +250,19 @@ __all__ = [
     "create_convergence_plot",
     # Concept Landscape pipeline
     "run_concept_landscape_pipeline",
-    # Memory Tracing constants
-    "SPARSITY_THRESHOLD",
-    "RANK_THRESHOLD",
-    "TOP_SINGULAR_VALUES",
-    "MIN_EPOCHS_FOR_TREND",
-    # Memory Tracing result types
-    "LayerMemoryStats",
-    "MemoryEpisodeStats",
-    "MemoryEvolutionResult",
-    # Memory Tracing analysis functions
-    "compute_matrix_stats",
-    "analyze_layer_memory",
-    "analyze_memory_states",
-    "analyze_memory_checkpoint",
-    "analyze_memory_evolution",
-    # Memory Tracing visualization functions
-    "create_memory_heatmap",
-    "create_evolution_plot",
-    "create_singular_value_plot",
-    # Memory Tracing high-level interface
-    "MemoryTracer",
+    # TNT Memory Analysis result types
+    "LocalMemoryMetrics",
+    "BlockMemoryMetrics",
+    "TNTMemoryAnalysis",
+    # TNT Memory Analysis functions
+    "compute_tnt_d_eff",
+    "compute_tnt_beta",
+    "analyze_local_memory",
+    "analyze_block_memory",
+    "analyze_tnt_memory",
+    "compare_memory_states",
+    # TNT Concept probing functions
+    "probe_concept_memory",
     # Visualization module constants
     "DEFAULT_AXIS_RANGE",
     "DEFAULT_PNG_WIDTH",
@@ -332,24 +296,6 @@ __all__ = [
     # High-level visualization functions
     "visualize_epoch_evolution",
     "visualize_memory_statistics",
-    # Atlas Statistics constants
-    "OUTLIER_Z_THRESHOLD",
-    "OUTLIER_IQR_MULTIPLIER",
-    "MIN_EPOCHS_FOR_STATS",
-    "DEFAULT_CLUSTER_COMPONENTS",
-    # Atlas Statistics result types
-    "EpochStatistics",
-    "ClusterStabilityMetrics",
-    "TrendAnalysis",
-    "OutlierDetectionResult",
-    "AtlasStatisticsResult",
-    # Atlas Statistics analysis functions
-    "compute_epoch_statistics",
-    "analyze_trends",
-    "detect_outliers",
-    "compute_summary_statistics",
-    # Atlas Statistics high-level interface
-    "AtlasStatisticsAnalyzer",
     # Batch Pipeline constants
     "TOTAL_EPOCHS",
     "GPU_MEMORY_BUDGET_MB",

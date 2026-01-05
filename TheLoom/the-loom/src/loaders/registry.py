@@ -4,7 +4,7 @@ The registry manages multiple loaders and automatically selects the best
 loader for each model based on:
 1. Explicit configuration (model_overrides in config)
 2. Loader can_load() checks (pattern matching)
-3. Fallback chain (mistral -> qwen -> transformers -> sentence_transformers -> custom)
+3. Fallback chain (tnt_olympian -> mistral -> qwen -> transformers -> sentence_transformers -> custom)
 
 This enables seamless loading of diverse models without manual loader selection.
 """
@@ -15,7 +15,6 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
-from .atlas_loader import AtlasLoader
 from .base import (
     EmbeddingOutput,
     GenerationOutput,
@@ -28,6 +27,7 @@ from .custom_loader import CustomLoader, CustomModelConfig
 from .mistral_loader import MistralLoader
 from .qwen_loader import QwenLoader
 from .sentence_transformers_loader import SentenceTransformersLoader
+from .tnt_olympian_loader import TNTOlympianLoader
 from .transformers_loader import TransformersLoader
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class LoaderRegistry:
 
         # Initialize loaders in priority order
         self.loaders: dict[str, ModelLoader] = {
-            "atlas": AtlasLoader(),
+            "tnt_olympian": TNTOlympianLoader(),
             "mistral": MistralLoader(),
             "qwen": QwenLoader(),
             "transformers": TransformersLoader(),
@@ -82,7 +82,7 @@ class LoaderRegistry:
         # Fallback order for auto-detection
         # Specialized loaders checked first, then transformers as general fallback
         self.fallback_order = [
-            "atlas",
+            "tnt_olympian",
             "mistral",
             "qwen",
             "transformers",

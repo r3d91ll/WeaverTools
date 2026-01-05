@@ -44,6 +44,8 @@ pyarrow = "^14.0.0"
 plotly = "^5.18.0"
 kaleido = "0.2.1"
 dash = "^2.14.0"
+# TNT Olympian model support (from Todd_Atlas repo)
+olympian = {git = "https://github.com/r3d91ll/Todd_Atlas.git", branch = "master"}
 
 [tool.poetry.extras]
 metrics = ["prometheus-client"]

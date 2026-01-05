@@ -1,6 +1,5 @@
 """Model loaders for different architectures."""
 
-from .atlas_loader import AtlasLoader, CheckpointValidationError
 from .base import EmbeddingOutput, GenerationOutput, LoadedModel, ModelLoader
 from .custom_loader import CustomLoader, CustomModelConfig, register_custom_model
 from .mistral_loader import MistralLoader
@@ -12,6 +11,8 @@ from .registry import (
     set_registry,
 )
 from .sentence_transformers_loader import SentenceTransformersLoader
+from .tnt_olympian_loader import TNTOlympianLoader
+from .tnt_olympian_tokenizer import ShakespeareBPETokenizer
 from .transformers_loader import TransformersLoader
 
 __all__ = [
@@ -21,8 +22,8 @@ __all__ = [
     "GenerationOutput",
     "EmbeddingOutput",
     # Loaders
-    "AtlasLoader",
-    "CheckpointValidationError",
+    "TNTOlympianLoader",
+    "ShakespeareBPETokenizer",
     "TransformersLoader",
     "SentenceTransformersLoader",
     "MistralLoader",
